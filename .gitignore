@@ -1,0 +1,13 @@
+backend/.env
+backend/app/**/__pycache__/
+backend/app/**/*.pyc
+frontend/dist/
+frontend/node_modules/
+storage/agent-images/*
+storage/voice-samples/*
+storage/training-audio/*
+storage/generated-audio/*
+!storage/agent-images/.gitkeep
+!storage/voice-samples/.gitkeep
+!storage/training-audio/.gitkeep
+!storage/generated-audio/.gitkeep
