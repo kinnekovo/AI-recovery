@@ -29,6 +29,7 @@ def import_models() -> None:
     from app.modules.agents import model as agents_model  # noqa: F401
     from app.modules.attempts import model as attempts_model  # noqa: F401
     from app.modules.consent import model as consent_model  # noqa: F401
+    from app.modules.evaluations import model as evaluations_model  # noqa: F401
     from app.modules.files import model as files_model  # noqa: F401
     from app.modules.scoring import model as scoring_model  # noqa: F401
     from app.modules.training import model as training_model  # noqa: F401

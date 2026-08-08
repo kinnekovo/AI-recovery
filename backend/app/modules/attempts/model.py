@@ -33,3 +33,4 @@ class Attempt(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     session_task = relationship("SessionTask")
     audio_file = relationship("FileAsset")
     score = relationship("AttemptScore", back_populates="attempt", uselist=False)
+    evaluations = relationship("AttemptEvaluation", back_populates="attempt", cascade="all, delete-orphan")

@@ -226,6 +226,90 @@ GET
 
 # 6. 评价接口
 
+## 获取评价指标字典
+
+GET
+
+    /api/evaluations/metrics
+
+可选查询参数：
+
+``` text
+category=process
+category=long_term_effect
+```
+
+返回：
+
+``` json
+[
+{
+"id":"uuid",
+"name":"script_accuracy",
+"category":"process",
+"description":"正确发音字数 / 脚本总字数，用于衡量脚本输出完整性。",
+"unit":"%",
+"normal_range":{"target":100,"operator":">="}
+}
+]
+```
+
+------------------------------------------------------------------------
+
+## 保存单次作答评价指标
+
+POST
+
+    /api/evaluations/attempts/{attempt_id}
+
+请求：
+
+``` json
+{
+"items":[
+{
+"metric_name":"script_accuracy",
+"value":95,
+"evaluation_source":"human"
+}
+]
+}
+```
+
+`evaluation_source` 支持：
+
+- mock_ai
+- human
+- clinician
+
+返回保存后的指标值列表。该接口用于保留人工评价和未来治疗师评价入口。
+
+------------------------------------------------------------------------
+
+## 获取单次作答评价指标
+
+GET
+
+    /api/evaluations/attempts/{attempt_id}
+
+返回：
+
+``` json
+{
+"attempt_id":"uuid",
+"items":[
+{
+"metric_name":"script_accuracy",
+"metric_category":"process",
+"value":95,
+"evaluation_source":"human"
+}
+]
+}
+```
+
+------------------------------------------------------------------------
+
 ## 请求作答分析
 
 POST

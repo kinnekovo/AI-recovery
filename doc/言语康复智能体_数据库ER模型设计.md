@@ -287,6 +287,63 @@ AttemptScore
 
 分析结果和过程性监控结果分离，方便未来重新分析。
 
+## evaluation_metrics（Phase 2.1 新增）
+
+保存康复评价指标字典。
+
+主要字段：
+
+- id
+- name
+- category
+- description
+- unit
+- normal_range
+
+其中 `category` 当前包括：
+
+- process：单次训练过程性监控指标
+- long_term_effect：长期训练前后效果评价指标
+
+默认过程性指标：
+
+- script_accuracy
+- error_count
+- speech_rate
+- loudness
+
+默认长期效果指标：
+
+- wab_information
+- wab_fluency
+- wab_grammar
+- wab_word_order
+- wab_comprehensibility
+- wab_repetition_comprehensibility
+- cadl_score
+- acceptance_score
+
+## attempt_evaluations（Phase 2.1 新增）
+
+保存每一次 attempt 产生的结构化康复评价指标值。
+
+主要字段：
+
+- id
+- attempt_id
+- metric_id
+- value
+- evaluation_source
+- created_at
+
+其中 `evaluation_source` 包括：
+
+- mock_ai
+- human
+- clinician
+
+同一个 attempt、同一个 metric、同一个 source 采用唯一约束，便于重复提交时更新指标值。
+
 ## effect_evaluations（后续新增）
 
 保存训练前后效果对比：

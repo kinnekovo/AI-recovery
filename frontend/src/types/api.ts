@@ -100,3 +100,39 @@ export interface LatestReport {
   average_score: number
   suggestion: string
 }
+
+export type EvaluationMetricCategory = 'process' | 'long_term_effect'
+export type EvaluationSource = 'mock_ai' | 'human' | 'clinician'
+
+export interface EvaluationMetric {
+  id: string
+  name: string
+  category: EvaluationMetricCategory
+  description: string
+  unit: string | null
+  normal_range: Record<string, unknown>
+  created_at: string
+}
+
+export interface AttemptEvaluation {
+  id: string
+  attempt_id: string
+  metric_id: string
+  metric_name: string
+  metric_category: EvaluationMetricCategory
+  value: number
+  evaluation_source: EvaluationSource
+  created_at: string
+}
+
+export interface AttemptEvaluationInput {
+  metric_id?: string
+  metric_name?: string
+  value: number
+  evaluation_source?: EvaluationSource
+}
+
+export interface AttemptEvaluationBatch {
+  attempt_id: string
+  items: AttemptEvaluation[]
+}
