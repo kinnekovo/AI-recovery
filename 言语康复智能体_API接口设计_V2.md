@@ -224,9 +224,9 @@ GET
 
 ------------------------------------------------------------------------
 
-# 6. 评分接口
+# 6. 评价接口
 
-## 请求分析评分
+## 请求作答分析
 
 POST
 
@@ -236,13 +236,21 @@ POST
 
 ``` json
 {
-"overall_score":85,
-"dimensions":{
-"content":88,
-"clarity":80,
-"fluency":83,
-"loudness":78,
-"prompt_dependence":90
+"process_monitoring":{
+"correct_script_word_rate":100,
+"error_count":0,
+"speech_rate_wpm":190,
+"loudness_dba":66
+},
+"reference_ranges":{
+"correct_script_word_rate":"100%",
+"error_count":"0",
+"speech_rate_wpm":"180-240字/min",
+"loudness_dba":"60-78 dBA"
+},
+"feedback":{
+"summary":"本次脚本输出完整，言语速率和响度处于参考范围。",
+"suggestion":"继续保持稳定输出，下一次可尝试减少停顿。"
 }
 }
 ```
@@ -251,7 +259,8 @@ POST
 
 -   ASR
 -   声学分析
--   LLM评价
+-   规则评价
+-   LLM反馈生成
 
 不影响接口。
 
@@ -268,8 +277,18 @@ GET
 ``` json
 {
 "training_count":10,
-"average_score":82,
-"suggestion":"继续加强自主表达"
+"process_monitoring_summary":{
+"avg_correct_script_word_rate":96.5,
+"avg_error_count":1.2,
+"avg_speech_rate_wpm":175,
+"avg_loudness_dba":64
+},
+"effect_comparison":{
+"wab":{},
+"cadl":{},
+"preference_acceptance":{}
+},
+"suggestion":"继续加强脚本输出稳定性，并观察阶段性WAB/CADL变化。"
 }
 ```
 
