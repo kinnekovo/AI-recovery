@@ -49,7 +49,13 @@ class PatientProfile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     training_status: Mapped[str] = mapped_column(String(40), default="not_started", nullable=False)
 
     user: Mapped[User] = relationship(back_populates="patient_profile")
-    agents: Mapped[list["Agent"]] = relationship(
-        "Agent", back_populates="patient_profile", foreign_keys="Agent.patient_profile_id"
-    )
     current_agent: Mapped["Agent | None"] = relationship("Agent", foreign_keys=[current_agent_id], post_update=True)
+
+
+from app.modules.agents.model import Agent  # noqa: E402
+
+PatientProfile.agents = relationship(
+    Agent,
+    back_populates="patient_profile",
+    foreign_keys=[Agent.patient_profile_id],
+)

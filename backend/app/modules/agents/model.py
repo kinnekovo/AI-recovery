@@ -40,3 +40,6 @@ class Agent(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     avatar_file = orm_relationship("FileAsset", foreign_keys=[avatar_file_id])
     voice_sample_file = orm_relationship("FileAsset", foreign_keys=[voice_sample_file_id])
     welcome_audio_file = orm_relationship("FileAsset", foreign_keys=[welcome_audio_file_id])
+
+
+from app.modules.files.model import FileAsset  # noqa: E402,F401
