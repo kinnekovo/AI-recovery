@@ -15,7 +15,7 @@
       <p v-if="status" class="success-text">{{ status }}</p>
       <p v-if="error" class="error-text">{{ error }}</p>
       <AppButton variant="primary" :disabled="!recordedBlob" :loading="loading" @click="submitAttempt">
-        上传录音并评分
+        上传录音并生成反馈
       </AppButton>
     </section>
   </section>
@@ -57,8 +57,8 @@ async function submitAttempt() {
   try {
     const attempt = await attemptsApi.create(task.value.id)
     await attemptsApi.uploadAudio(attempt.id, recordedBlob.value)
-    const score = await attemptsApi.analyze(attempt.id)
-    store.setScore(score)
+    const feedback = await attemptsApi.analyze(attempt.id)
+    store.setFeedback(feedback)
     router.push('/training/result')
   } catch (err) {
     error.value = err instanceof Error ? err.message : '评分失败'

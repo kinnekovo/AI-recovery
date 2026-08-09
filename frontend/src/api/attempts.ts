@@ -1,5 +1,5 @@
 import { http, request } from './http'
-import type { Attempt, ScoreResult } from '@/types/api'
+import type { Attempt, TrainingFeedbackResult } from '@/types/api'
 
 export const attemptsApi = {
   create(sessionTaskId: string) {
@@ -11,6 +11,6 @@ export const attemptsApi = {
     return request<Attempt>(http.post(`/attempts/${attemptId}/audio`, form))
   },
   analyze(attemptId: string) {
-    return request<ScoreResult>(http.post(`/attempts/${attemptId}/analyze`))
+    return request<TrainingFeedbackResult>(http.post(`/attempts/${attemptId}/analyze`))
   }
 }

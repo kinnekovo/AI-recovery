@@ -78,20 +78,23 @@ export interface Attempt {
   created_at: string
 }
 
-export interface ScoreResult {
+export interface ProcessMetrics {
+  script_accuracy: number
+  error_count: number
+  speech_rate: number
+  loudness: number
+}
+
+export interface TrainingFeedbackItem {
+  metric: 'script_accuracy' | 'error_count' | 'speech_rate' | 'loudness' | string
+  current_performance: string
+  suggestion: string
+}
+
+export interface TrainingFeedbackResult {
   attempt_id: string
-  overall_score: number
-  dimensions: {
-    content: number
-    clarity: number
-    fluency: number
-    loudness: number
-    prompt_dependence: number
-  }
-  feedback: {
-    strength: string
-    improve: string
-  }
+  process_metrics: ProcessMetrics
+  feedback: TrainingFeedbackItem[]
   transcript?: string | null
 }
 

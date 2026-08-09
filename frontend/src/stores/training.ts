@@ -1,17 +1,17 @@
 import { defineStore } from 'pinia'
-import type { ScoreResult, TrainingSession } from '@/types/api'
+import type { TrainingFeedbackResult, TrainingSession } from '@/types/api'
 
 export const useTrainingStore = defineStore('training', {
   state: () => ({
     currentSession: null as TrainingSession | null,
-    latestScore: null as ScoreResult | null
+    latestFeedback: null as TrainingFeedbackResult | null
   }),
   actions: {
     setSession(session: TrainingSession) {
       this.currentSession = session
     },
-    setScore(score: ScoreResult) {
-      this.latestScore = score
+    setFeedback(feedback: TrainingFeedbackResult) {
+      this.latestFeedback = feedback
     }
   }
 })

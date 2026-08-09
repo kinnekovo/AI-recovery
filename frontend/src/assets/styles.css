@@ -366,6 +366,62 @@ a:focus-visible {
   padding: 24px;
 }
 
+.process-feedback {
+  display: grid;
+  gap: 18px;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.metric-card,
+.feedback-item {
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 18px 45px rgba(31, 50, 42, 0.08);
+}
+
+.metric-card {
+  min-height: 132px;
+  padding: 18px;
+  display: grid;
+  align-content: center;
+  gap: 8px;
+}
+
+.metric-card span {
+  color: #1f4fb8;
+  font-size: 2.3rem;
+  font-weight: 850;
+}
+
+.metric-card p,
+.feedback-item p {
+  margin: 0;
+  color: #66756f;
+  line-height: 1.6;
+}
+
+.feedback-list {
+  display: grid;
+  gap: 12px;
+}
+
+.feedback-item {
+  padding: 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.feedback-item h3 {
+  margin-top: 10px;
+  font-size: 1rem;
+  line-height: 1.45;
+}
+
 .score-total {
   display: grid;
   place-items: center;
@@ -465,8 +521,9 @@ a:focus-visible {
   .home-grid,
   .training-choice,
   .agent-grid,
-  .score-panel,
-  .report-panel {
+    .score-panel,
+    .metric-grid,
+    .report-panel {
     grid-template-columns: 1fr;
   }
 

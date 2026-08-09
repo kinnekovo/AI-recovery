@@ -24,3 +24,23 @@ class ScoreRead(BaseModel):
     dimensions: ScoreDimensions
     feedback: ScoreFeedback
     transcript: str | None = None
+
+
+class ProcessMetricsRead(BaseModel):
+    script_accuracy: float
+    error_count: float
+    speech_rate: float
+    loudness: float
+
+
+class TrainingFeedbackItem(BaseModel):
+    metric: str
+    current_performance: str
+    suggestion: str
+
+
+class TrainingFeedbackRead(BaseModel):
+    attempt_id: UUID
+    process_metrics: ProcessMetricsRead
+    feedback: list[TrainingFeedbackItem]
+    transcript: str | None = None

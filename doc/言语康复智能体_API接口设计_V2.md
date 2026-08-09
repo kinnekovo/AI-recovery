@@ -323,26 +323,27 @@ Phase 2.2 起，该接口在分析完成后会自动向 `attempt_evaluations` �
 - speech_rate
 - loudness
 
+Phase 2.3 起，该接口返回训练反馈结构，不再返回旧的 `overall_score + dimensions`。
+
 返回：
 
 ``` json
 {
-"process_monitoring":{
-"correct_script_word_rate":100,
-"error_count":0,
-"speech_rate_wpm":190,
-"loudness_dba":66
+"attempt_id":"uuid",
+"process_metrics":{
+"script_accuracy":95,
+"error_count":2,
+"speech_rate":150,
+"loudness":65
 },
-"reference_ranges":{
-"correct_script_word_rate":"100%",
-"error_count":"0",
-"speech_rate_wpm":"180-240字/min",
-"loudness_dba":"60-78 dBA"
-},
-"feedback":{
-"summary":"本次脚本输出完整，言语速率和响度处于参考范围。",
-"suggestion":"继续保持稳定输出，下一次可尝试减少停顿。"
+"feedback":[
+{
+"metric":"speech_rate",
+"current_performance":"言语速率约为 150 字/min，低于参考范围。",
+"suggestion":"建议增加连续表达训练，先用熟悉短句做稳定输出。"
 }
+],
+"transcript":"这是一次模拟转写结果"
 }
 ```
 
