@@ -139,3 +139,46 @@ export interface AttemptEvaluationBatch {
   attempt_id: string
   items: AttemptEvaluation[]
 }
+
+export type AssessmentType = 'baseline' | 'during' | 'after_30_days' | 'post_training'
+
+export interface AssessmentMetrics {
+  wab_information?: number | null
+  wab_fluency?: number | null
+  wab_grammar?: number | null
+  wab_word_order?: number | null
+  wab_comprehensibility?: number | null
+  wab_repetition_comprehensibility?: number | null
+  cadl_score?: number | null
+  acceptance_score?: number | null
+}
+
+export interface AssessmentCreatePayload {
+  assessment_type: AssessmentType
+  evaluation_source?: Exclude<EvaluationSource, 'mock_ai'>
+  assessed_at?: string | null
+  metrics: AssessmentMetrics
+  notes?: string | null
+}
+
+export interface AssessmentSession {
+  id: string
+  assessment_type: AssessmentType
+  evaluation_source: EvaluationSource
+  assessed_at: string
+  metrics: Record<string, number>
+  notes: string | null
+  created_at: string
+}
+
+export interface MetricComparison {
+  baseline: number | null
+  current: number | null
+  change: number | null
+}
+
+export interface AssessmentCompare {
+  baseline_assessment: AssessmentSession | null
+  current_assessment: AssessmentSession | null
+  metrics: Record<string, MetricComparison>
+}

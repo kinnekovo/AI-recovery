@@ -360,6 +360,94 @@ Phase 2.3 起，该接口返回训练反馈结构，不再返回旧的 `overall_
 
 # 7. 报告接口
 
+## 阶段性评估
+
+POST
+
+    /api/assessment
+
+用于保存训练前、训练中或训练后的阶段性评估。WAB、CADL 和接受度数据应来自人工或治疗师录入，不应由模型自动伪造。
+
+请求：
+
+``` json
+{
+"assessment_type":"baseline",
+"evaluation_source":"human",
+"metrics":{
+"wab_information":6,
+"wab_fluency":5,
+"wab_grammar":4,
+"wab_word_order":4,
+"wab_comprehensibility":7,
+"wab_repetition_comprehensibility":6,
+"cadl_score":68,
+"acceptance_score":8
+},
+"notes":"训练开始前评估"
+}
+```
+
+返回：
+
+``` json
+{
+"id":"uuid",
+"assessment_type":"baseline",
+"evaluation_source":"human",
+"assessed_at":"2026-08-09T10:00:00Z",
+"metrics":{},
+"notes":"训练开始前评估"
+}
+```
+
+------------------------------------------------------------------------
+
+GET
+
+    /api/assessment/history
+
+可选查询参数：
+
+``` text
+assessment_type=baseline
+```
+
+返回阶段性评估历史，按评估时间升序排列。
+
+------------------------------------------------------------------------
+
+GET
+
+    /api/assessment/compare
+
+默认比较最早一次和最近一次阶段性评估。
+
+可选查询参数：
+
+``` text
+baseline_id=uuid
+current_id=uuid
+```
+
+返回：
+
+``` json
+{
+"baseline_assessment":{},
+"current_assessment":{},
+"metrics":{
+"wab_information":{
+"baseline":6,
+"current":8,
+"change":2
+}
+}
+}
+```
+
+------------------------------------------------------------------------
+
 GET
 
     /api/reports/latest

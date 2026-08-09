@@ -355,6 +355,42 @@ AttemptScore
 - post日期
 - 变化摘要
 
+## assessment_sessions（Phase 2.4 新增）
+
+保存阶段性康复评估会话，用于训练前、训练中、训练后效果比较。
+
+主要字段：
+
+- id
+- patient_profile_id
+- assessment_type
+- evaluation_source
+- assessed_at
+- metrics
+- notes
+- created_at
+- updated_at
+
+其中 `assessment_type` 包括：
+
+- baseline
+- during
+- after_30_days
+- post_training
+
+`metrics` 使用 JSONB 保存 WAB、CADL 和接受度指标：
+
+- wab_information
+- wab_fluency
+- wab_grammar
+- wab_word_order
+- wab_comprehensibility
+- wab_repetition_comprehensibility
+- cadl_score
+- acceptance_score
+
+阶段性量表数据应来自人工或治疗师录入，不应由模型自动伪造。
+
 ---
 
 # 7. 能力画像

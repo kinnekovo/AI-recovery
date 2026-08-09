@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
 from app.modules.agents.router import router as agents_router
+from app.modules.assessment.router import router as assessment_router
 from app.modules.attempts.router import router as attempts_router
 from app.modules.auth.router import router as auth_router
 from app.modules.consent.router import router as consent_router
@@ -31,6 +32,7 @@ def create_app() -> FastAPI:
     app.include_router(attempts_router, prefix=settings.api_prefix)
     app.include_router(scoring_router, prefix=settings.api_prefix)
     app.include_router(evaluations_router, prefix=settings.api_prefix)
+    app.include_router(assessment_router, prefix=settings.api_prefix)
     app.include_router(reports_router, prefix=settings.api_prefix)
     app.include_router(files_router, prefix=settings.api_prefix)
     app.include_router(consent_router, prefix=settings.api_prefix)
