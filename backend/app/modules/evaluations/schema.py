@@ -52,3 +52,11 @@ class AttemptEvaluationRead(BaseModel):
 class AttemptEvaluationBatchRead(BaseModel):
     attempt_id: UUID
     items: list[AttemptEvaluationRead]
+
+
+class ProcessEvaluation(BaseModel):
+    script_accuracy: float
+    error_count: int
+    speech_rate: float
+    loudness: float
+    details: dict[str, Any] = Field(default_factory=dict)

@@ -316,6 +316,13 @@ POST
 
     /api/attempts/{attempt_id}/analyze
 
+Phase 2.2 起，该接口在分析完成后会自动向 `attempt_evaluations` 写入 `mock_ai` 来源的过程性监控指标：
+
+- script_accuracy
+- error_count
+- speech_rate
+- loudness
+
 返回：
 
 ``` json
