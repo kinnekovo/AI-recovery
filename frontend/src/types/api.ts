@@ -100,8 +100,29 @@ export interface TrainingFeedbackResult {
 
 export interface LatestReport {
   training_count: number
-  average_score: number
+  process_monitoring_summary: ProcessMonitoringSummary
+  effect_comparison: ReportEffectComparison
   suggestion: string
+}
+
+export interface ProcessMonitoringSummary {
+  avg_script_accuracy: number | null
+  avg_error_count: number | null
+  avg_speech_rate: number | null
+  avg_loudness: number | null
+}
+
+export interface ReportMetricComparison {
+  baseline: number | null
+  current: number | null
+  change: number | null
+}
+
+export interface ReportEffectComparison {
+  has_comparison: boolean
+  wab: Record<string, ReportMetricComparison>
+  cadl: ReportMetricComparison | null
+  acceptance: ReportMetricComparison | null
 }
 
 export type EvaluationMetricCategory = 'process' | 'long_term_effect'

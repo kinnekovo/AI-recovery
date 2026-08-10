@@ -529,6 +529,38 @@ a:focus-visible {
   align-items: center;
 }
 
+.report-overview,
+.report-section {
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 18px 45px rgba(31, 50, 42, 0.08);
+  padding: 24px;
+}
+
+.report-overview {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 20px;
+  align-items: center;
+}
+
+.report-section {
+  display: grid;
+  gap: 18px;
+}
+
+.report-count p,
+.report-section p {
+  margin: 6px 0 0;
+  color: #66756f;
+  line-height: 1.6;
+}
+
+.report-metrics .metric-card {
+  box-shadow: none;
+  background: #f7faf8;
+}
+
 .report-suggestion {
   padding-left: 20px;
   border-left: 1px solid #dce7e1;
@@ -596,9 +628,17 @@ a:focus-visible {
     .score-panel,
     .metric-grid,
     .report-panel,
+    .report-overview,
     .evaluation-summary,
     .evaluation-grid {
     grid-template-columns: 1fr;
+  }
+
+  .report-suggestion {
+    padding-left: 0;
+    padding-top: 18px;
+    border-left: 0;
+    border-top: 1px solid #dce7e1;
   }
 
   .comparison-row {
