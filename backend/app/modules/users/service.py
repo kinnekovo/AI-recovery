@@ -30,6 +30,18 @@ def require_patient(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+def require_family(user: User = Depends(get_current_user)) -> User:
+    if user.role != UserRole.family:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅家属用户可访问")
+    return user
+
+
+def require_therapist(user: User = Depends(get_current_user)) -> User:
+    if user.role != UserRole.therapist:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅治疗师用户可访问")
+    return user
+
+
 def get_patient_profile(db: Session, user: User) -> PatientProfile:
     profile = db.scalar(select(PatientProfile).where(PatientProfile.user_id == user.id))
     if not profile:

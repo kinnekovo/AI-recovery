@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import LoginView from '@/views/LoginView.vue'
 import PatientLayout from '@/layouts/PatientLayout.vue'
+import FamilyLayout from '@/layouts/FamilyLayout.vue'
+import TherapistLayout from '@/layouts/TherapistLayout.vue'
 import HomeView from '@/views/patient/HomeView.vue'
 import AgentCreateView from '@/views/patient/AgentCreateView.vue'
 import AgentListView from '@/views/patient/AgentListView.vue'
@@ -9,6 +11,19 @@ import TrainingSessionView from '@/views/patient/TrainingSessionView.vue'
 import TrainingResultView from '@/views/patient/TrainingResultView.vue'
 import ReportView from '@/views/patient/ReportView.vue'
 import { useAuthStore } from '@/stores/auth'
+import type { UserRole } from '@/types/api'
+
+const roleHome: Record<UserRole, string> = {
+  patient: '/home',
+  family: '/family',
+  therapist: '/therapist',
+  admin: '/therapist'
+}
+
+function canAccess(userRole: UserRole, requiredRole: UserRole) {
+  if (userRole === requiredRole) return true
+  return userRole === 'admin' && requiredRole === 'therapist'
+}
 
 const router = createRouter({
   history: createWebHistory(),
@@ -18,15 +33,37 @@ const router = createRouter({
     {
       path: '/',
       component: PatientLayout,
+      meta: { role: 'patient' },
       children: [
-        { path: 'home', component: HomeView },
-        { path: 'agent/create', component: AgentCreateView },
-        { path: 'agent/list', component: AgentListView },
-        { path: 'training', component: TrainingView },
-        { path: 'training/:type(repeat|scenario)', component: TrainingSessionView },
-        { path: 'training/result', component: TrainingResultView },
-        { path: 'evaluation', component: () => import('@/views/patient/EvaluationView.vue') },
-        { path: 'report', component: ReportView }
+        { path: 'home', component: HomeView, meta: { role: 'patient' } },
+        { path: 'agent/create', component: AgentCreateView, meta: { role: 'patient' } },
+        { path: 'agent/list', component: AgentListView, meta: { role: 'patient' } },
+        { path: 'training', component: TrainingView, meta: { role: 'patient' } },
+        { path: 'training/:type(repeat|scenario)', component: TrainingSessionView, meta: { role: 'patient' } },
+        { path: 'training/result', component: TrainingResultView, meta: { role: 'patient' } },
+        { path: 'evaluation', component: () => import('@/views/patient/EvaluationView.vue'), meta: { role: 'patient' } },
+        { path: 'report', component: ReportView, meta: { role: 'patient' } }
+      ]
+    },
+    {
+      path: '/family',
+      component: FamilyLayout,
+      meta: { role: 'family' },
+      children: [
+        { path: '', component: () => import('@/views/family/FamilyDashboardView.vue'), meta: { role: 'family' } }
+      ]
+    },
+    {
+      path: '/therapist',
+      component: TherapistLayout,
+      meta: { role: 'therapist' },
+      children: [
+        { path: '', component: () => import('@/views/therapist/TherapistDashboardView.vue'), meta: { role: 'therapist' } },
+        {
+          path: 'assessments',
+          component: () => import('@/views/therapist/TherapistAssessmentsView.vue'),
+          meta: { role: 'therapist' }
+        }
       ]
     }
   ]
@@ -42,6 +79,13 @@ router.beforeEach(async (to) => {
       auth.logout()
       return '/login'
     }
+  }
+  if (to.path === '/login' && auth.isAuthenticated && auth.me) {
+    return roleHome[auth.me.user.role]
+  }
+  const requiredRole = to.matched.find((item) => item.meta.role)?.meta.role as UserRole | undefined
+  if (requiredRole && auth.me && !canAccess(auth.me.user.role, requiredRole)) {
+    return roleHome[auth.me?.user.role || 'patient']
   }
 })
 

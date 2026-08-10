@@ -11,6 +11,7 @@ from app.database.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 class UserRole(str, enum.Enum):
     patient = "patient"
     family = "family"
+    therapist = "therapist"
     admin = "admin"
 
 

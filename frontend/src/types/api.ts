@@ -7,10 +7,12 @@ export interface ApiEnvelope<T> {
 export interface User {
   id: string
   username: string
-  role: 'patient'
+  role: UserRole
   status: string
   created_at: string
 }
+
+export type UserRole = 'patient' | 'family' | 'therapist' | 'admin'
 
 export interface PatientProfile {
   id: string

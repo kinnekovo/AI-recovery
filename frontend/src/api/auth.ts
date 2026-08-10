@@ -1,12 +1,12 @@
 import { http, request } from './http'
-import type { PatientProfile, User } from '@/types/api'
+import type { PatientProfile, User, UserRole } from '@/types/api'
 
 export interface AuthResult {
   access_token: string
   token_type: string
   user: {
     id: string
-    role: 'patient'
+    role: UserRole
   }
 }
 

@@ -60,6 +60,16 @@ textarea {
   font-weight: 800;
 }
 
+.family-nav .brand-mark {
+  background: #eaf1ff;
+  color: #1f4fb8;
+}
+
+.therapist-nav .brand-mark {
+  background: #f8e8e2;
+  color: #b44b32;
+}
+
 .brand p,
 .page-heading p,
 .agent-card p,
@@ -589,6 +599,36 @@ textarea {
   margin: 0;
   color: #40524b;
   line-height: 1.7;
+}
+
+.role-boundary-panel {
+  max-width: 820px;
+  display: grid;
+  gap: 16px;
+  padding: 24px;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 45px rgba(31, 50, 42, 0.08);
+}
+
+.role-boundary-panel p {
+  margin: 0;
+  color: #66756f;
+  line-height: 1.7;
+}
+
+.boundary-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.boundary-list span {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #f1f5f3;
+  color: #40524b;
+  font-weight: 700;
 }
 
 .report-suggestion {
