@@ -106,13 +106,13 @@ def build_effect_comparison(db: Session, user: User) -> EffectComparisonRead:
 
 def build_suggestion(summary: ProcessMonitoringSummary, effect: EffectComparisonRead) -> str:
     if summary.avg_script_accuracy is None:
-        return "完成一次训练并生成反馈后，系统会根据过程性指标给出下一步建议。"
+        return "完成一次训练后，系统会给出下一步练习建议。"
     if summary.avg_script_accuracy < 70 or (summary.avg_error_count is not None and summary.avg_error_count >= 4):
-        return "建议先稳定完成短句跟读，必要时增加提示后再尝试。"
+        return "建议先练短句，把一句话说完整，再慢慢增加难度。"
     if summary.avg_speech_rate is not None and summary.avg_speech_rate < 180:
-        return "最近语速偏慢，可以增加连续短句表达训练，先追求稳定输出。"
+        return "可以继续练熟悉短句，重点放在少停顿、连起来说。"
     if summary.avg_loudness is not None and summary.avg_loudness < 60:
-        return "最近响度偏低，可以练习更清晰、稳定的发声，再观察后续变化。"
+        return "可以试着把声音放清楚一点，不用着急，稳定开口最重要。"
     if effect.has_comparison:
-        return "过程性指标较稳定，可以结合阶段性评估变化继续推进下一轮训练。"
-    return "过程性指标较稳定，建议补充 baseline 和训练后评估，便于观察阶段变化。"
+        return "最近练习比较稳定，可以继续保持今天的训练节奏。"
+    return "最近练习比较稳定，继续完成日常训练就很好。"

@@ -21,7 +21,9 @@ a {
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 
@@ -194,7 +196,9 @@ label {
   font-weight: 650;
 }
 
-input {
+input,
+select,
+textarea {
   width: 100%;
   border: 1px solid #dce7e1;
   border-radius: 8px;
@@ -204,10 +208,18 @@ input {
 }
 
 input:focus,
+select:focus,
+textarea:focus,
 button:focus-visible,
 a:focus-visible {
   outline: 3px solid rgba(37, 99, 235, 0.24);
   outline-offset: 2px;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 96px;
+  line-height: 1.6;
 }
 
 .check-line {
@@ -559,6 +571,24 @@ a:focus-visible {
 .report-metrics .metric-card {
   box-shadow: none;
   background: #f7faf8;
+}
+
+.patient-metric-card span {
+  font-size: 2rem;
+}
+
+.patient-advice {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border-radius: 8px;
+  background: #eef6f2;
+}
+
+.patient-advice p {
+  margin: 0;
+  color: #40524b;
+  line-height: 1.7;
 }
 
 .report-suggestion {
