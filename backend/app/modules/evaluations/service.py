@@ -17,8 +17,10 @@ from app.modules.evaluations.schema import (
     AttemptEvaluationBatchRead,
     AttemptEvaluationRead,
     ProcessEvaluation,
+    ProcessTrendPoint,
+    ProcessTrendRead,
 )
-from app.modules.training.model import TaskTemplate, TrainingType
+from app.modules.training.model import SessionTask, TaskTemplate, TrainingSession, TrainingType
 from app.modules.users.model import User
 
 
@@ -282,6 +284,44 @@ def list_attempt_evaluations(db: Session, user: User, attempt_id: UUID) -> Attem
         )
     )
     return AttemptEvaluationBatchRead(attempt_id=attempt.id, items=[to_read(row) for row in rows])
+
+
+def list_process_trend(db: Session, user: User, limit: int = 20) -> ProcessTrendRead:
+    from app.modules.attempts.model import Attempt
+    from app.modules.users.service import get_patient_profile
+
+    profile = get_patient_profile(db, user)
+    rows = db.execute(
+        select(
+            Attempt.id,
+            Attempt.created_at,
+            EvaluationMetric.name,
+            AttemptEvaluation.value,
+        )
+        .join(AttemptEvaluation, AttemptEvaluation.attempt_id == Attempt.id)
+        .join(EvaluationMetric, EvaluationMetric.id == AttemptEvaluation.metric_id)
+        .join(SessionTask, SessionTask.id == Attempt.session_task_id)
+        .join(TrainingSession, TrainingSession.id == SessionTask.training_session_id)
+        .where(
+            TrainingSession.patient_profile_id == profile.id,
+            AttemptEvaluation.evaluation_source == EvaluationSource.mock_ai,
+            EvaluationMetric.name.in_(PROCESS_METRIC_NAMES),
+        )
+        .order_by(Attempt.created_at.desc())
+    ).all()
+    grouped: dict = {}
+    for attempt_id, created_at, metric_name, value in rows:
+        if attempt_id not in grouped:
+            grouped[attempt_id] = {"created_at": created_at, "metrics": {}}
+        grouped[attempt_id]["metrics"][metric_name] = float(value)
+
+    points = [
+        ProcessTrendPoint(attempt_id=attempt_id, created_at=data["created_at"], metrics=data["metrics"])
+        for attempt_id, data in grouped.items()
+        if PROCESS_METRIC_NAMES.issubset(data["metrics"].keys())
+    ]
+    points = sorted(points, key=lambda item: item.created_at)[-limit:]
+    return ProcessTrendRead(items=points)
 
 
 def save_attempt_evaluations(

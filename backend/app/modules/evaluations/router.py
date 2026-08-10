@@ -25,6 +25,16 @@ def list_metrics(
     return api_success(data)
 
 
+@router.get("/process-trend")
+def process_trend(
+    limit: int = 20,
+    current_user: User = Depends(require_patient),
+    db: Session = Depends(get_db),
+):
+    result = service.list_process_trend(db, current_user, limit=max(1, min(limit, 100)))
+    return api_success(result.model_dump(mode="json"))
+
+
 @router.get("/attempts/{attempt_id}")
 def list_attempt_evaluations(
     attempt_id: UUID,

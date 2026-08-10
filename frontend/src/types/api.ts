@@ -140,6 +140,16 @@ export interface AttemptEvaluationBatch {
   items: AttemptEvaluation[]
 }
 
+export interface ProcessTrendPoint {
+  attempt_id: string
+  created_at: string
+  metrics: ProcessMetrics
+}
+
+export interface ProcessTrend {
+  items: ProcessTrendPoint[]
+}
+
 export type AssessmentType = 'baseline' | 'during' | 'after_30_days' | 'post_training'
 
 export interface AssessmentMetrics {

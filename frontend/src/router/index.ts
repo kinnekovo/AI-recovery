@@ -25,6 +25,7 @@ const router = createRouter({
         { path: 'training', component: TrainingView },
         { path: 'training/:type(repeat|scenario)', component: TrainingSessionView },
         { path: 'training/result', component: TrainingResultView },
+        { path: 'evaluation', component: () => import('@/views/patient/EvaluationView.vue') },
         { path: 'report', component: ReportView }
       ]
     }

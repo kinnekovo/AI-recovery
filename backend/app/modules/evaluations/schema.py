@@ -60,3 +60,13 @@ class ProcessEvaluation(BaseModel):
     speech_rate: float
     loudness: float
     details: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProcessTrendPoint(BaseModel):
+    attempt_id: UUID
+    created_at: datetime
+    metrics: dict[str, float]
+
+
+class ProcessTrendRead(BaseModel):
+    items: list[ProcessTrendPoint]

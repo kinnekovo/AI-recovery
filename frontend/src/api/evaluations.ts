@@ -3,7 +3,8 @@ import type {
   AttemptEvaluationBatch,
   AttemptEvaluationInput,
   EvaluationMetric,
-  EvaluationMetricCategory
+  EvaluationMetricCategory,
+  ProcessTrend
 } from '@/types/api'
 
 export const evaluationsApi = {
@@ -19,5 +20,8 @@ export const evaluationsApi = {
   },
   saveAttemptEvaluations(attemptId: string, items: AttemptEvaluationInput[]) {
     return request<AttemptEvaluationBatch>(http.post(`/evaluations/attempts/${attemptId}`, { items }))
+  },
+  processTrend(limit = 20) {
+    return request<ProcessTrend>(http.get('/evaluations/process-trend', { params: { limit } }))
   }
 }
