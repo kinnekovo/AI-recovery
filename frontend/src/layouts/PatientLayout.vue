@@ -13,6 +13,7 @@
         <RouterLink to="/agent/list">我的智能体</RouterLink>
         <RouterLink to="/training">进入训练</RouterLink>
         <RouterLink to="/evaluation">我的进步</RouterLink>
+        <RouterLink to="/ability">能力画像</RouterLink>
         <RouterLink to="/report">康复记录</RouterLink>
       </nav>
       <button class="logout-button" @click="logout">退出登录</button>

@@ -30,7 +30,13 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
         from app.modules.assessment.service import create_auto_assessment_from_attempt
 
         create_auto_assessment_from_attempt(db, attempt, _metric_values(db, attempt.id))
-        db.commit()
+        task = db.get(SessionTask, attempt.session_task_id)
+        if task and task.session:
+            from app.modules.profiles.service import refresh_ability_profile
+
+            refresh_ability_profile(db, task.session.patient_profile_id)
+        else:
+            db.commit()
         return to_training_feedback_read(db, attempt.id, transcript=None)
     audio = db.get(FileAsset, attempt.audio_file_id)
     task = db.get(SessionTask, attempt.session_task_id)
@@ -90,6 +96,9 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
             "loudness": process_evaluation.loudness,
         },
     )
+    from app.modules.profiles.service import refresh_ability_profile
+
+    refresh_ability_profile(db, task.session.patient_profile_id)
     complete_session_if_needed(db, task.session)
     db.refresh(score)
     return to_training_feedback_read(db, attempt.id, transcript=transcript)

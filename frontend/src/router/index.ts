@@ -42,6 +42,7 @@ const router = createRouter({
         { path: 'training/:type(repeat|scenario)', component: TrainingSessionView, meta: { role: 'patient' } },
         { path: 'training/result', component: TrainingResultView, meta: { role: 'patient' } },
         { path: 'evaluation', component: () => import('@/views/patient/EvaluationView.vue'), meta: { role: 'patient' } },
+        { path: 'ability', component: () => import('@/views/patient/AbilityProfileView.vue'), meta: { role: 'patient' } },
         { path: 'report', component: ReportView, meta: { role: 'patient' } }
       ]
     },
@@ -62,6 +63,11 @@ const router = createRouter({
         {
           path: 'assessments',
           component: () => import('@/views/therapist/TherapistAssessmentsView.vue'),
+          meta: { role: 'therapist' }
+        },
+        {
+          path: 'profiles',
+          component: () => import('@/views/therapist/TherapistProfilesView.vue'),
           meta: { role: 'therapist' }
         }
       ]

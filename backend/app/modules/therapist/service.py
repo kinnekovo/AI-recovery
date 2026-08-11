@@ -134,6 +134,10 @@ def create_patient_assessment(
     profile.assessment_status = "started"
     db.commit()
     db.refresh(assessment)
+    from app.modules.profiles.service import refresh_ability_profile
+
+    refresh_ability_profile(db, profile.id)
+    db.refresh(assessment)
     return to_read(assessment)
 
 
@@ -175,6 +179,10 @@ def review_patient_assessment(
     assessment.reviewed_by_user_id = therapist.id
     assessment.reviewed_at = utc_now()
     db.commit()
+    db.refresh(assessment)
+    from app.modules.profiles.service import refresh_ability_profile
+
+    refresh_ability_profile(db, assessment.patient_profile_id)
     db.refresh(assessment)
     return to_read(assessment)
 

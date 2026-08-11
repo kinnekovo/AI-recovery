@@ -7,6 +7,7 @@ from app.core.response import api_success
 from app.database.session import get_db
 from app.modules.assessment.model import AssessmentReviewStatus, AssessmentType
 from app.modules.assessment.schema import AssessmentCreate, AssessmentReviewUpdate
+from app.modules.profiles.service import get_patient_ability_profile
 from app.modules.therapist import service
 from app.modules.users.model import User
 from app.modules.users.service import require_therapist
@@ -55,6 +56,16 @@ def review_assessment(
     db: Session = Depends(get_db),
 ):
     result = service.review_patient_assessment(db, current_user, patient_user_id, assessment_id, payload)
+    return api_success(result.model_dump(mode="json"))
+
+
+@router.get("/patients/{patient_user_id}/ability-profile")
+def ability_profile(
+    patient_user_id: UUID,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    result = get_patient_ability_profile(db, patient_user_id)
     return api_success(result.model_dump(mode="json"))
 
 

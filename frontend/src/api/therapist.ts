@@ -1,5 +1,6 @@
 import { http, request } from './http'
 import type {
+  AbilityProfile,
   AssessmentCompare,
   AssessmentCreatePayload,
   AssessmentReviewPayload,
@@ -30,6 +31,9 @@ export const therapistApi = {
     return request<AssessmentSession>(
       http.patch(`/therapist/patients/${patientUserId}/assessments/${assessmentId}/review`, payload)
     )
+  },
+  abilityProfile(patientUserId: string) {
+    return request<AbilityProfile>(http.get(`/therapist/patients/${patientUserId}/ability-profile`))
   },
   assessmentCompare(patientUserId: string, baselineId?: string, currentId?: string) {
     return request<AssessmentCompare>(

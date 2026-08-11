@@ -240,3 +240,25 @@ export interface TherapistPatient {
   latest_assessment_at: string | null
   created_at: string
 }
+
+export interface AbilityProfile {
+  id: string
+  patient_profile_id: string
+  current_content_level: string
+  current_autonomy_level: string
+  avg_script_accuracy_recent: number | null
+  avg_error_count_recent: number | null
+  avg_speech_rate_recent: number | null
+  avg_loudness_recent: number | null
+  assessment_summary: string
+  recommendation: string
+  confidence: number
+  evidence: {
+    recent_attempt_count?: number
+    reviewed_assessment_count?: number
+    latest_review_status?: string | null
+    latest_therapist_notes?: string | null
+    [key: string]: unknown
+  }
+  updated_at: string
+}
