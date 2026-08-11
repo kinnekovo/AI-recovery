@@ -27,6 +27,10 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先上传录音")
     if attempt.score:
         ensure_process_evaluation(db, attempt)
+        from app.modules.assessment.service import create_auto_assessment_from_attempt
+
+        create_auto_assessment_from_attempt(db, attempt, _metric_values(db, attempt.id))
+        db.commit()
         return to_training_feedback_read(db, attempt.id, transcript=None)
     audio = db.get(FileAsset, attempt.audio_file_id)
     task = db.get(SessionTask, attempt.session_task_id)
@@ -74,6 +78,18 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
     db.add(score)
     db.flush()
     save_process_evaluation(db, attempt.id, process_evaluation)
+    from app.modules.assessment.service import create_auto_assessment_from_attempt
+
+    create_auto_assessment_from_attempt(
+        db,
+        attempt,
+        {
+            "script_accuracy": process_evaluation.script_accuracy,
+            "error_count": process_evaluation.error_count,
+            "speech_rate": process_evaluation.speech_rate,
+            "loudness": process_evaluation.loudness,
+        },
+    )
     complete_session_if_needed(db, task.session)
     db.refresh(score)
     return to_training_feedback_read(db, attempt.id, transcript=transcript)

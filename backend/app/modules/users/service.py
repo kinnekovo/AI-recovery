@@ -37,8 +37,8 @@ def require_family(user: User = Depends(get_current_user)) -> User:
 
 
 def require_therapist(user: User = Depends(get_current_user)) -> User:
-    if user.role != UserRole.therapist:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅治疗师用户可访问")
+    if user.role not in {UserRole.therapist, UserRole.admin}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅治疗师或管理员可访问")
     return user
 
 

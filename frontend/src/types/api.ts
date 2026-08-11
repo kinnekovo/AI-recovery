@@ -174,6 +174,7 @@ export interface ProcessTrend {
 }
 
 export type AssessmentType = 'baseline' | 'during' | 'after_30_days' | 'post_training'
+export type AssessmentReviewStatus = 'auto_generated' | 'pending_review' | 'confirmed' | 'adjusted'
 
 export interface AssessmentMetrics {
   wab_information?: number | null
@@ -196,12 +197,25 @@ export interface AssessmentCreatePayload {
 
 export interface AssessmentSession {
   id: string
+  patient_profile_id: string
+  source_attempt_id: string | null
   assessment_type: AssessmentType
   evaluation_source: EvaluationSource
+  review_status: AssessmentReviewStatus
+  reviewed_by_user_id: string | null
+  reviewed_at: string | null
   assessed_at: string
   metrics: Record<string, number>
   notes: string | null
+  therapist_notes: string | null
   created_at: string
+}
+
+export interface AssessmentReviewPayload {
+  review_status: Extract<AssessmentReviewStatus, 'confirmed' | 'adjusted'>
+  metrics?: Record<string, number> | null
+  notes?: string | null
+  therapist_notes?: string | null
 }
 
 export interface MetricComparison {
@@ -214,4 +228,15 @@ export interface AssessmentCompare {
   baseline_assessment: AssessmentSession | null
   current_assessment: AssessmentSession | null
   metrics: Record<string, MetricComparison>
+}
+
+export interface TherapistPatient {
+  user_id: string
+  patient_profile_id: string
+  username: string
+  assessment_status: string
+  training_status: string
+  pending_review_count: number
+  latest_assessment_at: string | null
+  created_at: string
 }

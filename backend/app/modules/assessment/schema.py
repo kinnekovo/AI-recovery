@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.modules.assessment.model import AssessmentType
+from app.modules.assessment.model import AssessmentReviewStatus, AssessmentType
 from app.modules.evaluations.model import EvaluationSource
 
 
@@ -16,6 +16,13 @@ LONG_TERM_METRIC_NAMES = {
     "wab_repetition_comprehensibility",
     "cadl_score",
     "acceptance_score",
+}
+
+PROCESS_METRIC_NAMES = {
+    "script_accuracy",
+    "error_count",
+    "speech_rate",
+    "loudness",
 }
 
 
@@ -53,12 +60,33 @@ class AssessmentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    patient_profile_id: UUID
+    source_attempt_id: UUID | None = None
     assessment_type: AssessmentType
     evaluation_source: EvaluationSource
+    review_status: AssessmentReviewStatus
+    reviewed_by_user_id: UUID | None = None
+    reviewed_at: datetime | None = None
     assessed_at: datetime
     metrics: dict[str, float]
     notes: str | None = None
+    therapist_notes: str | None = None
     created_at: datetime
+
+
+class AssessmentReviewUpdate(BaseModel):
+    review_status: AssessmentReviewStatus = AssessmentReviewStatus.confirmed
+    metrics: dict[str, float] | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+    therapist_notes: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_review(self) -> "AssessmentReviewUpdate":
+        if self.review_status not in {AssessmentReviewStatus.confirmed, AssessmentReviewStatus.adjusted}:
+            raise ValueError("治疗师只能确认或修正自动评估记录")
+        if self.review_status == AssessmentReviewStatus.adjusted and self.metrics is None and self.notes is None:
+            raise ValueError("修正评估时至少需要调整指标或备注")
+        return self
 
 
 class MetricComparison(BaseModel):
