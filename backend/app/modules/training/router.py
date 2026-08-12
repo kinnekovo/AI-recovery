@@ -37,7 +37,14 @@ def create_session(
     current_user: User = Depends(require_patient),
     db: Session = Depends(get_db),
 ):
-    session = service.create_session(db, current_user, payload.type)
+    session = service.create_session(
+        db,
+        current_user,
+        payload.type,
+        recommendation_id=payload.recommendation_id,
+        recommendation_source=payload.recommendation_source,
+        recommendation_headline=payload.recommendation_headline,
+    )
     return api_success(TrainingSessionRead.model_validate(session).model_dump(mode="json"))
 
 

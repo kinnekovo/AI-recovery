@@ -8,6 +8,9 @@ from app.modules.training.model import TrainingType
 
 class TrainingSessionCreate(BaseModel):
     type: TrainingType
+    recommendation_id: UUID | None = None
+    recommendation_source: str | None = None
+    recommendation_headline: str | None = None
 
 
 class TaskTemplateRead(BaseModel):
@@ -40,6 +43,10 @@ class TrainingSessionRead(BaseModel):
     training_type: TrainingType
     status: str
     agent_id: UUID | None = None
+    recommendation_review_id: UUID | None = None
+    recommendation_source: str | None = None
+    recommendation_snapshot: dict | None = None
+    recommendation_matched: bool
     created_at: datetime
     session_tasks: list[SessionTaskRead]
 
@@ -76,3 +83,22 @@ class TrainingRecommendationReviewUpdate(BaseModel):
     focus_points: list[str]
     suggested_minutes: int
     therapist_notes: str | None = None
+
+
+class RecommendationEffectRead(BaseModel):
+    session_id: UUID
+    created_at: datetime
+    training_type: TrainingType
+    recommendation_source: str | None = None
+    recommendation_headline: str | None = None
+    recommendation_matched: bool
+    status: str
+    metrics: dict[str, float]
+    summary: str
+
+
+class RecommendationEffectSummaryRead(BaseModel):
+    total_recommended_sessions: int
+    completed_recommended_sessions: int
+    matched_sessions: int
+    latest: list[RecommendationEffectRead]

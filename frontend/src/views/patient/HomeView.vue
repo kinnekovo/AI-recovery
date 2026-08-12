@@ -17,7 +17,7 @@
           <small v-if="recommendation.therapist_notes">治疗师备注：{{ recommendation.therapist_notes }}</small>
         </div>
         <p v-if="recommendationError" class="error-text">{{ recommendationError }}</p>
-        <RouterLink class="primary-link" :to="recommendation ? `/training/${recommendation.recommended_type}` : '/training'">
+        <RouterLink class="primary-link" :to="recommendation ? recommendedTrainingLink(recommendation) : '/training'">
           按建议开始
         </RouterLink>
       </div>
@@ -63,4 +63,16 @@ onMounted(async () => {
     recommendationError.value = '暂时无法读取训练建议，可以进入训练页手动选择。'
   }
 })
+
+function recommendedTrainingLink(item: TrainingRecommendation) {
+  return {
+    path: `/training/${item.recommended_type}`,
+    query: {
+      recommended: '1',
+      source: item.source,
+      ...(item.id ? { recommendation_id: item.id } : {}),
+      headline: item.headline
+    }
+  }
+}
 </script>

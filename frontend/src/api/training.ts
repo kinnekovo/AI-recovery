@@ -1,5 +1,5 @@
 import { http, request } from './http'
-import type { TrainingRecommendation, TrainingSession } from '@/types/api'
+import type { TrainingRecommendation, TrainingSession, TrainingSessionCreatePayload } from '@/types/api'
 
 export const trainingApi = {
   types() {
@@ -11,8 +11,9 @@ export const trainingApi = {
   recommendation() {
     return request<TrainingRecommendation>(http.get('/training/recommendation'))
   },
-  createSession(type: 'repeat' | 'scenario') {
-    return request<TrainingSession>(http.post('/training/session', { type }))
+  createSession(payload: TrainingSessionCreatePayload | 'repeat' | 'scenario') {
+    const body = typeof payload === 'string' ? { type: payload } : payload
+    return request<TrainingSession>(http.post('/training/session', body))
   },
   getSession(sessionId: string) {
     return request<TrainingSession>(http.get(`/training/session/${sessionId}`))

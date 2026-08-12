@@ -16,7 +16,7 @@
       </div>
       <div class="recommendation-action">
         <span>{{ recommendation.suggested_minutes }} 分钟</span>
-        <RouterLink class="primary-link" :to="`/training/${recommendation.recommended_type}`">按建议开始</RouterLink>
+        <RouterLink class="primary-link" :to="recommendedTrainingLink(recommendation)">按建议开始</RouterLink>
       </div>
       <div class="focus-strip">
         <span v-for="point in recommendation.focus_points" :key="point">{{ point }}</span>
@@ -57,4 +57,16 @@ onMounted(async () => {
     error.value = err instanceof Error ? err.message : '暂时无法读取训练建议，可以先手动选择训练。'
   }
 })
+
+function recommendedTrainingLink(item: TrainingRecommendation) {
+  return {
+    path: `/training/${item.recommended_type}`,
+    query: {
+      recommended: '1',
+      source: item.source,
+      ...(item.id ? { recommendation_id: item.id } : {}),
+      headline: item.headline
+    }
+  }
+}
 </script>

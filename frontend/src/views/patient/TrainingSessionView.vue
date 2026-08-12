@@ -41,7 +41,13 @@ const status = ref('')
 const error = ref('')
 
 onMounted(async () => {
-  const session = await trainingApi.createSession(type.value)
+  const isRecommended = route.query.recommended === '1'
+  const session = await trainingApi.createSession({
+    type: type.value,
+    recommendation_id: typeof route.query.recommendation_id === 'string' ? route.query.recommendation_id : null,
+    recommendation_source: isRecommended && typeof route.query.source === 'string' ? route.query.source : null,
+    recommendation_headline: isRecommended && typeof route.query.headline === 'string' ? route.query.headline : null
+  })
   store.setSession(session)
 })
 

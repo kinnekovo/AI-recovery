@@ -95,12 +95,21 @@ class TrainingSession(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     patient_profile_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patient_profiles.id"), index=True)
     agent_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=True)
     training_plan_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("training_plans.id"), nullable=True)
+    recommendation_review_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("training_recommendation_reviews.id"),
+        nullable=True,
+    )
+    recommendation_source: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    recommendation_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    recommendation_matched: Mapped[bool] = mapped_column(default=False, nullable=False)
     training_type: Mapped[TrainingType] = mapped_column(Enum(TrainingType, name="session_training_type"), nullable=False)
     status: Mapped[TrainingStatus] = mapped_column(
         Enum(TrainingStatus, name="session_status"), default=TrainingStatus.in_progress, nullable=False
     )
 
     session_tasks: Mapped[list["SessionTask"]] = relationship(back_populates="session", cascade="all, delete-orphan")
+    recommendation_review = relationship("TrainingRecommendationReview")
 
 
 class SessionTask(Base, UUIDPrimaryKeyMixin, TimestampMixin):

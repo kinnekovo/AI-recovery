@@ -911,6 +911,70 @@ textarea {
   font-weight: 700;
 }
 
+.recommendation-effect-list {
+  display: grid;
+  gap: 14px;
+}
+
+.recommendation-effect-summary,
+.recommendation-effect-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.recommendation-effect-summary span,
+.recommendation-effect-metrics span {
+  border-radius: 999px;
+  padding: 7px 11px;
+  background: #eef6f2;
+  color: #40524b;
+  font-weight: 700;
+}
+
+.recommendation-effect-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.7fr);
+  gap: 14px;
+  padding: 16px;
+  border-radius: 8px;
+  background: #f7faf8;
+}
+
+.recommendation-effect-row strong {
+  color: #20302a;
+}
+
+.recommendation-effect-row p {
+  margin: 8px 0 0;
+  color: #40524b;
+  line-height: 1.6;
+}
+
+.recommendation-effect-row small {
+  display: block;
+  margin-top: 8px;
+  color: #66756f;
+}
+
+.recommendation-complete {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border-radius: 8px;
+  background: #eef6f2;
+}
+
+.recommendation-complete strong {
+  color: #20302a;
+}
+
+.recommendation-complete p {
+  margin: 0;
+  color: #40524b;
+  line-height: 1.6;
+}
+
 .role-boundary-panel {
   max-width: 820px;
   display: grid;
@@ -1432,6 +1496,7 @@ textarea {
   .ability-metrics,
   .ability-level-row,
   .recommendation-review-form,
+  .recommendation-effect-row,
   .assessment-history-row {
     grid-template-columns: 1fr;
   }

@@ -156,6 +156,40 @@
           <p>选择患者后会显示系统推荐，并允许治疗师确认或调整。</p>
         </div>
       </article>
+
+      <article class="therapist-panel recommendation-review-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>推荐后表现</h2>
+            <p>查看患者从推荐入口开始训练后的完成情况和过程指标。</p>
+          </div>
+        </div>
+
+        <div v-if="loadingEffects" class="success-text">正在加载推荐效果。</div>
+        <div v-else-if="effects && effects.latest.length" class="recommendation-effect-list">
+          <div class="recommendation-effect-summary">
+            <span>推荐入口 {{ effects.total_recommended_sessions }} 次</span>
+            <span>已完成 {{ effects.completed_recommended_sessions }} 次</span>
+            <span>按建议类型 {{ effects.matched_sessions }} 次</span>
+          </div>
+          <div v-for="item in effects.latest" :key="item.session_id" class="recommendation-effect-row">
+            <div>
+              <strong>{{ item.recommendation_headline || trainingTypeLabel(item.training_type) }}</strong>
+              <p>{{ item.summary }}</p>
+              <small>{{ dateTimeLabel(item.created_at) }} · {{ sourceText(item.recommendation_source) }}</small>
+            </div>
+            <div class="recommendation-effect-metrics">
+              <span>{{ item.recommendation_matched ? '按建议' : '改练其他' }}</span>
+              <span>{{ item.status === 'completed' ? '已完成' : '未完成' }}</span>
+              <span v-if="item.metrics.script_accuracy != null">完整度 {{ formatNumber(item.metrics.script_accuracy) }}%</span>
+              <span v-if="item.metrics.error_count != null">错误 {{ formatNumber(item.metrics.error_count) }} 次</span>
+            </div>
+          </div>
+        </div>
+        <div v-else class="empty-state">
+          <p>患者还没有从推荐入口开始训练。</p>
+        </div>
+      </article>
     </section>
   </section>
 </template>
@@ -163,15 +197,23 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { therapistApi } from '@/api/therapist'
-import type { AbilityProfile, TherapistPatient, TrainingRecommendation, TrainingRecommendationReviewPayload } from '@/types/api'
+import type {
+  AbilityProfile,
+  RecommendationEffectSummary,
+  TherapistPatient,
+  TrainingRecommendation,
+  TrainingRecommendationReviewPayload
+} from '@/types/api'
 
 const patients = ref<TherapistPatient[]>([])
 const selectedPatientId = ref('')
 const ability = ref<AbilityProfile | null>(null)
 const recommendation = ref<TrainingRecommendation | null>(null)
+const effects = ref<RecommendationEffectSummary | null>(null)
 const loading = ref(true)
 const loadingProfile = ref(false)
 const loadingRecommendation = ref(false)
+const loadingEffects = ref(false)
 const savingRecommendation = ref(false)
 const pageError = ref('')
 const recommendationSaved = ref('')
@@ -218,21 +260,25 @@ async function reloadSelected() {
   if (!selectedPatientId.value) return
   loadingProfile.value = true
   loadingRecommendation.value = true
+  loadingEffects.value = true
   pageError.value = ''
   recommendationSaved.value = ''
   try {
-    const [abilityResult, recommendationResult] = await Promise.all([
+    const [abilityResult, recommendationResult, effectsResult] = await Promise.all([
       therapistApi.abilityProfile(selectedPatientId.value),
-      therapistApi.trainingRecommendation(selectedPatientId.value)
+      therapistApi.trainingRecommendation(selectedPatientId.value),
+      therapistApi.recommendationEffects(selectedPatientId.value)
     ])
     ability.value = abilityResult
     recommendation.value = recommendationResult
+    effects.value = effectsResult
     syncRecommendationForm(recommendationResult)
   } catch (err) {
     pageError.value = err instanceof Error ? err.message : '能力画像或训练推荐加载失败'
   } finally {
     loadingProfile.value = false
     loadingRecommendation.value = false
+    loadingEffects.value = false
   }
 }
 
@@ -297,6 +343,16 @@ function syncRecommendationForm(data: TrainingRecommendation) {
 function sourceLabel(source: string, status: string) {
   if (source === 'therapist') return status === 'adjusted' ? '治疗师已调整，患者端正在使用此建议。' : '治疗师已确认，患者端正在使用此建议。'
   return '系统自动生成，等待治疗师确认或调整。'
+}
+
+function sourceText(source: string | null) {
+  if (source === 'therapist') return '治疗师建议'
+  if (source === 'system') return '系统建议'
+  return '推荐入口'
+}
+
+function trainingTypeLabel(type: string) {
+  return type === 'scenario' ? '场景表达' : '跟读训练'
 }
 
 function metricCard(key: string, label: string, value: number | null | undefined, unit: string) {

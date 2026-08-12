@@ -12,6 +12,9 @@ export const useTrainingStore = defineStore('training', {
     },
     setFeedback(feedback: TrainingFeedbackResult) {
       this.latestFeedback = feedback
+    },
+    clearSession() {
+      this.currentSession = null
     }
   }
 })

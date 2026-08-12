@@ -15,7 +15,16 @@ from app.modules.training.model import (
     TrainingStatus,
     TrainingType,
 )
-from app.modules.training.schema import TaskTemplateRead, TrainingRecommendationRead, TrainingRecommendationReviewUpdate
+from app.modules.attempts.model import Attempt
+from app.modules.evaluations.model import AttemptEvaluation, EvaluationMetric, EvaluationSource
+from app.modules.evaluations.service import PROCESS_METRIC_NAMES
+from app.modules.training.schema import (
+    RecommendationEffectRead,
+    RecommendationEffectSummaryRead,
+    TaskTemplateRead,
+    TrainingRecommendationRead,
+    TrainingRecommendationReviewUpdate,
+)
 from app.modules.users.model import PatientProfile, User, UserRole
 from app.modules.users.service import get_patient_profile
 
@@ -135,6 +144,84 @@ def save_patient_recommendation_review(
     db.commit()
     db.refresh(review)
     return recommendation_review_to_read(db, review)
+
+
+def get_patient_recommendation_effects(db: Session, patient_user_id: UUID) -> RecommendationEffectSummaryRead:
+    profile = get_patient_profile_by_user_id(db, patient_user_id)
+    sessions = list(
+        db.scalars(
+            select(TrainingSession)
+            .where(
+                TrainingSession.patient_profile_id == profile.id,
+                TrainingSession.recommendation_source.is_not(None),
+            )
+            .order_by(TrainingSession.created_at.desc())
+            .limit(8)
+        )
+    )
+    effects = [build_recommendation_effect(db, session) for session in sessions]
+    completed_count = sum(1 for effect in effects if effect.status == TrainingStatus.completed.value)
+    matched_count = sum(1 for effect in effects if effect.recommendation_matched)
+    return RecommendationEffectSummaryRead(
+        total_recommended_sessions=len(effects),
+        completed_recommended_sessions=completed_count,
+        matched_sessions=matched_count,
+        latest=effects,
+    )
+
+
+def build_recommendation_effect(db: Session, session: TrainingSession) -> RecommendationEffectRead:
+    metrics = recommendation_session_metrics(db, session.id)
+    return RecommendationEffectRead(
+        session_id=session.id,
+        created_at=session.created_at,
+        training_type=session.training_type,
+        recommendation_source=session.recommendation_source,
+        recommendation_headline=(session.recommendation_snapshot or {}).get("headline"),
+        recommendation_matched=session.recommendation_matched,
+        status=session.status.value,
+        metrics=metrics,
+        summary=effect_summary(metrics, session.status == TrainingStatus.completed),
+    )
+
+
+def recommendation_session_metrics(db: Session, session_id: UUID) -> dict[str, float]:
+    rows = db.execute(
+        select(EvaluationMetric.name, AttemptEvaluation.value)
+        .join(AttemptEvaluation, AttemptEvaluation.metric_id == EvaluationMetric.id)
+        .join(Attempt, Attempt.id == AttemptEvaluation.attempt_id)
+        .join(SessionTask, SessionTask.id == Attempt.session_task_id)
+        .where(
+            SessionTask.training_session_id == session_id,
+            AttemptEvaluation.evaluation_source == EvaluationSource.mock_ai,
+            EvaluationMetric.name.in_(PROCESS_METRIC_NAMES),
+        )
+    ).all()
+    grouped: dict[str, list[float]] = {}
+    for metric_name, value in rows:
+        grouped.setdefault(metric_name, []).append(float(value))
+    return {name: round(sum(values) / len(values), 1) for name, values in grouped.items() if values}
+
+
+def effect_summary(metrics: dict[str, float], completed: bool) -> str:
+    if not completed:
+        return "患者已从推荐入口开始训练，但还没有完成评分。"
+    if not metrics:
+        return "训练已完成，暂时没有可汇总的过程指标。"
+    parts = []
+    accuracy = metrics.get("script_accuracy")
+    errors = metrics.get("error_count")
+    speech_rate = metrics.get("speech_rate")
+    loudness = metrics.get("loudness")
+    if accuracy is not None:
+        parts.append("表达完整度较好" if accuracy >= 90 else "表达完整度仍需关注")
+    if errors is not None:
+        parts.append("错误较少" if errors <= 1 else "错误仍偏多")
+    if speech_rate is not None:
+        parts.append("节奏稳定" if 180 <= speech_rate <= 240 else "节奏需要继续观察")
+    if loudness is not None:
+        parts.append("音量稳定" if 60 <= loudness <= 78 else "音量需要继续观察")
+    return "；".join(parts) + "。"
 
 
 def latest_recommendation_review(db: Session, patient_profile_id: UUID) -> TrainingRecommendationReview | None:
@@ -313,7 +400,14 @@ def get_or_create_today_plan(db: Session, user: User) -> TrainingPlan:
     )
 
 
-def create_session(db: Session, user: User, training_type: TrainingType) -> TrainingSession:
+def create_session(
+    db: Session,
+    user: User,
+    training_type: TrainingType,
+    recommendation_id: UUID | None = None,
+    recommendation_source: str | None = None,
+    recommendation_headline: str | None = None,
+) -> TrainingSession:
     profile = get_patient_profile(db, user)
     if profile.current_agent_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先创建并选择智能体")
@@ -326,11 +420,16 @@ def create_session(db: Session, user: User, training_type: TrainingType) -> Trai
         plan_item = TrainingPlanItem(training_plan_id=plan.id, task_template_id=template.id, order_index=len(plan.items))
         db.add(plan_item)
         db.flush()
+    recommendation = get_training_recommendation(db, user) if recommendation_source else None
     session = TrainingSession(
         patient_profile_id=profile.id,
         agent_id=profile.current_agent_id,
         training_plan_id=plan.id,
         training_type=training_type,
+        recommendation_review_id=recommendation_id,
+        recommendation_source=recommendation_source,
+        recommendation_snapshot=build_session_recommendation_snapshot(recommendation, recommendation_headline),
+        recommendation_matched=bool(recommendation and recommendation.recommended_type == training_type),
     )
     db.add(session)
     db.flush()
@@ -344,6 +443,24 @@ def create_session(db: Session, user: User, training_type: TrainingType) -> Trai
     )
     db.commit()
     return get_session(db, user, session.id)
+
+
+def build_session_recommendation_snapshot(
+    recommendation: TrainingRecommendationRead | None,
+    recommendation_headline: str | None = None,
+) -> dict | None:
+    if not recommendation:
+        return None
+    return {
+        "headline": recommendation_headline or recommendation.headline,
+        "recommended_type": recommendation.recommended_type.value,
+        "source": recommendation.source,
+        "review_status": recommendation.review_status,
+        "content_level": recommendation.content_level,
+        "autonomy_level": recommendation.autonomy_level,
+        "confidence": recommendation.confidence,
+        "therapist_notes": recommendation.therapist_notes,
+    }
 
 
 def get_session(db: Session, user: User, session_id: UUID) -> TrainingSession:

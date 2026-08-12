@@ -62,6 +62,10 @@ export interface TrainingSession {
   training_type: 'repeat' | 'scenario'
   status: string
   agent_id: string | null
+  recommendation_review_id: string | null
+  recommendation_source: string | null
+  recommendation_snapshot: Record<string, unknown> | null
+  recommendation_matched: boolean
   created_at: string
   session_tasks: SessionTask[]
 }
@@ -91,6 +95,32 @@ export interface TrainingRecommendationReviewPayload {
   focus_points: string[]
   suggested_minutes: number
   therapist_notes?: string | null
+}
+
+export interface TrainingSessionCreatePayload {
+  type: 'repeat' | 'scenario'
+  recommendation_id?: string | null
+  recommendation_source?: string | null
+  recommendation_headline?: string | null
+}
+
+export interface RecommendationEffect {
+  session_id: string
+  created_at: string
+  training_type: 'repeat' | 'scenario'
+  recommendation_source: string | null
+  recommendation_headline: string | null
+  recommendation_matched: boolean
+  status: string
+  metrics: Partial<ProcessMetrics>
+  summary: string
+}
+
+export interface RecommendationEffectSummary {
+  total_recommended_sessions: number
+  completed_recommended_sessions: number
+  matched_sessions: number
+  latest: RecommendationEffect[]
 }
 
 export interface Attempt {
