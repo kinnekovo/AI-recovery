@@ -67,6 +67,7 @@ export interface TrainingSession {
 }
 
 export interface TrainingRecommendation {
+  id: string | null
   recommended_type: 'repeat' | 'scenario'
   headline: string
   reason: string
@@ -76,7 +77,20 @@ export interface TrainingRecommendation {
   autonomy_level: string
   confidence: number
   profile_summary: string
+  source: 'system' | 'therapist' | string
+  review_status: 'pending_review' | 'confirmed' | 'adjusted' | string
+  therapist_notes: string | null
+  updated_at: string | null
   task_template: TaskTemplate | null
+}
+
+export interface TrainingRecommendationReviewPayload {
+  recommended_type: 'repeat' | 'scenario'
+  headline: string
+  reason: string
+  focus_points: string[]
+  suggested_minutes: number
+  therapist_notes?: string | null
 }
 
 export interface Attempt {

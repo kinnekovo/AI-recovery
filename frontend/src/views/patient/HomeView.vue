@@ -11,9 +11,10 @@
         <p v-if="today">今日计划包含 {{ today.items_count }} 项任务，状态：{{ today.status }}</p>
         <p v-else>正在获取今日训练。</p>
         <div v-if="recommendation" class="home-recommendation">
-          <span>今日建议</span>
+          <span>{{ recommendation.source === 'therapist' ? '治疗师建议' : '系统建议' }}</span>
           <strong>{{ recommendation.headline }}</strong>
           <p>{{ recommendation.reason }}</p>
+          <small v-if="recommendation.therapist_notes">治疗师备注：{{ recommendation.therapist_notes }}</small>
         </div>
         <p v-if="recommendationError" class="error-text">{{ recommendationError }}</p>
         <RouterLink class="primary-link" :to="recommendation ? `/training/${recommendation.recommended_type}` : '/training'">

@@ -7,6 +7,8 @@ import type {
   AssessmentReviewStatus,
   AssessmentSession,
   AssessmentType,
+  TrainingRecommendation,
+  TrainingRecommendationReviewPayload,
   TherapistPatient
 } from '@/types/api'
 
@@ -34,6 +36,14 @@ export const therapistApi = {
   },
   abilityProfile(patientUserId: string) {
     return request<AbilityProfile>(http.get(`/therapist/patients/${patientUserId}/ability-profile`))
+  },
+  trainingRecommendation(patientUserId: string) {
+    return request<TrainingRecommendation>(http.get(`/therapist/patients/${patientUserId}/training-recommendation`))
+  },
+  reviewTrainingRecommendation(patientUserId: string, payload: TrainingRecommendationReviewPayload) {
+    return request<TrainingRecommendation>(
+      http.post(`/therapist/patients/${patientUserId}/training-recommendation/review`, payload)
+    )
   },
   assessmentCompare(patientUserId: string, baselineId?: string, currentId?: string) {
     return request<AssessmentCompare>(

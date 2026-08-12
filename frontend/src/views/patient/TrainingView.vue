@@ -7,9 +7,12 @@
     </div>
     <section v-if="recommendation" class="recommendation-panel">
       <div class="recommendation-copy">
-        <span class="recommendation-label">系统建议</span>
+        <span class="recommendation-label">
+          {{ recommendation.source === 'therapist' ? '治疗师建议' : '系统建议' }}
+        </span>
         <h2>{{ recommendation.headline }}</h2>
         <p>{{ recommendation.reason }}</p>
+        <small v-if="recommendation.therapist_notes">治疗师备注：{{ recommendation.therapist_notes }}</small>
       </div>
       <div class="recommendation-action">
         <span>{{ recommendation.suggested_minutes }} 分钟</span>

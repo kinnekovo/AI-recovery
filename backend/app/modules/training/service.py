@@ -5,16 +5,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.modules.training.model import (
+    RecommendationReviewStatus,
     SessionTask,
     TaskTemplate,
     TrainingPlan,
     TrainingPlanItem,
+    TrainingRecommendationReview,
     TrainingSession,
     TrainingStatus,
     TrainingType,
 )
-from app.modules.training.schema import TaskTemplateRead, TrainingRecommendationRead
-from app.modules.users.model import User
+from app.modules.training.schema import TaskTemplateRead, TrainingRecommendationRead, TrainingRecommendationReviewUpdate
+from app.modules.users.model import PatientProfile, User, UserRole
 from app.modules.users.service import get_patient_profile
 
 
@@ -55,17 +57,21 @@ def get_training_types() -> list[str]:
 def get_training_recommendation(db: Session, user: User) -> TrainingRecommendationRead:
     ensure_seed_tasks(db)
     profile = get_patient_profile(db, user)
+    return get_patient_training_recommendation(db, profile.id, include_review_override=True)
+
+
+def get_patient_training_recommendation(
+    db: Session,
+    patient_profile_id: UUID,
+    include_review_override: bool = True,
+) -> TrainingRecommendationRead:
+    ensure_seed_tasks(db)
     from app.modules.profiles.service import refresh_ability_profile
 
-    ability = refresh_ability_profile(db, profile.id)
+    ability = refresh_ability_profile(db, patient_profile_id)
     recommended_type, headline, reason, focus_points, minutes = decide_recommendation(ability)
-    template = pick_template_for_recommendation(
-        db,
-        recommended_type=recommended_type,
-        content_level=ability.current_content_level,
-        autonomy_level=ability.current_autonomy_level,
-    )
-    return TrainingRecommendationRead(
+    system_recommendation = build_recommendation_read(
+        db=db,
         recommended_type=recommended_type,
         headline=headline,
         reason=reason,
@@ -75,7 +81,129 @@ def get_training_recommendation(db: Session, user: User) -> TrainingRecommendati
         autonomy_level=ability.current_autonomy_level,
         confidence=ability.confidence,
         profile_summary=ability.assessment_summary,
+        source="system",
+        review_status=RecommendationReviewStatus.pending_review.value,
+    )
+    review = latest_recommendation_review(db, patient_profile_id)
+    if not include_review_override or not review:
+        return system_recommendation
+    if review.review_status not in {RecommendationReviewStatus.confirmed, RecommendationReviewStatus.adjusted}:
+        return system_recommendation
+    return recommendation_review_to_read(db, review)
+
+
+def get_patient_recommendation_for_therapist(db: Session, patient_user_id: UUID) -> TrainingRecommendationRead:
+    profile = get_patient_profile_by_user_id(db, patient_user_id)
+    return get_patient_training_recommendation(db, profile.id, include_review_override=False)
+
+
+def save_patient_recommendation_review(
+    db: Session,
+    therapist: User,
+    patient_user_id: UUID,
+    payload: TrainingRecommendationReviewUpdate,
+) -> TrainingRecommendationRead:
+    profile = get_patient_profile_by_user_id(db, patient_user_id)
+    system_recommendation = get_patient_training_recommendation(db, profile.id, include_review_override=False)
+    status_value = (
+        RecommendationReviewStatus.confirmed
+        if payload.recommended_type == system_recommendation.recommended_type
+        and payload.headline == system_recommendation.headline
+        and payload.reason == system_recommendation.reason
+        and payload.focus_points == system_recommendation.focus_points
+        and payload.suggested_minutes == system_recommendation.suggested_minutes
+        else RecommendationReviewStatus.adjusted
+    )
+    review = TrainingRecommendationReview(
+        patient_profile_id=profile.id,
+        recommended_type=payload.recommended_type,
+        headline=payload.headline.strip() or system_recommendation.headline,
+        reason=payload.reason.strip() or system_recommendation.reason,
+        focus_points=[point.strip() for point in payload.focus_points if point.strip()][:5],
+        suggested_minutes=max(5, min(payload.suggested_minutes, 30)),
+        content_level=system_recommendation.content_level,
+        autonomy_level=system_recommendation.autonomy_level,
+        confidence=system_recommendation.confidence,
+        profile_summary=system_recommendation.profile_summary,
+        review_status=status_value,
+        reviewed_by_user_id=therapist.id,
+        therapist_notes=payload.therapist_notes,
+    )
+    if not review.focus_points:
+        review.focus_points = system_recommendation.focus_points
+    db.add(review)
+    db.commit()
+    db.refresh(review)
+    return recommendation_review_to_read(db, review)
+
+
+def latest_recommendation_review(db: Session, patient_profile_id: UUID) -> TrainingRecommendationReview | None:
+    return db.scalar(
+        select(TrainingRecommendationReview)
+        .where(TrainingRecommendationReview.patient_profile_id == patient_profile_id)
+        .order_by(TrainingRecommendationReview.created_at.desc())
+    )
+
+
+def build_recommendation_read(
+    db: Session,
+    recommended_type: TrainingType,
+    headline: str,
+    reason: str,
+    focus_points: list[str],
+    suggested_minutes: int,
+    content_level: str,
+    autonomy_level: str,
+    confidence: float,
+    profile_summary: str,
+    source: str,
+    review_status: str,
+    review_id: UUID | None = None,
+    therapist_notes: str | None = None,
+    updated_at=None,
+) -> TrainingRecommendationRead:
+    template = pick_template_for_recommendation(
+        db,
+        recommended_type=recommended_type,
+        content_level=content_level,
+        autonomy_level=autonomy_level,
+    )
+    return TrainingRecommendationRead(
+        id=review_id,
+        recommended_type=recommended_type,
+        headline=headline,
+        reason=reason,
+        focus_points=focus_points,
+        suggested_minutes=suggested_minutes,
+        content_level=content_level,
+        autonomy_level=autonomy_level,
+        confidence=confidence,
+        profile_summary=profile_summary,
+        source=source,
+        review_status=review_status,
+        therapist_notes=therapist_notes,
+        updated_at=updated_at,
         task_template=TaskTemplateRead.model_validate(template) if template else None,
+    )
+
+
+def recommendation_review_to_read(db: Session, review: TrainingRecommendationReview) -> TrainingRecommendationRead:
+    return build_recommendation_read(
+        db=db,
+        recommended_type=review.recommended_type,
+        headline=review.headline,
+        reason=review.reason,
+        focus_points=review.focus_points,
+        suggested_minutes=review.suggested_minutes,
+        content_level=review.content_level,
+        autonomy_level=review.autonomy_level,
+        confidence=review.confidence,
+        profile_summary=review.profile_summary,
+        source="therapist",
+        review_status=review.review_status.value,
+        review_id=review.id,
+        therapist_notes=review.therapist_notes,
+        updated_at=review.updated_at,
     )
 
 
@@ -235,3 +363,13 @@ def complete_session_if_needed(db: Session, session: TrainingSession) -> None:
     for task in session.session_tasks:
         task.status = TrainingStatus.completed
     db.commit()
+
+
+def get_patient_profile_by_user_id(db: Session, patient_user_id: UUID) -> PatientProfile:
+    patient = db.get(User, patient_user_id)
+    if not patient or patient.role != UserRole.patient:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="患者不存在")
+    profile = db.scalar(select(PatientProfile).where(PatientProfile.user_id == patient.id))
+    if not profile:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="患者档案不存在")
+    return profile

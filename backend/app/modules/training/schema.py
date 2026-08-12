@@ -52,6 +52,7 @@ class TodayTrainingRead(BaseModel):
 
 
 class TrainingRecommendationRead(BaseModel):
+    id: UUID | None = None
     recommended_type: TrainingType
     headline: str
     reason: str
@@ -61,4 +62,17 @@ class TrainingRecommendationRead(BaseModel):
     autonomy_level: str
     confidence: float
     profile_summary: str
+    source: str = "system"
+    review_status: str = "pending_review"
+    therapist_notes: str | None = None
+    updated_at: datetime | None = None
     task_template: TaskTemplateRead | None = None
+
+
+class TrainingRecommendationReviewUpdate(BaseModel):
+    recommended_type: TrainingType
+    headline: str
+    reason: str
+    focus_points: list[str]
+    suggested_minutes: int
+    therapist_notes: str | None = None

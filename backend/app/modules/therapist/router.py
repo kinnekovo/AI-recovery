@@ -9,6 +9,8 @@ from app.modules.assessment.model import AssessmentReviewStatus, AssessmentType
 from app.modules.assessment.schema import AssessmentCreate, AssessmentReviewUpdate
 from app.modules.profiles.service import get_patient_ability_profile
 from app.modules.therapist import service
+from app.modules.training.schema import TrainingRecommendationReviewUpdate
+from app.modules.training.service import get_patient_recommendation_for_therapist, save_patient_recommendation_review
 from app.modules.users.model import User
 from app.modules.users.service import require_therapist
 
@@ -66,6 +68,27 @@ def ability_profile(
     db: Session = Depends(get_db),
 ):
     result = get_patient_ability_profile(db, patient_user_id)
+    return api_success(result.model_dump(mode="json"))
+
+
+@router.get("/patients/{patient_user_id}/training-recommendation")
+def training_recommendation(
+    patient_user_id: UUID,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    result = get_patient_recommendation_for_therapist(db, patient_user_id)
+    return api_success(result.model_dump(mode="json"))
+
+
+@router.post("/patients/{patient_user_id}/training-recommendation/review")
+def review_training_recommendation(
+    patient_user_id: UUID,
+    payload: TrainingRecommendationReviewUpdate,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    result = save_patient_recommendation_review(db, current_user, patient_user_id, payload)
     return api_success(result.model_dump(mode="json"))
 
 

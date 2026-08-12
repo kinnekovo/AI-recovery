@@ -1,7 +1,7 @@
 import enum
 import uuid
 
-from sqlalchemy import Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -17,6 +17,12 @@ class TrainingStatus(str, enum.Enum):
     planned = "planned"
     in_progress = "in_progress"
     completed = "completed"
+
+
+class RecommendationReviewStatus(str, enum.Enum):
+    pending_review = "pending_review"
+    confirmed = "confirmed"
+    adjusted = "adjusted"
 
 
 class TaskTemplate(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -56,6 +62,31 @@ class TrainingPlanItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     plan: Mapped[TrainingPlan] = relationship(back_populates="items")
     task_template: Mapped[TaskTemplate] = relationship()
+
+
+class TrainingRecommendationReview(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    __tablename__ = "training_recommendation_reviews"
+
+    patient_profile_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patient_profiles.id"), index=True)
+    recommended_type: Mapped[TrainingType] = mapped_column(Enum(TrainingType, name="recommendation_training_type"), nullable=False)
+    headline: Mapped[str] = mapped_column(String(160), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    focus_points: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
+    suggested_minutes: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
+    content_level: Mapped[str] = mapped_column(String(8), default="L1", nullable=False)
+    autonomy_level: Mapped[str] = mapped_column(String(8), default="S1", nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    profile_summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    review_status: Mapped[RecommendationReviewStatus] = mapped_column(
+        Enum(RecommendationReviewStatus, name="recommendation_review_status"),
+        default=RecommendationReviewStatus.pending_review,
+        nullable=False,
+    )
+    reviewed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    therapist_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    patient_profile = relationship("PatientProfile")
+    reviewed_by = relationship("User")
 
 
 class TrainingSession(Base, UUIDPrimaryKeyMixin, TimestampMixin):

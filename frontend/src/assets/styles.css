@@ -398,6 +398,15 @@ textarea {
   line-height: 1.7;
 }
 
+.recommendation-copy small,
+.home-recommendation small {
+  display: block;
+  margin-top: 8px;
+  color: #40524b;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
 .recommendation-action {
   display: grid;
   gap: 10px;
@@ -839,6 +848,67 @@ textarea {
 .ability-level-row strong {
   color: #20302a;
   font-size: 2rem;
+}
+
+.recommendation-review-panel {
+  grid-column: 2;
+}
+
+.recommendation-review-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.recommendation-review-form label {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  color: #20302a;
+  font-weight: 800;
+}
+
+.recommendation-review-form label:nth-of-type(3),
+.recommendation-review-form label:nth-of-type(4),
+.recommendation-review-form label:nth-of-type(6),
+.recommendation-evidence,
+.recommendation-review-form .form-actions,
+.recommendation-review-form .success-text {
+  grid-column: 1 / -1;
+}
+
+.recommendation-review-form input,
+.recommendation-review-form select,
+.recommendation-review-form textarea {
+  width: 100%;
+  border: 1px solid #dce8e3;
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: #20302a;
+  background: #fbfdfc;
+  font: inherit;
+  resize: vertical;
+}
+
+.recommendation-review-form input:focus,
+.recommendation-review-form select:focus,
+.recommendation-review-form textarea:focus {
+  outline: 3px solid #cfe0ff;
+  border-color: #2f6fed;
+}
+
+.recommendation-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.recommendation-evidence span {
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: #eef6f2;
+  color: #40524b;
+  font-weight: 700;
 }
 
 .role-boundary-panel {
@@ -1352,11 +1422,16 @@ textarea {
     justify-items: start;
   }
 
+  .recommendation-review-panel {
+    grid-column: auto;
+  }
+
   .assessment-fields,
   .metric-summary-grid,
   .metric-edit-grid,
   .ability-metrics,
   .ability-level-row,
+  .recommendation-review-form,
   .assessment-history-row {
     grid-template-columns: 1fr;
   }

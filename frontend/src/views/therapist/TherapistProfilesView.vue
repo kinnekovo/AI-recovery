@@ -97,6 +97,65 @@
           <p>选择患者后会生成或刷新能力画像。</p>
         </div>
       </article>
+
+      <article class="therapist-panel recommendation-review-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>推荐复核</h2>
+            <p>{{ recommendation ? sourceLabel(recommendation.source, recommendation.review_status) : '选择患者后显示系统建议' }}</p>
+          </div>
+        </div>
+
+        <div v-if="loadingRecommendation" class="success-text">正在生成训练推荐。</div>
+        <form v-else-if="recommendation" class="recommendation-review-form" @submit.prevent="saveRecommendation">
+          <label>
+            推荐训练
+            <select v-model="reviewForm.recommended_type">
+              <option value="repeat">跟读训练</option>
+              <option value="scenario">场景表达</option>
+            </select>
+          </label>
+          <label>
+            推荐标题
+            <input v-model="reviewForm.headline" maxlength="80" />
+          </label>
+          <label>
+            推荐原因
+            <textarea v-model="reviewForm.reason" rows="4" maxlength="300"></textarea>
+          </label>
+          <label>
+            今日关注点
+            <textarea v-model="focusText" rows="4" maxlength="240"></textarea>
+          </label>
+          <label>
+            建议时长
+            <input v-model.number="reviewForm.suggested_minutes" type="number" min="5" max="30" />
+          </label>
+          <label>
+            治疗师备注
+            <textarea v-model="reviewForm.therapist_notes" rows="4" maxlength="300"></textarea>
+          </label>
+
+          <div class="recommendation-evidence">
+            <span>画像等级 {{ recommendation.content_level }} / {{ recommendation.autonomy_level }}</span>
+            <span>置信度 {{ Math.round(recommendation.confidence * 100) }}%</span>
+            <span>{{ recommendation.task_template?.title || '暂无匹配模板' }}</span>
+          </div>
+
+          <div class="form-actions">
+            <button class="app-button primary" type="submit" :disabled="savingRecommendation">
+              {{ savingRecommendation ? '保存中' : '保存复核建议' }}
+            </button>
+            <button class="app-button secondary" type="button" :disabled="savingRecommendation" @click="resetRecommendationForm">
+              恢复系统建议
+            </button>
+          </div>
+          <p v-if="recommendationSaved" class="success-text">{{ recommendationSaved }}</p>
+        </form>
+        <div v-else class="empty-state">
+          <p>选择患者后会显示系统推荐，并允许治疗师确认或调整。</p>
+        </div>
+      </article>
     </section>
   </section>
 </template>
@@ -104,14 +163,27 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { therapistApi } from '@/api/therapist'
-import type { AbilityProfile, TherapistPatient } from '@/types/api'
+import type { AbilityProfile, TherapistPatient, TrainingRecommendation, TrainingRecommendationReviewPayload } from '@/types/api'
 
 const patients = ref<TherapistPatient[]>([])
 const selectedPatientId = ref('')
 const ability = ref<AbilityProfile | null>(null)
+const recommendation = ref<TrainingRecommendation | null>(null)
 const loading = ref(true)
 const loadingProfile = ref(false)
+const loadingRecommendation = ref(false)
+const savingRecommendation = ref(false)
 const pageError = ref('')
+const recommendationSaved = ref('')
+const focusText = ref('')
+const reviewForm = ref<TrainingRecommendationReviewPayload>({
+  recommended_type: 'repeat',
+  headline: '',
+  reason: '',
+  focus_points: [],
+  suggested_minutes: 10,
+  therapist_notes: ''
+})
 
 const selectedPatient = computed(() => patients.value.find((item) => item.user_id === selectedPatientId.value))
 
@@ -145,14 +217,86 @@ async function selectPatient(patientUserId: string) {
 async function reloadSelected() {
   if (!selectedPatientId.value) return
   loadingProfile.value = true
+  loadingRecommendation.value = true
   pageError.value = ''
+  recommendationSaved.value = ''
   try {
-    ability.value = await therapistApi.abilityProfile(selectedPatientId.value)
+    const [abilityResult, recommendationResult] = await Promise.all([
+      therapistApi.abilityProfile(selectedPatientId.value),
+      therapistApi.trainingRecommendation(selectedPatientId.value)
+    ])
+    ability.value = abilityResult
+    recommendation.value = recommendationResult
+    syncRecommendationForm(recommendationResult)
   } catch (err) {
-    pageError.value = err instanceof Error ? err.message : '能力画像加载失败'
+    pageError.value = err instanceof Error ? err.message : '能力画像或训练推荐加载失败'
   } finally {
     loadingProfile.value = false
+    loadingRecommendation.value = false
   }
+}
+
+async function saveRecommendation() {
+  if (!selectedPatientId.value || !recommendation.value) return
+  savingRecommendation.value = true
+  pageError.value = ''
+  recommendationSaved.value = ''
+  try {
+    const payload: TrainingRecommendationReviewPayload = {
+      ...reviewForm.value,
+      headline: reviewForm.value.headline.trim() || recommendation.value.headline,
+      reason: reviewForm.value.reason.trim() || recommendation.value.reason,
+      focus_points: focusText.value
+        .split('\n')
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, 5),
+      suggested_minutes: Math.max(5, Math.min(Number(reviewForm.value.suggested_minutes) || 10, 30)),
+      therapist_notes: reviewForm.value.therapist_notes?.trim() || null
+    }
+    recommendation.value = await therapistApi.reviewTrainingRecommendation(selectedPatientId.value, payload)
+    syncRecommendationForm(recommendation.value)
+    recommendationSaved.value = '复核建议已保存，患者端会优先显示治疗师建议。'
+  } catch (err) {
+    pageError.value = err instanceof Error ? err.message : '训练推荐保存失败'
+  } finally {
+    savingRecommendation.value = false
+  }
+}
+
+function resetRecommendationForm() {
+  if (!selectedPatientId.value) return
+  loadingRecommendation.value = true
+  recommendationSaved.value = ''
+  therapistApi
+    .trainingRecommendation(selectedPatientId.value)
+    .then((data) => {
+      recommendation.value = data
+      syncRecommendationForm(data)
+    })
+    .catch((err) => {
+      pageError.value = err instanceof Error ? err.message : '系统推荐加载失败'
+    })
+    .finally(() => {
+      loadingRecommendation.value = false
+    })
+}
+
+function syncRecommendationForm(data: TrainingRecommendation) {
+  reviewForm.value = {
+    recommended_type: data.recommended_type,
+    headline: data.headline,
+    reason: data.reason,
+    focus_points: data.focus_points,
+    suggested_minutes: data.suggested_minutes,
+    therapist_notes: data.therapist_notes || ''
+  }
+  focusText.value = data.focus_points.join('\n')
+}
+
+function sourceLabel(source: string, status: string) {
+  if (source === 'therapist') return status === 'adjusted' ? '治疗师已调整，患者端正在使用此建议。' : '治疗师已确认，患者端正在使用此建议。'
+  return '系统自动生成，等待治疗师确认或调整。'
 }
 
 function metricCard(key: string, label: string, value: number | null | undefined, unit: string) {
