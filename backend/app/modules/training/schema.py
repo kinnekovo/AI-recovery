@@ -101,4 +101,8 @@ class RecommendationEffectSummaryRead(BaseModel):
     total_recommended_sessions: int
     completed_recommended_sessions: int
     matched_sessions: int
+    trend_status: str
+    trend_summary: str
+    strategy_hint: str
+    evidence_points: list[str]
     latest: list[RecommendationEffectRead]

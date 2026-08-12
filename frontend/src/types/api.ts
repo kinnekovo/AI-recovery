@@ -120,6 +120,10 @@ export interface RecommendationEffectSummary {
   total_recommended_sessions: number
   completed_recommended_sessions: number
   matched_sessions: number
+  trend_status: 'observing' | 'effective' | 'needs_adjustment' | 'mixed' | string
+  trend_summary: string
+  strategy_hint: string
+  evidence_points: string[]
   latest: RecommendationEffect[]
 }
 

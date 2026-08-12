@@ -162,10 +162,15 @@ def get_patient_recommendation_effects(db: Session, patient_user_id: UUID) -> Re
     effects = [build_recommendation_effect(db, session) for session in sessions]
     completed_count = sum(1 for effect in effects if effect.status == TrainingStatus.completed.value)
     matched_count = sum(1 for effect in effects if effect.recommendation_matched)
+    trend = analyze_recommendation_trend(effects)
     return RecommendationEffectSummaryRead(
         total_recommended_sessions=len(effects),
         completed_recommended_sessions=completed_count,
         matched_sessions=matched_count,
+        trend_status=trend["status"],
+        trend_summary=trend["summary"],
+        strategy_hint=trend["hint"],
+        evidence_points=trend["evidence"],
         latest=effects,
     )
 
@@ -222,6 +227,92 @@ def effect_summary(metrics: dict[str, float], completed: bool) -> str:
     if loudness is not None:
         parts.append("音量稳定" if 60 <= loudness <= 78 else "音量需要继续观察")
     return "；".join(parts) + "。"
+
+
+def analyze_recommendation_trend(effects: list[RecommendationEffectRead]) -> dict:
+    completed = [effect for effect in reversed(effects) if effect.status == TrainingStatus.completed.value and effect.metrics]
+    if len(completed) < 2:
+        return {
+            "status": "observing",
+            "summary": "推荐后完成训练次数还不够，暂时只适合观察。",
+            "hint": "建议继续保持当前推荐，并等待至少两次完成评分后再判断是否调整。",
+            "evidence": [f"已完成推荐训练 {len(completed)} 次"],
+        }
+
+    first = completed[0]
+    latest = completed[-1]
+    deltas = metric_deltas(first.metrics, latest.metrics)
+    evidence = build_trend_evidence(deltas)
+    positive = 0
+    negative = 0
+    if deltas.get("script_accuracy", 0) >= 3:
+        positive += 1
+    elif deltas.get("script_accuracy", 0) <= -3:
+        negative += 1
+    if deltas.get("error_count", 0) <= -1:
+        positive += 1
+    elif deltas.get("error_count", 0) >= 1:
+        negative += 1
+    if "speech_rate" in deltas and speech_rate_better(first.metrics.get("speech_rate"), latest.metrics.get("speech_rate")):
+        positive += 1
+    if "loudness" in deltas and loudness_better(first.metrics.get("loudness"), latest.metrics.get("loudness")):
+        positive += 1
+
+    if positive >= 2 and negative == 0:
+        return {
+            "status": "effective",
+            "summary": "推荐后的训练表现正在变好。",
+            "hint": "建议继续使用当前推荐方向，下一次可小幅增加句子长度或自主表达比例。",
+            "evidence": evidence,
+        }
+    if negative >= 2:
+        return {
+            "status": "needs_adjustment",
+            "summary": "推荐后的表现没有稳定改善。",
+            "hint": "建议治疗师重新检查推荐方向，必要时降低难度或改回更熟悉的跟读训练。",
+            "evidence": evidence,
+        }
+    return {
+        "status": "mixed",
+        "summary": "推荐后的表现有变化，但趋势还不稳定。",
+        "hint": "建议保持当前推荐一到两次，同时关注错误次数和说话节奏是否继续改善。",
+        "evidence": evidence,
+    }
+
+
+def metric_deltas(first: dict[str, float], latest: dict[str, float]) -> dict[str, float]:
+    return {
+        name: round(latest[name] - first[name], 1)
+        for name in PROCESS_METRIC_NAMES
+        if name in first and name in latest
+    }
+
+
+def build_trend_evidence(deltas: dict[str, float]) -> list[str]:
+    labels = {
+        "script_accuracy": ("完整度", "%"),
+        "error_count": ("错误", "次"),
+        "speech_rate": ("语速", "字/min"),
+        "loudness": ("音量", "dBA"),
+    }
+    points = []
+    for key, value in deltas.items():
+        label, unit = labels.get(key, (key, ""))
+        direction = "提升" if value > 0 else "下降" if value < 0 else "持平"
+        points.append(f"{label}{direction} {abs(value):g}{unit}")
+    return points or ["暂无可比较指标"]
+
+
+def speech_rate_better(first: float | None, latest: float | None) -> bool:
+    if first is None or latest is None:
+        return False
+    return abs(latest - 210) + 8 < abs(first - 210)
+
+
+def loudness_better(first: float | None, latest: float | None) -> bool:
+    if first is None or latest is None:
+        return False
+    return abs(latest - 69) + 3 < abs(first - 69)
 
 
 def latest_recommendation_review(db: Session, patient_profile_id: UUID) -> TrainingRecommendationReview | None:

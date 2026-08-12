@@ -916,6 +916,42 @@ textarea {
   gap: 14px;
 }
 
+.strategy-hint-box {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border-radius: 8px;
+  background: #f7faf8;
+}
+
+.strategy-hint-box span {
+  color: #66756f;
+  font-weight: 800;
+}
+
+.strategy-hint-box strong {
+  color: #20302a;
+  font-size: 1.18rem;
+}
+
+.strategy-hint-box p {
+  margin: 0;
+  color: #40524b;
+  line-height: 1.65;
+}
+
+.strategy-hint-box.effective {
+  background: #eef6f2;
+}
+
+.strategy-hint-box.needs_adjustment {
+  background: #fff4e8;
+}
+
+.strategy-hint-box.mixed {
+  background: #f5f8ff;
+}
+
 .recommendation-effect-summary,
 .recommendation-effect-metrics {
   display: flex;

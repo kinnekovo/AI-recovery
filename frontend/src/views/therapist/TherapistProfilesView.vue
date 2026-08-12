@@ -167,6 +167,14 @@
 
         <div v-if="loadingEffects" class="success-text">正在加载推荐效果。</div>
         <div v-else-if="effects && effects.latest.length" class="recommendation-effect-list">
+          <div class="strategy-hint-box" :class="effects.trend_status">
+            <span>{{ trendLabel(effects.trend_status) }}</span>
+            <strong>{{ effects.trend_summary }}</strong>
+            <p>{{ effects.strategy_hint }}</p>
+            <div class="evidence-row">
+              <span v-for="point in effects.evidence_points" :key="point">{{ point }}</span>
+            </div>
+          </div>
           <div class="recommendation-effect-summary">
             <span>推荐入口 {{ effects.total_recommended_sessions }} 次</span>
             <span>已完成 {{ effects.completed_recommended_sessions }} 次</span>
@@ -353,6 +361,13 @@ function sourceText(source: string | null) {
 
 function trainingTypeLabel(type: string) {
   return type === 'scenario' ? '场景表达' : '跟读训练'
+}
+
+function trendLabel(status: string) {
+  if (status === 'effective') return '建议有效'
+  if (status === 'needs_adjustment') return '建议需调整'
+  if (status === 'mixed') return '趋势不稳'
+  return '继续观察'
 }
 
 function metricCard(key: string, label: string, value: number | null | undefined, unit: string) {
