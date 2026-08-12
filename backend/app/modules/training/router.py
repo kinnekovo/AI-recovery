@@ -25,6 +25,12 @@ def today(current_user: User = Depends(require_patient), db: Session = Depends(g
     return api_success(data.model_dump(mode="json"))
 
 
+@router.get("/recommendation")
+def recommendation(current_user: User = Depends(require_patient), db: Session = Depends(get_db)):
+    result = service.get_training_recommendation(db, current_user)
+    return api_success(result.model_dump(mode="json"))
+
+
 @router.post("/session")
 def create_session(
     payload: TrainingSessionCreate,

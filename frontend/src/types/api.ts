@@ -66,6 +66,19 @@ export interface TrainingSession {
   session_tasks: SessionTask[]
 }
 
+export interface TrainingRecommendation {
+  recommended_type: 'repeat' | 'scenario'
+  headline: string
+  reason: string
+  focus_points: string[]
+  suggested_minutes: number
+  content_level: string
+  autonomy_level: string
+  confidence: number
+  profile_summary: string
+  task_template: TaskTemplate | null
+}
+
 export interface Attempt {
   id: string
   session_task_id: string

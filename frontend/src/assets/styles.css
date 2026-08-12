@@ -342,11 +342,110 @@ textarea {
   display: grid;
   gap: 10px;
   min-height: 170px;
+  position: relative;
 }
 
 .choice-panel:hover {
   transform: translateY(-2px);
   transition: transform 180ms ease-out;
+}
+
+.choice-panel.recommended {
+  outline: 2px solid #2f6fed;
+  background: #f5f8ff;
+}
+
+.choice-badge {
+  justify-self: start;
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: #e6efff;
+  color: #1f4fb8;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.recommendation-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 24px;
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 18px 45px rgba(31, 50, 42, 0.08);
+}
+
+.recommendation-copy {
+  min-width: 0;
+}
+
+.recommendation-label {
+  color: #2f9e73;
+  font-weight: 800;
+}
+
+.recommendation-copy h2 {
+  margin: 8px 0 0;
+  color: #20302a;
+  font-size: 1.55rem;
+}
+
+.recommendation-copy p {
+  max-width: 68ch;
+  margin: 8px 0 0;
+  color: #40524b;
+  line-height: 1.7;
+}
+
+.recommendation-action {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+}
+
+.recommendation-action span {
+  color: #66756f;
+  font-weight: 800;
+}
+
+.focus-strip {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.focus-strip span {
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: #eef6f2;
+  color: #20302a;
+  font-weight: 700;
+}
+
+.home-recommendation {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 8px;
+  background: #f5f8ff;
+}
+
+.home-recommendation span {
+  color: #1f4fb8;
+  font-weight: 800;
+}
+
+.home-recommendation strong {
+  color: #20302a;
+  font-size: 1.25rem;
+}
+
+.home-recommendation p {
+  margin: 0;
+  color: #40524b;
+  line-height: 1.6;
 }
 
 .task-panel {
@@ -1232,6 +1331,7 @@ textarea {
 
   .home-grid,
   .training-choice,
+  .recommendation-panel,
   .agent-grid,
     .score-panel,
     .metric-grid,
@@ -1246,6 +1346,10 @@ textarea {
     .evaluation-summary,
     .evaluation-grid {
     grid-template-columns: 1fr;
+  }
+
+  .recommendation-action {
+    justify-items: start;
   }
 
   .assessment-fields,

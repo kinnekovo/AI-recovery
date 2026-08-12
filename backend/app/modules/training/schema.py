@@ -49,3 +49,16 @@ class TodayTrainingRead(BaseModel):
     title: str
     status: str
     items_count: int
+
+
+class TrainingRecommendationRead(BaseModel):
+    recommended_type: TrainingType
+    headline: str
+    reason: str
+    focus_points: list[str]
+    suggested_minutes: int
+    content_level: str
+    autonomy_level: str
+    confidence: float
+    profile_summary: str
+    task_template: TaskTemplateRead | None = None
