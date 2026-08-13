@@ -97,6 +97,51 @@ export interface TrainingRecommendationReviewPayload {
   therapist_notes?: string | null
 }
 
+export interface TherapistTrainingRecord {
+  attempt_id: string
+  session_id: string
+  created_at: string
+  training_type: 'repeat' | 'scenario'
+  task_title: string
+  target_text: string
+  analysis_status: string
+  overall_score: number | null
+  content_score: number | null
+  clarity_score: number | null
+  fluency_score: number | null
+  loudness_score: number | null
+  process_metrics: Partial<ProcessMetrics>
+  feedback_summary: string
+  recommendation_source: string | null
+  recommendation_matched: boolean
+}
+
+export interface TherapistTrendBucket {
+  key: 'latest' | 'days_3' | 'days_7' | 'days_30' | string
+  label: string
+  attempt_count: number
+  avg_overall_score: number | null
+  avg_script_accuracy: number | null
+  avg_error_count: number | null
+  avg_speech_rate: number | null
+  avg_loudness: number | null
+  summary: string
+}
+
+export interface TherapistTrainingTrends {
+  buckets: TherapistTrendBucket[]
+  overall_summary: string
+}
+
+export interface RecommendationNotePayload {
+  note: string | null
+}
+
+export interface RecommendationNote {
+  note: string | null
+  updated_at: string | null
+}
+
 export interface TrainingSessionCreatePayload {
   type: 'repeat' | 'scenario'
   recommendation_id?: string | null
@@ -125,6 +170,66 @@ export interface RecommendationEffectSummary {
   strategy_hint: string
   evidence_points: string[]
   latest: RecommendationEffect[]
+}
+
+export interface StrategyFeedbackPayload {
+  judgment: 'agree' | 'disagree' | 'observe'
+  reason?: string | null
+  next_strategy?: string | null
+}
+
+export interface StrategyFeedback {
+  id: string
+  patient_profile_id: string
+  therapist_user_id: string
+  trend_status: string
+  judgment: string
+  reason: string | null
+  next_strategy: string | null
+  created_at: string
+}
+
+export interface FamilyObservation {
+  patient_username: string
+  training_count: number
+  completed_recommended_sessions: number
+  recommendation_headline: string
+  recommendation_source: string
+  trend_summary: string
+  strategy_hint: string
+  therapist_note: string | null
+  current_level_label: string
+  progress_label: string
+  progress_percent: number
+  level_items: FamilyLevelItem[]
+  trend_items: FamilyTrendItem[]
+}
+
+export interface FamilyLevelItem {
+  key: string
+  label: string
+  icon: string
+  value: string
+  level: number
+  tone: 'good' | 'steady' | 'watch' | 'muted' | string
+  hint: string
+}
+
+export interface FamilyTrendItem {
+  label: string
+  value: number
+  summary: string
+  created_at: string
+}
+
+export interface Phase3DemoStatus {
+  has_patient: boolean
+  has_recommendation: boolean
+  has_therapist_review: boolean
+  has_recommended_training: boolean
+  has_effect_trend: boolean
+  has_strategy_feedback: boolean
+  next_step: string
 }
 
 export interface Attempt {

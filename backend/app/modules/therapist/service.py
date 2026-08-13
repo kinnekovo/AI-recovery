@@ -1,3 +1,4 @@
+from datetime import timedelta
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -18,8 +19,20 @@ from app.modules.assessment.schema import (
 from app.modules.assessment.service import calculate_change, to_read
 from app.modules.attempts.model import AnalysisStatus, Attempt
 from app.modules.evaluations.model import AttemptEvaluation, EvaluationMetric, EvaluationSource
-from app.modules.therapist.schema import TherapistPatientRead
-from app.modules.training.model import SessionTask, TrainingSession
+from app.modules.scoring.model import AttemptScore
+from app.modules.therapist.schema import (
+    RecommendationNoteRead,
+    TherapistPatientRead,
+    TherapistTrainingRecordRead,
+    TherapistTrainingTrendsRead,
+    TherapistTrendBucketRead,
+)
+from app.modules.training.model import (
+    RecommendationStrategyFeedback,
+    SessionTask,
+    StrategyFeedbackJudgment,
+    TrainingSession,
+)
 from app.modules.users.model import PatientProfile, User, UserRole
 
 
@@ -109,6 +122,177 @@ def process_metrics_for_attempt(db: Session, attempt_id: UUID) -> dict[str, floa
         )
     ).all()
     return {name: float(value) for name, value in rows}
+
+
+def list_patient_training_records(
+    db: Session,
+    patient_user_id: UUID,
+    limit: int = 30,
+) -> list[TherapistTrainingRecordRead]:
+    profile = get_patient_profile_by_user_id(db, patient_user_id)
+    rows = db.execute(
+        select(Attempt, TrainingSession, SessionTask, AttemptScore)
+        .join(SessionTask, SessionTask.id == Attempt.session_task_id)
+        .join(TrainingSession, TrainingSession.id == SessionTask.training_session_id)
+        .outerjoin(AttemptScore, AttemptScore.attempt_id == Attempt.id)
+        .where(TrainingSession.patient_profile_id == profile.id)
+        .order_by(Attempt.created_at.desc())
+        .limit(limit)
+    ).all()
+    return [
+        TherapistTrainingRecordRead(
+            attempt_id=attempt.id,
+            session_id=session.id,
+            created_at=attempt.created_at,
+            training_type=session.training_type,
+            task_title=task.task_template.title,
+            target_text=task.task_template.target_text,
+            analysis_status=attempt.analysis_status.value,
+            overall_score=score.overall_score if score else None,
+            content_score=score.content_score if score else None,
+            clarity_score=score.clarity_score if score else None,
+            fluency_score=score.fluency_score if score else None,
+            loudness_score=score.loudness_score if score else None,
+            process_metrics=process_metrics_for_attempt(db, attempt.id),
+            feedback_summary=score.suggestion if score else attempt_status_summary(attempt),
+            recommendation_source=session.recommendation_source,
+            recommendation_matched=session.recommendation_matched,
+        )
+        for attempt, session, task, score in rows
+    ]
+
+
+def get_patient_training_trends(db: Session, patient_user_id: UUID) -> TherapistTrainingTrendsRead:
+    profile = get_patient_profile_by_user_id(db, patient_user_id)
+    now = utc_now()
+    rows = db.execute(
+        select(Attempt, AttemptScore)
+        .join(SessionTask, SessionTask.id == Attempt.session_task_id)
+        .join(TrainingSession, TrainingSession.id == SessionTask.training_session_id)
+        .outerjoin(AttemptScore, AttemptScore.attempt_id == Attempt.id)
+        .where(TrainingSession.patient_profile_id == profile.id)
+        .order_by(Attempt.created_at.desc())
+    ).all()
+    buckets = [
+        build_trend_bucket(db, "latest", "上次", rows[:1]),
+        build_trend_bucket(db, "days_3", "三天内", filter_attempt_rows(rows, now - timedelta(days=3))),
+        build_trend_bucket(db, "days_7", "七天内", filter_attempt_rows(rows, now - timedelta(days=7))),
+        build_trend_bucket(db, "days_30", "三十天内", filter_attempt_rows(rows, now - timedelta(days=30))),
+    ]
+    latest = buckets[0]
+    month = buckets[-1]
+    if latest.attempt_count == 0:
+        summary = "还没有训练评分，完成一次训练后这里会显示趋势。"
+    elif month.attempt_count <= 1:
+        summary = "已有最近一次训练结果，样本还少，建议继续观察。"
+    elif latest.avg_overall_score is not None and month.avg_overall_score is not None:
+        delta = round(latest.avg_overall_score - month.avg_overall_score, 1)
+        if delta >= 3:
+            summary = "最近一次整体分数高于三十天均值，训练方向暂时有效。"
+        elif delta <= -3:
+            summary = "最近一次整体分数低于三十天均值，需要关注难度或状态波动。"
+        else:
+            summary = "最近一次整体表现接近三十天均值，状态相对稳定。"
+    else:
+        summary = "已汇总近期过程指标，评分样本仍在积累。"
+    return TherapistTrainingTrendsRead(buckets=buckets, overall_summary=summary)
+
+
+def save_recommendation_note(
+    db: Session,
+    therapist: User,
+    patient_user_id: UUID,
+    note: str | None,
+) -> RecommendationNoteRead:
+    profile = get_patient_profile_by_user_id(db, patient_user_id)
+    cleaned_note = (note or "").strip() or None
+    feedback = RecommendationStrategyFeedback(
+        patient_profile_id=profile.id,
+        therapist_user_id=therapist.id,
+        trend_status="manual_note",
+        judgment=StrategyFeedbackJudgment.observe,
+        reason="治疗师自然语言调整推荐训练内容。",
+        next_strategy=cleaned_note,
+    )
+    db.add(feedback)
+    db.commit()
+    db.refresh(feedback)
+    return RecommendationNoteRead(note=feedback.next_strategy, updated_at=feedback.created_at)
+
+
+def get_latest_recommendation_note(db: Session, patient_user_id: UUID) -> RecommendationNoteRead:
+    profile = get_patient_profile_by_user_id(db, patient_user_id)
+    feedback = db.scalar(
+        select(RecommendationStrategyFeedback)
+        .where(
+            RecommendationStrategyFeedback.patient_profile_id == profile.id,
+            RecommendationStrategyFeedback.trend_status == "manual_note",
+        )
+        .order_by(RecommendationStrategyFeedback.created_at.desc())
+    )
+    return RecommendationNoteRead(
+        note=feedback.next_strategy if feedback else None,
+        updated_at=feedback.created_at if feedback else None,
+    )
+
+
+def filter_attempt_rows(rows, since):
+    return [(attempt, score) for attempt, score in rows if attempt.created_at >= since]
+
+
+def build_trend_bucket(db: Session, key: str, label: str, rows) -> TherapistTrendBucketRead:
+    metrics_list = [process_metrics_for_attempt(db, attempt.id) for attempt, _score in rows]
+    scores = [float(score.overall_score) for _attempt, score in rows if score]
+    metrics = {
+        "script_accuracy": average_metric(metrics_list, "script_accuracy"),
+        "error_count": average_metric(metrics_list, "error_count"),
+        "speech_rate": average_metric(metrics_list, "speech_rate"),
+        "loudness": average_metric(metrics_list, "loudness"),
+    }
+    attempt_count = len(rows)
+    return TherapistTrendBucketRead(
+        key=key,
+        label=label,
+        attempt_count=attempt_count,
+        avg_overall_score=round(sum(scores) / len(scores), 1) if scores else None,
+        avg_script_accuracy=metrics["script_accuracy"],
+        avg_error_count=metrics["error_count"],
+        avg_speech_rate=metrics["speech_rate"],
+        avg_loudness=metrics["loudness"],
+        summary=trend_bucket_summary(attempt_count, metrics),
+    )
+
+
+def average_metric(metrics_list: list[dict[str, float]], name: str) -> float | None:
+    values = [metrics[name] for metrics in metrics_list if name in metrics]
+    return round(sum(values) / len(values), 1) if values else None
+
+
+def trend_bucket_summary(attempt_count: int, metrics: dict[str, float | None]) -> str:
+    if attempt_count == 0:
+        return "暂无训练。"
+    parts = []
+    accuracy = metrics.get("script_accuracy")
+    errors = metrics.get("error_count")
+    speech_rate = metrics.get("speech_rate")
+    loudness = metrics.get("loudness")
+    if accuracy is not None:
+        parts.append("表达完整度较好" if accuracy >= 90 else "表达完整度需关注")
+    if errors is not None:
+        parts.append("错误较少" if errors <= 1 else "错误偏多")
+    if speech_rate is not None:
+        parts.append("节奏稳定" if 180 <= speech_rate <= 240 else "节奏需观察")
+    if loudness is not None:
+        parts.append("音量稳定" if 60 <= loudness <= 78 else "音量需观察")
+    return "，".join(parts) + "。" if parts else "已有训练记录，暂缺完整指标。"
+
+
+def attempt_status_summary(attempt: Attempt) -> str:
+    if attempt.analysis_status == AnalysisStatus.pending:
+        return "录音已提交，系统正在分析评分。"
+    if attempt.analysis_status == AnalysisStatus.failed:
+        return "本次录音分析失败，可让患者重新完成一次。"
+    return "系统已完成过程分析，暂无总评分。"
 
 
 def create_patient_assessment(

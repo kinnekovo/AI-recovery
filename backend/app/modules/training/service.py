@@ -1,12 +1,14 @@
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.modules.training.model import (
     RecommendationReviewStatus,
+    RecommendationStrategyFeedback,
     SessionTask,
+    StrategyFeedbackJudgment,
     TaskTemplate,
     TrainingPlan,
     TrainingPlanItem,
@@ -19,8 +21,12 @@ from app.modules.attempts.model import Attempt
 from app.modules.evaluations.model import AttemptEvaluation, EvaluationMetric, EvaluationSource
 from app.modules.evaluations.service import PROCESS_METRIC_NAMES
 from app.modules.training.schema import (
+    FamilyObservationRead,
+    Phase3DemoStatusRead,
     RecommendationEffectRead,
     RecommendationEffectSummaryRead,
+    StrategyFeedbackCreate,
+    StrategyFeedbackRead,
     TaskTemplateRead,
     TrainingRecommendationRead,
     TrainingRecommendationReviewUpdate,
@@ -79,6 +85,7 @@ def get_patient_training_recommendation(
 
     ability = refresh_ability_profile(db, patient_profile_id)
     recommended_type, headline, reason, focus_points, minutes = decide_recommendation(ability)
+    manual_note = latest_recommendation_note(db, patient_profile_id)
     system_recommendation = build_recommendation_read(
         db=db,
         recommended_type=recommended_type,
@@ -92,13 +99,10 @@ def get_patient_training_recommendation(
         profile_summary=ability.assessment_summary,
         source="system",
         review_status=RecommendationReviewStatus.pending_review.value,
+        therapist_notes=manual_note.next_strategy if manual_note else None,
+        updated_at=manual_note.created_at if manual_note else None,
     )
-    review = latest_recommendation_review(db, patient_profile_id)
-    if not include_review_override or not review:
-        return system_recommendation
-    if review.review_status not in {RecommendationReviewStatus.confirmed, RecommendationReviewStatus.adjusted}:
-        return system_recommendation
-    return recommendation_review_to_read(db, review)
+    return system_recommendation
 
 
 def get_patient_recommendation_for_therapist(db: Session, patient_user_id: UUID) -> TrainingRecommendationRead:
@@ -173,6 +177,308 @@ def get_patient_recommendation_effects(db: Session, patient_user_id: UUID) -> Re
         evidence_points=trend["evidence"],
         latest=effects,
     )
+
+
+def create_strategy_feedback(
+    db: Session,
+    therapist: User,
+    patient_user_id: UUID,
+    payload: StrategyFeedbackCreate,
+) -> StrategyFeedbackRead:
+    profile = get_patient_profile_by_user_id(db, patient_user_id)
+    effects = get_patient_recommendation_effects(db, patient_user_id)
+    try:
+        judgment = StrategyFeedbackJudgment(payload.judgment)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="策略反馈判断无效") from exc
+    feedback = RecommendationStrategyFeedback(
+        patient_profile_id=profile.id,
+        therapist_user_id=therapist.id,
+        trend_status=effects.trend_status,
+        judgment=judgment,
+        reason=payload.reason,
+        next_strategy=payload.next_strategy,
+    )
+    db.add(feedback)
+    db.commit()
+    db.refresh(feedback)
+    return StrategyFeedbackRead.model_validate(feedback)
+
+
+def latest_strategy_feedback(db: Session, patient_profile_id: UUID) -> RecommendationStrategyFeedback | None:
+    return db.scalar(
+        select(RecommendationStrategyFeedback)
+        .where(RecommendationStrategyFeedback.patient_profile_id == patient_profile_id)
+        .order_by(RecommendationStrategyFeedback.created_at.desc())
+    )
+
+
+def latest_recommendation_note(db: Session, patient_profile_id: UUID) -> RecommendationStrategyFeedback | None:
+    return db.scalar(
+        select(RecommendationStrategyFeedback)
+        .where(
+            RecommendationStrategyFeedback.patient_profile_id == patient_profile_id,
+            RecommendationStrategyFeedback.trend_status == "manual_note",
+        )
+        .order_by(RecommendationStrategyFeedback.created_at.desc())
+    )
+
+
+def get_family_observation(db: Session) -> FamilyObservationRead:
+    patient = first_patient(db)
+    if not patient:
+        return FamilyObservationRead(
+            patient_username="暂无患者",
+            training_count=0,
+            completed_recommended_sessions=0,
+            recommendation_headline="暂无训练建议",
+            recommendation_source="system",
+            trend_summary="还没有可观察的训练记录。",
+            strategy_hint="请等待患者完成训练后再查看。",
+            therapist_note=None,
+            current_level_label="等待开始",
+            progress_label="暂无趋势",
+            progress_percent=0,
+            level_items=family_empty_level_items(),
+            trend_items=[],
+        )
+    profile = get_patient_profile_by_user_id(db, patient.id)
+    recommendation = get_patient_training_recommendation(db, profile.id, include_review_override=True)
+    effects = get_patient_recommendation_effects(db, patient.id)
+    feedback = latest_strategy_feedback(db, profile.id)
+    training_count = db.scalar(select(func.count(TrainingSession.id)).where(TrainingSession.patient_profile_id == profile.id))
+    family_visuals = build_family_visuals(effects)
+    return FamilyObservationRead(
+        patient_username=patient.username,
+        training_count=training_count or 0,
+        completed_recommended_sessions=effects.completed_recommended_sessions,
+        recommendation_headline=recommendation.headline,
+        recommendation_source=recommendation.source,
+        trend_summary=effects.trend_summary,
+        strategy_hint=feedback.next_strategy if feedback and feedback.next_strategy else effects.strategy_hint,
+        therapist_note=feedback.reason if feedback and feedback.reason else recommendation.therapist_notes,
+        current_level_label=family_visuals["current_level_label"],
+        progress_label=family_visuals["progress_label"],
+        progress_percent=family_visuals["progress_percent"],
+        level_items=family_visuals["level_items"],
+        trend_items=family_visuals["trend_items"],
+    )
+
+
+def build_family_visuals(effects: RecommendationEffectSummaryRead) -> dict:
+    latest = effects.latest[0] if effects.latest else None
+    metrics = latest.metrics if latest else {}
+    accuracy = metrics.get("script_accuracy")
+    errors = metrics.get("error_count")
+    speech_rate = metrics.get("speech_rate")
+    loudness = metrics.get("loudness")
+    progress_percent = family_progress_percent(accuracy, errors)
+    return {
+        "current_level_label": family_level_label(progress_percent, effects.completed_recommended_sessions),
+        "progress_label": family_progress_label(effects.trend_status),
+        "progress_percent": progress_percent,
+        "level_items": [
+            {
+                "key": "expression",
+                "label": "表达完整度",
+                "icon": "message-circle",
+                "value": family_value_label(accuracy, "%"),
+                "level": progress_percent,
+                "tone": family_tone_from_percent(progress_percent),
+                "hint": "能不能把一句话比较完整地说出来。",
+            },
+            {
+                "key": "stability",
+                "label": "稳定度",
+                "icon": "shield-check",
+                "value": "较稳" if errors is not None and errors <= 1 else "需陪伴" if errors is not None else "观察中",
+                "level": family_stability_percent(errors),
+                "tone": family_tone_from_percent(family_stability_percent(errors)),
+                "hint": "错误和停顿越少，说明练习越稳定。",
+            },
+            {
+                "key": "rhythm",
+                "label": "说话节奏",
+                "icon": "audio-lines",
+                "value": family_rhythm_label(speech_rate),
+                "level": family_rhythm_percent(speech_rate),
+                "tone": family_tone_from_percent(family_rhythm_percent(speech_rate)),
+                "hint": "不是越快越好，平稳、能听清更重要。",
+            },
+            {
+                "key": "voice",
+                "label": "声音状态",
+                "icon": "volume-2",
+                "value": family_voice_label(loudness),
+                "level": family_voice_percent(loudness),
+                "tone": family_tone_from_percent(family_voice_percent(loudness)),
+                "hint": "声音保持自然、清楚即可。",
+            },
+        ],
+        "trend_items": family_trend_items(effects.latest),
+    }
+
+
+def family_empty_level_items() -> list[dict]:
+    return [
+        {"key": "expression", "label": "表达完整度", "icon": "message-circle", "value": "待训练", "level": 0, "tone": "muted", "hint": "完成训练后自动显示。"},
+        {"key": "stability", "label": "稳定度", "icon": "shield-check", "value": "待训练", "level": 0, "tone": "muted", "hint": "完成训练后自动显示。"},
+        {"key": "rhythm", "label": "说话节奏", "icon": "audio-lines", "value": "待训练", "level": 0, "tone": "muted", "hint": "完成训练后自动显示。"},
+        {"key": "voice", "label": "声音状态", "icon": "volume-2", "value": "待训练", "level": 0, "tone": "muted", "hint": "完成训练后自动显示。"},
+    ]
+
+
+def family_progress_percent(accuracy: float | None, errors: float | None) -> int:
+    if accuracy is None:
+        return 0
+    score = accuracy
+    if errors is not None:
+        score -= min(max(errors - 1, 0), 5) * 4
+    return int(max(0, min(round(score), 100)))
+
+
+def family_level_label(percent: int, completed_count: int) -> str:
+    if completed_count == 0:
+        return "正在建立记录"
+    if percent >= 90:
+        return "表现稳定"
+    if percent >= 75:
+        return "稳步练习中"
+    if percent >= 55:
+        return "需要多陪伴"
+    return "先建立信心"
+
+
+def family_progress_label(status: str) -> str:
+    if status == "effective":
+        return "正在进步"
+    if status == "needs_adjustment":
+        return "需要调整"
+    if status == "mixed":
+        return "有波动"
+    return "继续观察"
+
+
+def family_value_label(value: float | None, unit: str) -> str:
+    if value is None:
+        return "观察中"
+    return f"{value:g}{unit}"
+
+
+def family_tone_from_percent(percent: int) -> str:
+    if percent >= 85:
+        return "good"
+    if percent >= 65:
+        return "steady"
+    if percent > 0:
+        return "watch"
+    return "muted"
+
+
+def family_stability_percent(errors: float | None) -> int:
+    if errors is None:
+        return 0
+    return int(max(20, min(100, 100 - errors * 18)))
+
+
+def family_rhythm_percent(speech_rate: float | None) -> int:
+    if speech_rate is None:
+        return 0
+    return int(max(25, min(100, 100 - abs(speech_rate - 210) * 0.7)))
+
+
+def family_voice_percent(loudness: float | None) -> int:
+    if loudness is None:
+        return 0
+    return int(max(25, min(100, 100 - abs(loudness - 69) * 3)))
+
+
+def family_rhythm_label(speech_rate: float | None) -> str:
+    if speech_rate is None:
+        return "观察中"
+    if speech_rate < 180:
+        return "偏慢"
+    if speech_rate > 240:
+        return "偏快"
+    return "平稳"
+
+
+def family_voice_label(loudness: float | None) -> str:
+    if loudness is None:
+        return "观察中"
+    if loudness < 60:
+        return "偏轻"
+    if loudness > 78:
+        return "偏响"
+    return "清楚"
+
+
+def family_trend_items(effects: list[RecommendationEffectRead]) -> list[dict]:
+    completed = [effect for effect in reversed(effects) if effect.status == TrainingStatus.completed.value and effect.metrics]
+    if not completed:
+        return []
+    recent = completed[-4:]
+    items = []
+    for index, effect in enumerate(recent, start=1):
+        percent = family_progress_percent(effect.metrics.get("script_accuracy"), effect.metrics.get("error_count"))
+        items.append(
+            {
+                "label": f"第 {index} 次",
+                "value": percent,
+                "summary": effect.summary,
+                "created_at": effect.created_at.isoformat(),
+            }
+        )
+    return items
+
+
+def get_phase3_demo_status(db: Session) -> Phase3DemoStatusRead:
+    patient = first_patient(db)
+    if not patient:
+        return Phase3DemoStatusRead(
+            has_patient=False,
+            has_recommendation=False,
+            has_therapist_review=False,
+            has_recommended_training=False,
+            has_effect_trend=False,
+            has_strategy_feedback=False,
+            next_step="先创建或准备一个患者账号。",
+        )
+    profile = get_patient_profile_by_user_id(db, patient.id)
+    recommendation = get_patient_training_recommendation(db, profile.id, include_review_override=True)
+    review = latest_recommendation_review(db, profile.id)
+    effects = get_patient_recommendation_effects(db, patient.id)
+    feedback = latest_strategy_feedback(db, profile.id)
+    has_effect_trend = effects.completed_recommended_sessions >= 1
+    return Phase3DemoStatusRead(
+        has_patient=True,
+        has_recommendation=bool(recommendation.headline),
+        has_therapist_review=bool(review and review.review_status in {RecommendationReviewStatus.confirmed, RecommendationReviewStatus.adjusted}),
+        has_recommended_training=effects.total_recommended_sessions > 0,
+        has_effect_trend=has_effect_trend,
+        has_strategy_feedback=feedback is not None,
+        next_step=phase3_next_step(review, effects, feedback),
+    )
+
+
+def first_patient(db: Session) -> User | None:
+    return db.scalar(select(User).where(User.role == UserRole.patient).order_by(User.created_at.asc()))
+
+
+def phase3_next_step(
+    review: TrainingRecommendationReview | None,
+    effects: RecommendationEffectSummaryRead,
+    feedback: RecommendationStrategyFeedback | None,
+) -> str:
+    if not review:
+        return "治疗师复核一次训练推荐。"
+    if effects.total_recommended_sessions == 0:
+        return "患者从推荐入口完成一次训练。"
+    if effects.completed_recommended_sessions == 0:
+        return "患者上传录音并生成反馈。"
+    if not feedback:
+        return "治疗师记录一次策略反馈。"
+    return "Phase 3 演示闭环已打通。"
 
 
 def build_recommendation_effect(db: Session, session: TrainingSession) -> RecommendationEffectRead:

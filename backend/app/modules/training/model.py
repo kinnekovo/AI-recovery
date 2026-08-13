@@ -25,6 +25,12 @@ class RecommendationReviewStatus(str, enum.Enum):
     adjusted = "adjusted"
 
 
+class StrategyFeedbackJudgment(str, enum.Enum):
+    agree = "agree"
+    disagree = "disagree"
+    observe = "observe"
+
+
 class TaskTemplate(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "task_templates"
 
@@ -87,6 +93,23 @@ class TrainingRecommendationReview(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     patient_profile = relationship("PatientProfile")
     reviewed_by = relationship("User")
+
+
+class RecommendationStrategyFeedback(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    __tablename__ = "recommendation_strategy_feedbacks"
+
+    patient_profile_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patient_profiles.id"), index=True)
+    therapist_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), index=True)
+    trend_status: Mapped[str] = mapped_column(String(40), nullable=False)
+    judgment: Mapped[StrategyFeedbackJudgment] = mapped_column(
+        Enum(StrategyFeedbackJudgment, name="strategy_feedback_judgment"),
+        nullable=False,
+    )
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_strategy: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    patient_profile = relationship("PatientProfile")
+    therapist = relationship("User")
 
 
 class TrainingSession(Base, UUIDPrimaryKeyMixin, TimestampMixin):

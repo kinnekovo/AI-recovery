@@ -7,7 +7,14 @@ import type {
   AssessmentReviewStatus,
   AssessmentSession,
   AssessmentType,
+  Phase3DemoStatus,
+  RecommendationNote,
+  RecommendationNotePayload,
   RecommendationEffectSummary,
+  StrategyFeedback,
+  StrategyFeedbackPayload,
+  TherapistTrainingRecord,
+  TherapistTrainingTrends,
   TrainingRecommendation,
   TrainingRecommendationReviewPayload,
   TherapistPatient
@@ -41,6 +48,18 @@ export const therapistApi = {
   trainingRecommendation(patientUserId: string) {
     return request<TrainingRecommendation>(http.get(`/therapist/patients/${patientUserId}/training-recommendation`))
   },
+  trainingRecords(patientUserId: string) {
+    return request<TherapistTrainingRecord[]>(http.get(`/therapist/patients/${patientUserId}/training-records`))
+  },
+  trainingTrends(patientUserId: string) {
+    return request<TherapistTrainingTrends>(http.get(`/therapist/patients/${patientUserId}/training-trends`))
+  },
+  recommendationNote(patientUserId: string) {
+    return request<RecommendationNote>(http.get(`/therapist/patients/${patientUserId}/recommendation-note`))
+  },
+  saveRecommendationNote(patientUserId: string, payload: RecommendationNotePayload) {
+    return request<RecommendationNote>(http.post(`/therapist/patients/${patientUserId}/recommendation-note`, payload))
+  },
   reviewTrainingRecommendation(patientUserId: string, payload: TrainingRecommendationReviewPayload) {
     return request<TrainingRecommendation>(
       http.post(`/therapist/patients/${patientUserId}/training-recommendation/review`, payload)
@@ -50,6 +69,14 @@ export const therapistApi = {
     return request<RecommendationEffectSummary>(
       http.get(`/therapist/patients/${patientUserId}/training-recommendation/effects`)
     )
+  },
+  createStrategyFeedback(patientUserId: string, payload: StrategyFeedbackPayload) {
+    return request<StrategyFeedback>(
+      http.post(`/therapist/patients/${patientUserId}/training-recommendation/strategy-feedback`, payload)
+    )
+  },
+  phase3DemoStatus() {
+    return request<Phase3DemoStatus>(http.get('/therapist/phase3/demo-status'))
   },
   assessmentCompare(patientUserId: string, baselineId?: string, currentId?: string) {
     return request<AssessmentCompare>(

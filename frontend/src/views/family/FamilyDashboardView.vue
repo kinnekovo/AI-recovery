@@ -1,19 +1,139 @@
 <template>
-  <section class="page-stack">
-    <div class="page-heading">
+  <section class="page-stack family-observation-page family-visual-page">
+    <div class="page-heading family-heading">
       <span class="kicker">家属端</span>
-      <h1>陪伴训练情况</h1>
-      <p>这里将用于查看患者训练完成情况、近期变化和陪伴建议。</p>
+      <h1>看见练习变化，陪他稳稳往前</h1>
+      <p>这里把训练结果转换成家属容易理解的图标和趋势，不展示治疗师用的专业量表。</p>
     </div>
 
-    <section class="role-boundary-panel">
-      <h2>家属端职责</h2>
-      <div class="boundary-list">
-        <span>查看训练是否完成</span>
-        <span>查看趋势是否稳定</span>
-        <span>查看陪伴提醒建议</span>
-      </div>
-      <p>家属端不录入专业量表，也不修改训练方案。</p>
+    <p v-if="loading" class="success-text">正在加载陪伴观察。</p>
+    <p v-if="error" class="error-text">{{ error }}</p>
+
+    <section v-if="observation" class="family-visual-grid">
+      <article class="family-status-panel">
+        <div class="family-status-copy">
+          <span>当前患者</span>
+          <strong>{{ observation.patient_username }}</strong>
+          <p>{{ observation.trend_summary }}</p>
+        </div>
+        <div class="family-progress-orb" :style="{ '--progress': progressDegrees }">
+          <div>
+            <strong>{{ observation.progress_percent }}%</strong>
+            <span>{{ observation.current_level_label }}</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="family-status-panel family-keep-panel">
+        <div>
+          <span>训练坚持</span>
+          <strong>{{ observation.training_count }} 次</strong>
+          <p>其中 {{ observation.completed_recommended_sessions }} 次完成了建议训练。</p>
+        </div>
+        <div class="family-keep-icon">
+          <CalendarCheck aria-hidden="true" :size="34" />
+          <span>{{ observation.progress_label }}</span>
+        </div>
+      </article>
+
+      <article class="family-wide-panel family-level-panel">
+        <div class="panel-heading">
+          <div>
+            <span>当前水平</span>
+            <h2>用四个维度看最近一次表现</h2>
+          </div>
+        </div>
+        <div class="family-level-grid">
+          <section v-for="item in observation.level_items" :key="item.key" class="family-level-card" :class="item.tone">
+            <div class="family-level-icon">
+              <component :is="iconFor(item.icon)" :size="24" aria-hidden="true" />
+            </div>
+            <div>
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+              <p>{{ item.hint }}</p>
+            </div>
+            <div class="family-level-bar" aria-hidden="true">
+              <i :style="{ width: `${Math.max(0, Math.min(item.level, 100))}%` }"></i>
+            </div>
+          </section>
+        </div>
+      </article>
+
+      <article class="family-wide-panel family-trend-panel">
+        <div class="panel-heading">
+          <div>
+            <span>进步趋势</span>
+            <h2>最近几次建议训练后的变化</h2>
+          </div>
+        </div>
+        <div v-if="observation.trend_items.length" class="family-trend-track">
+          <section v-for="item in observation.trend_items" :key="item.created_at" class="family-trend-step">
+            <div class="trend-stick" :style="{ height: `${Math.max(12, item.value)}%` }"></div>
+            <strong>{{ item.value }}%</strong>
+            <span>{{ item.label }}</span>
+          </section>
+        </div>
+        <p v-else>还需要完成几次训练，系统才能画出稳定趋势。</p>
+      </article>
+
+      <article class="family-wide-panel family-companion-panel">
+        <div>
+          <span>{{ observation.recommendation_source === 'therapist' ? '治疗师建议' : '系统建议' }}</span>
+          <h2>{{ observation.recommendation_headline }}</h2>
+          <p>{{ observation.strategy_hint }}</p>
+        </div>
+        <div v-if="observation.therapist_note" class="family-note">
+          <HeartHandshake aria-hidden="true" :size="22" />
+          <div>
+            <strong>治疗师补充</strong>
+            <p>{{ observation.therapist_note }}</p>
+          </div>
+        </div>
+      </article>
     </section>
+    <div v-else-if="!loading && !error" class="empty-state">
+      <p>暂时没有可观察的训练信息。</p>
+    </div>
   </section>
 </template>
+
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import {
+  AudioLines,
+  CalendarCheck,
+  HeartHandshake,
+  MessageCircle,
+  ShieldCheck,
+  Volume2
+} from 'lucide-vue-next'
+import { familyApi } from '@/api/family'
+import type { FamilyObservation } from '@/types/api'
+
+const observation = ref<FamilyObservation | null>(null)
+const loading = ref(true)
+const error = ref('')
+
+const progressDegrees = computed(() => `${Math.min(Math.max(observation.value?.progress_percent || 0, 0), 100) * 3.6}deg`)
+
+onMounted(async () => {
+  try {
+    observation.value = await familyApi.observation()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '陪伴观察加载失败'
+  } finally {
+    loading.value = false
+  }
+})
+
+function iconFor(name: string) {
+  const icons = {
+    'audio-lines': AudioLines,
+    'message-circle': MessageCircle,
+    'shield-check': ShieldCheck,
+    'volume-2': Volume2
+  }
+  return icons[name as keyof typeof icons] || MessageCircle
+}
+</script>

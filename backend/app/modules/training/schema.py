@@ -106,3 +106,48 @@ class RecommendationEffectSummaryRead(BaseModel):
     strategy_hint: str
     evidence_points: list[str]
     latest: list[RecommendationEffectRead]
+
+
+class StrategyFeedbackCreate(BaseModel):
+    judgment: str
+    reason: str | None = None
+    next_strategy: str | None = None
+
+
+class StrategyFeedbackRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    patient_profile_id: UUID
+    therapist_user_id: UUID
+    trend_status: str
+    judgment: str
+    reason: str | None = None
+    next_strategy: str | None = None
+    created_at: datetime
+
+
+class FamilyObservationRead(BaseModel):
+    patient_username: str
+    training_count: int
+    completed_recommended_sessions: int
+    recommendation_headline: str
+    recommendation_source: str
+    trend_summary: str
+    strategy_hint: str
+    therapist_note: str | None = None
+    current_level_label: str = "观察中"
+    progress_label: str = "继续观察"
+    progress_percent: int = 0
+    level_items: list[dict] = []
+    trend_items: list[dict] = []
+
+
+class Phase3DemoStatusRead(BaseModel):
+    has_patient: bool
+    has_recommendation: bool
+    has_therapist_review: bool
+    has_recommended_training: bool
+    has_effect_trend: bool
+    has_strategy_feedback: bool
+    next_step: str

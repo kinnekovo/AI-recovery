@@ -822,6 +822,228 @@ textarea {
   align-items: start;
 }
 
+.therapist-workbench-page {
+  max-width: 1460px;
+}
+
+.therapist-workbench-grid {
+  display: grid;
+  grid-template-columns: 260px minmax(520px, 1fr) minmax(340px, 0.72fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.therapist-main-flow,
+.therapist-side-flow {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.training-records-panel {
+  min-width: 0;
+}
+
+.therapist-record-list {
+  display: grid;
+  gap: 12px;
+  max-height: 660px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.training-record-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) minmax(220px, 0.5fr);
+  gap: 14px;
+  align-items: start;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f7faf8;
+}
+
+.record-score-block {
+  min-height: 76px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  background: #eaf1ff;
+  color: #1f4fb8;
+}
+
+.record-score-block.empty {
+  background: #f1f5f3;
+  color: #66756f;
+}
+
+.record-score-block strong {
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+.record-score-block span {
+  margin-top: 4px;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.record-main {
+  min-width: 0;
+}
+
+.record-topline {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.record-topline strong,
+.algorithm-recommendation-box strong {
+  color: #20302a;
+  overflow-wrap: anywhere;
+}
+
+.record-topline span {
+  flex: 0 0 auto;
+  color: #66756f;
+  font-size: 0.9rem;
+}
+
+.record-main p,
+.record-main small,
+.algorithm-recommendation-box p,
+.compact-profile-summary {
+  margin: 7px 0 0;
+  color: #40524b;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.record-main small {
+  display: block;
+  color: #66756f;
+}
+
+.record-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.record-tags span {
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: #eef6f2;
+  color: #40524b;
+  font-size: 0.86rem;
+  font-weight: 750;
+}
+
+.record-metric-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.record-metric-strip span {
+  min-height: 38px;
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: #ffffff;
+  color: #40524b;
+  font-size: 0.9rem;
+  font-weight: 750;
+}
+
+.trend-window-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.trend-window-card {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  border-radius: 8px;
+  padding: 16px;
+  background: #f7faf8;
+}
+
+.trend-window-card span,
+.algorithm-recommendation-box span,
+.compact-profile-grid span {
+  color: #66756f;
+  font-weight: 800;
+}
+
+.trend-window-card strong {
+  display: block;
+  margin-top: 6px;
+  color: #1f4fb8;
+  font-size: 1.6rem;
+}
+
+.trend-window-card p {
+  margin: 0;
+  min-height: 52px;
+  color: #40524b;
+  line-height: 1.6;
+}
+
+.recommendation-note-panel {
+  position: sticky;
+  top: 24px;
+}
+
+.algorithm-recommendation-box {
+  display: grid;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 16px;
+  background: #f5f8ff;
+}
+
+.algorithm-recommendation-box strong {
+  font-size: 1.18rem;
+}
+
+.recommendation-note-form {
+  display: grid;
+  gap: 14px;
+}
+
+.recommendation-note-form label {
+  color: #20302a;
+  font-weight: 800;
+}
+
+.recommendation-note-form textarea {
+  min-height: 154px;
+}
+
+.compact-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.compact-profile-grid div {
+  border-radius: 8px;
+  padding: 13px;
+  background: #eef6f2;
+}
+
+.compact-profile-grid strong {
+  display: block;
+  margin-top: 4px;
+  color: #20302a;
+  font-size: 1.4rem;
+}
+
 .therapist-ability-detail {
   display: grid;
   gap: 16px;
@@ -950,6 +1172,378 @@ textarea {
 
 .strategy-hint-box.mixed {
   background: #f5f8ff;
+}
+
+.strategy-feedback-form {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 8px;
+  background: #fbfdfc;
+}
+
+.strategy-feedback-form label {
+  display: grid;
+  gap: 8px;
+  color: #20302a;
+  font-weight: 800;
+}
+
+.strategy-feedback-form select,
+.strategy-feedback-form textarea {
+  width: 100%;
+  border: 1px solid #dce8e3;
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: #20302a;
+  background: #ffffff;
+  font: inherit;
+  resize: vertical;
+}
+
+.phase-demo-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 18px 20px;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 45px rgba(31, 50, 42, 0.08);
+}
+
+.phase-demo-strip span {
+  color: #66756f;
+  font-weight: 800;
+}
+
+.phase-demo-strip strong {
+  display: block;
+  margin-top: 6px;
+  color: #20302a;
+}
+
+.demo-step-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.demo-step-row span {
+  border-radius: 999px;
+  padding: 7px 11px;
+  background: #f1f5f3;
+  color: #66756f;
+}
+
+.demo-step-row span.done {
+  background: #e6efff;
+  color: #1f4fb8;
+}
+
+.family-observation-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.family-visual-page {
+  max-width: 1180px;
+}
+
+.family-heading p {
+  max-width: 70ch;
+}
+
+.family-visual-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.family-status-panel {
+  min-height: 210px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 148px;
+  gap: 20px;
+  align-items: center;
+  padding: 24px;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 45px rgba(31, 50, 42, 0.08);
+}
+
+.family-status-copy,
+.family-status-panel > div:first-child {
+  min-width: 0;
+}
+
+.family-status-panel span,
+.family-level-panel span,
+.family-trend-panel span,
+.family-companion-panel span {
+  color: #2f6fed;
+  font-weight: 850;
+}
+
+.family-status-panel strong {
+  display: block;
+  margin-top: 8px;
+  color: #20302a;
+  font-size: 2rem;
+  line-height: 1.08;
+  overflow-wrap: anywhere;
+}
+
+.family-status-panel p {
+  margin: 12px 0 0;
+  color: #40524b;
+  line-height: 1.7;
+}
+
+.family-progress-orb {
+  width: 138px;
+  aspect-ratio: 1;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at center, #ffffff 0 58%, transparent 59%),
+    conic-gradient(#2f6fed var(--progress), #eaf1ff 0);
+}
+
+.family-progress-orb div {
+  width: 96px;
+  height: 96px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  background: #ffffff;
+  text-align: center;
+}
+
+.family-progress-orb strong {
+  margin: 0;
+  color: #1f4fb8;
+  font-size: 1.7rem;
+}
+
+.family-progress-orb span {
+  margin-top: 4px;
+  color: #40524b;
+  font-size: 0.82rem;
+}
+
+.family-keep-icon {
+  justify-self: end;
+  width: 126px;
+  min-height: 126px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  background: #eef6f2;
+  color: #1d6f51;
+}
+
+.family-keep-icon span {
+  color: #1d6f51;
+}
+
+.family-level-panel,
+.family-trend-panel,
+.family-companion-panel {
+  grid-column: 1 / -1;
+}
+
+.family-level-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.family-level-card {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(142px, 1fr) auto;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 8px;
+  background: #f7faf8;
+}
+
+.family-level-card.good {
+  background: #eef8f2;
+}
+
+.family-level-card.steady {
+  background: #f5f8ff;
+}
+
+.family-level-card.watch {
+  background: #fff6e6;
+}
+
+.family-level-card.muted {
+  background: #f1f5f3;
+}
+
+.family-level-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: #ffffff;
+  color: #1f4fb8;
+}
+
+.family-level-card div:nth-child(2) {
+  min-width: 0;
+}
+
+.family-level-card strong {
+  display: block;
+  margin-top: 8px;
+  color: #20302a;
+  font-size: 1.55rem;
+  overflow-wrap: anywhere;
+}
+
+.family-level-card p {
+  margin: 8px 0 0;
+  color: #40524b;
+  line-height: 1.58;
+}
+
+.family-level-bar {
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  overflow: hidden;
+}
+
+.family-level-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #2f6fed;
+}
+
+.family-trend-track {
+  min-height: 220px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(80px, 1fr));
+  gap: 14px;
+  align-items: end;
+  padding: 18px;
+  border-radius: 8px;
+  background: #f7faf8;
+}
+
+.family-trend-step {
+  min-height: 174px;
+  display: grid;
+  grid-template-rows: 1fr auto auto;
+  gap: 8px;
+  justify-items: center;
+  color: #40524b;
+}
+
+.trend-stick {
+  width: min(54px, 70%);
+  min-height: 12px;
+  align-self: end;
+  border-radius: 8px 8px 4px 4px;
+  background: #2f6fed;
+}
+
+.family-trend-step strong {
+  color: #20302a;
+}
+
+.family-trend-step span {
+  color: #66756f;
+  font-size: 0.9rem;
+}
+
+.family-companion-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.58fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.family-companion-panel h2 {
+  margin-top: 8px;
+}
+
+.family-companion-panel p {
+  margin: 10px 0 0;
+  color: #40524b;
+  line-height: 1.7;
+}
+
+.family-companion-panel .family-note {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  background: #eef6f2;
+  color: #1d6f51;
+}
+
+.family-focus-card,
+.family-wide-panel {
+  padding: 22px;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 45px rgba(31, 50, 42, 0.08);
+}
+
+.family-focus-card {
+  display: grid;
+  gap: 10px;
+}
+
+.family-focus-card span,
+.family-wide-panel span {
+  color: #2f9e73;
+  font-weight: 800;
+}
+
+.family-focus-card strong {
+  color: #20302a;
+  font-size: 2rem;
+}
+
+.family-focus-card p,
+.family-wide-panel p,
+.family-note p {
+  margin: 0;
+  color: #40524b;
+  line-height: 1.7;
+}
+
+.family-wide-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 12px;
+}
+
+.family-wide-panel h2 {
+  margin: 0;
+  color: #20302a;
+}
+
+.family-note {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 8px;
+  background: #eef6f2;
 }
 
 .recommendation-effect-summary,
@@ -1502,6 +2096,8 @@ textarea {
   .home-grid,
   .training-choice,
   .recommendation-panel,
+  .phase-demo-strip,
+  .family-observation-grid,
   .agent-grid,
     .score-panel,
     .metric-grid,
@@ -1510,7 +2106,11 @@ textarea {
     .therapist-grid,
     .therapist-review-grid,
     .therapist-review-heading,
+    .therapist-workbench-grid,
     .therapist-profile-grid,
+    .family-visual-grid,
+    .family-status-panel,
+    .family-companion-panel,
     .ability-grid,
     .ability-hero,
     .evaluation-summary,
@@ -1526,6 +2126,10 @@ textarea {
     grid-column: auto;
   }
 
+  .recommendation-note-panel {
+    position: static;
+  }
+
   .assessment-fields,
   .metric-summary-grid,
   .metric-edit-grid,
@@ -1533,8 +2137,25 @@ textarea {
   .ability-level-row,
   .recommendation-review-form,
   .recommendation-effect-row,
+  .training-record-row,
+  .trend-window-grid,
+  .family-level-grid,
+  .family-trend-track,
   .assessment-history-row {
     grid-template-columns: 1fr;
+  }
+
+  .family-progress-orb,
+  .family-keep-icon {
+    justify-self: start;
+  }
+
+  .record-topline {
+    display: grid;
+  }
+
+  .record-topline span {
+    flex: initial;
   }
 
   .review-summary-strip {
