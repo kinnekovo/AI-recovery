@@ -2,30 +2,52 @@
   <section class="page-stack">
     <div class="page-heading">
       <span class="kicker">进入训练</span>
-      <h1>今天先练最合适的一项</h1>
-      <p>系统会根据你的能力画像给出建议，你也可以自己选择另一种训练。</p>
+      <h1>{{ isTodayRecommendationCompleted ? '今日建议任务已完成' : '今天练一组从易到难的小任务' }}</h1>
+      <p>
+        {{
+          isTodayRecommendationCompleted
+            ? '今天的建议任务组已经完成，接下来可以自主安排训练，也可以休息恢复。'
+            : '系统会根据你的能力画像安排热身、主练和挑战，完成一组比只练一项更稳定。'
+        }}
+      </p>
     </div>
-    <section v-if="recommendation" class="recommendation-panel">
+    <section v-if="recommendation" class="recommendation-panel training-group-panel" :class="{ completed: isTodayRecommendationCompleted }">
       <div class="recommendation-copy">
         <span class="recommendation-label">
-          {{ recommendation.source === 'therapist' ? '治疗师建议' : '系统建议' }}
+          {{ isTodayRecommendationCompleted ? '今日已完成' : recommendation.source === 'therapist' ? '治疗师建议' : '系统建议' }}
         </span>
-        <h2>{{ recommendation.headline }}</h2>
-        <p>{{ recommendation.reason }}</p>
-        <small v-if="recommendation.therapist_notes">治疗师备注：{{ recommendation.therapist_notes }}</small>
+        <h2>{{ isTodayRecommendationCompleted ? '可自主安排训练' : recommendation.headline }}</h2>
+        <p>
+          {{
+            isTodayRecommendationCompleted
+              ? '建议任务已经完成。下面的自选训练可以按体力和心情选择，不需要重复完成同一组推荐。'
+              : recommendation.reason
+          }}
+        </p>
+        <small v-if="recommendation.therapist_notes && !isTodayRecommendationCompleted">治疗师备注：{{ recommendation.therapist_notes }}</small>
       </div>
-      <div class="recommendation-action">
+      <div v-if="!isTodayRecommendationCompleted" class="recommendation-action">
         <span>{{ recommendation.suggested_minutes }} 分钟</span>
         <RouterLink class="primary-link" :to="recommendedTrainingLink(recommendation)">按建议开始</RouterLink>
       </div>
-      <div class="focus-strip">
+      <div v-if="!isTodayRecommendationCompleted" class="focus-strip">
         <span v-for="point in recommendation.focus_points" :key="point">{{ point }}</span>
+      </div>
+      <div v-if="recommendedTasks.length" class="recommended-task-sequence">
+        <article v-for="(task, index) in recommendedTasks" :key="task.id" class="recommended-task-step">
+          <div class="step-index">{{ index + 1 }}</div>
+          <div>
+            <span>{{ stepLabel(index) }} · {{ trainingTypeLabel(task.task_type) }} · {{ task.content_level }}/{{ task.autonomy_level }}</span>
+            <strong>{{ task.title }}</strong>
+            <p>{{ task.target_text }}</p>
+          </div>
+        </article>
       </div>
     </section>
     <p v-if="error" class="error-text">{{ error }}</p>
-    <div class="training-choice">
+    <div class="training-choice manual-choice">
       <RouterLink class="choice-panel" :class="{ recommended: recommendation?.recommended_type === 'repeat' }" to="/training/repeat">
-        <span v-if="recommendation?.recommended_type === 'repeat'" class="choice-badge">推荐</span>
+        <span class="choice-badge">自选</span>
         <strong>跟读训练</strong>
         <p>系统展示目标句子，你录音跟读。适合先把一句话说完整、说清楚。</p>
       </RouterLink>
@@ -34,7 +56,7 @@
         :class="{ recommended: recommendation?.recommended_type === 'scenario' }"
         to="/training/scenario"
       >
-        <span v-if="recommendation?.recommended_type === 'scenario'" class="choice-badge">推荐</span>
+        <span class="choice-badge">自选</span>
         <strong>场景表达</strong>
         <p>围绕生活场景自由表达。适合练习把想法组织起来，说出自己的需求。</p>
       </RouterLink>
@@ -43,18 +65,25 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { trainingApi } from '@/api/training'
-import type { TrainingRecommendation } from '@/types/api'
+import type { TodayTraining, TrainingRecommendation } from '@/types/api'
 
+const today = ref<TodayTraining | null>(null)
 const recommendation = ref<TrainingRecommendation | null>(null)
 const error = ref('')
+const recommendedTasks = computed(() => recommendation.value?.task_sequence?.length ? recommendation.value.task_sequence : [])
+const isTodayRecommendationCompleted = computed(() => Boolean(today.value?.recommended_completed))
 
 onMounted(async () => {
-  try {
-    recommendation.value = await trainingApi.recommendation()
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '暂时无法读取训练建议，可以先手动选择训练。'
+  const [todayResult, recommendationResult] = await Promise.allSettled([trainingApi.today(), trainingApi.recommendation()])
+  if (todayResult.status === 'fulfilled') {
+    today.value = todayResult.value
+  }
+  if (recommendationResult.status === 'fulfilled') {
+    recommendation.value = recommendationResult.value
+  } else {
+    error.value = recommendationResult.reason instanceof Error ? recommendationResult.reason.message : '暂时无法读取训练建议，可以先手动选择训练。'
   }
 })
 
@@ -65,8 +94,17 @@ function recommendedTrainingLink(item: TrainingRecommendation) {
       recommended: '1',
       source: item.source,
       ...(item.id ? { recommendation_id: item.id } : {}),
-      headline: item.headline
+      headline: item.headline,
+      tasks: recommendedTasks.value.map((task) => task.id).join(',')
     }
   }
+}
+
+function stepLabel(index: number) {
+  return ['热身', '主练', '挑战'][index] || `第 ${index + 1} 项`
+}
+
+function trainingTypeLabel(type: string) {
+  return type === 'scenario' ? '场景表达' : '跟读'
 }
 </script>

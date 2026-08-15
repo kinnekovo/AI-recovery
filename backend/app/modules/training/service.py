@@ -27,7 +27,10 @@ from app.modules.training.schema import (
     RecommendationEffectSummaryRead,
     StrategyFeedbackCreate,
     StrategyFeedbackRead,
+    TaskTemplateCreate,
     TaskTemplateRead,
+    TaskTemplateUpdate,
+    TodayTrainingRead,
     TrainingRecommendationRead,
     TrainingRecommendationReviewUpdate,
 )
@@ -38,35 +41,219 @@ from app.modules.users.service import get_patient_profile
 SEED_TASKS = [
     {
         "task_type": TrainingType.repeat,
-        "title": "短句跟读",
+        "title": "熟悉短句：天气",
         "instruction": "请跟我说这一句。",
         "target_text": "今天天气很好。",
+        "content_level": "L1",
+        "autonomy_level": "S1",
+        "tags": ["日常", "短句", "建立信心"],
+        "recommendation_weight": 95,
+    },
+    {
+        "task_type": TrainingType.repeat,
+        "title": "熟悉短句：喝水",
+        "instruction": "请跟我说这一句。",
+        "target_text": "我想喝一点温水。",
+        "content_level": "L1",
+        "autonomy_level": "S1",
+        "tags": ["日常", "需求表达", "短句"],
+        "recommendation_weight": 92,
+    },
+    {
+        "task_type": TrainingType.repeat,
+        "title": "连贯短句：午饭",
+        "instruction": "请跟我连起来说。",
+        "target_text": "我今天中午想吃米饭和青菜。",
         "content_level": "L2",
         "autonomy_level": "S1",
+        "tags": ["日常", "连贯", "饮食"],
+        "recommendation_weight": 88,
+    },
+    {
+        "task_type": TrainingType.repeat,
+        "title": "连贯短句：散步",
+        "instruction": "请先听清楚，再完整跟读。",
+        "target_text": "吃完晚饭后，我想和家人一起散步。",
+        "content_level": "L3",
+        "autonomy_level": "S2",
+        "tags": ["家庭", "连贯", "活动"],
+        "recommendation_weight": 78,
+    },
+    {
+        "task_type": TrainingType.repeat,
+        "title": "复合短句：复诊",
+        "instruction": "请尽量保持声音稳定，把句子说完整。",
+        "target_text": "明天上午我要去医院复诊，请帮我准备病历。",
+        "content_level": "L4",
+        "autonomy_level": "S2",
+        "tags": ["医疗", "复合句", "计划"],
+        "recommendation_weight": 70,
+    },
+    {
+        "task_type": TrainingType.repeat,
+        "title": "挑战短句：复健安排",
+        "instruction": "请完整跟读这句较长的话，注意中间不要急。",
+        "target_text": "这周我想每天上午练习十分钟，下午再和家人复习一遍。",
+        "content_level": "L5",
+        "autonomy_level": "S3",
+        "tags": ["复健", "长句", "挑战"],
+        "recommendation_weight": 66,
     },
     {
         "task_type": TrainingType.scenario,
         "title": "医院看病场景",
         "instruction": "请说说在医院看病时你想表达什么。",
         "target_text": "我想去医院看病，请医生帮我检查。",
-        "content_level": "L4",
+        "content_level": "L3",
         "autonomy_level": "S3",
         "scene_prompt": "医院看病",
+        "tags": ["医疗", "需求表达", "场景"],
+        "recommendation_weight": 86,
+    },
+    {
+        "task_type": TrainingType.scenario,
+        "title": "家庭吃饭场景",
+        "instruction": "请说说吃饭时你想表达什么。",
+        "target_text": "我想少吃一点米饭，多吃一些青菜。",
+        "content_level": "L2",
+        "autonomy_level": "S2",
+        "scene_prompt": "家庭吃饭",
+        "tags": ["家庭", "饮食", "场景"],
+        "recommendation_weight": 84,
+    },
+    {
+        "task_type": TrainingType.scenario,
+        "title": "外出购物场景",
+        "instruction": "请说说买东西时你想表达什么。",
+        "target_text": "请问这个多少钱？我想买两个苹果。",
+        "content_level": "L3",
+        "autonomy_level": "S3",
+        "scene_prompt": "外出购物",
+        "tags": ["生活", "购物", "场景"],
+        "recommendation_weight": 76,
+    },
+    {
+        "task_type": TrainingType.scenario,
+        "title": "家人沟通场景",
+        "instruction": "请试着把自己的想法说给家人听。",
+        "target_text": "我今天有点累，想先休息一会儿，晚点再训练。",
+        "content_level": "L4",
+        "autonomy_level": "S4",
+        "scene_prompt": "家人沟通",
+        "tags": ["家庭", "情绪", "自主表达"],
+        "recommendation_weight": 72,
+    },
+    {
+        "task_type": TrainingType.scenario,
+        "title": "社区问路场景",
+        "instruction": "请围绕问路场景说清楚自己的需求。",
+        "target_text": "请问去社区卫生服务中心怎么走？我想坐电梯上去。",
+        "content_level": "L5",
+        "autonomy_level": "S4",
+        "scene_prompt": "社区问路",
+        "tags": ["社区", "问路", "自主表达"],
+        "recommendation_weight": 64,
     },
 ]
 
 
 def ensure_seed_tasks(db: Session) -> None:
-    exists = db.scalar(select(TaskTemplate.id).limit(1))
-    if exists:
-        return
+    existing = {item.title: item for item in db.scalars(select(TaskTemplate))}
+    changed = False
     for item in SEED_TASKS:
+        template = existing.get(item["title"])
+        if template:
+            for field in [
+                "task_type",
+                "instruction",
+                "target_text",
+                "content_level",
+                "autonomy_level",
+                "scene_prompt",
+                "tags",
+                "recommendation_weight",
+            ]:
+                if field in item and getattr(template, field) != item[field]:
+                    setattr(template, field, item[field])
+                    changed = True
+            if not template.is_active:
+                template.is_active = True
+                changed = True
+            continue
         db.add(TaskTemplate(**item, scoring_config={"mode": "mock"}))
-    db.commit()
+        changed = True
+    legacy = existing.get("短句跟读")
+    if legacy and legacy.is_active:
+        legacy.is_active = False
+        changed = True
+    if changed:
+        db.commit()
 
 
 def get_training_types() -> list[str]:
     return [TrainingType.repeat.value, TrainingType.scenario.value]
+
+
+def list_task_templates(
+    db: Session,
+    training_type: TrainingType | None = None,
+    include_inactive: bool = False,
+) -> list[TaskTemplateRead]:
+    ensure_seed_tasks(db)
+    stmt = select(TaskTemplate).order_by(
+        TaskTemplate.task_type.asc(),
+        TaskTemplate.content_level.asc(),
+        TaskTemplate.autonomy_level.asc(),
+        TaskTemplate.recommendation_weight.desc(),
+    )
+    if training_type:
+        stmt = stmt.where(TaskTemplate.task_type == training_type)
+    if not include_inactive:
+        stmt = stmt.where(TaskTemplate.is_active.is_(True))
+    return [TaskTemplateRead.model_validate(item) for item in db.scalars(stmt)]
+
+
+def create_task_template(db: Session, payload: TaskTemplateCreate) -> TaskTemplateRead:
+    template = TaskTemplate(
+        task_type=payload.task_type,
+        title=payload.title.strip(),
+        instruction=payload.instruction.strip(),
+        target_text=payload.target_text.strip(),
+        content_level=payload.content_level.strip() or "L1",
+        autonomy_level=payload.autonomy_level.strip() or "S1",
+        scene_prompt=payload.scene_prompt.strip() if payload.scene_prompt else None,
+        tags=[item.strip() for item in payload.tags if item.strip()],
+        recommendation_weight=max(0, min(payload.recommendation_weight, 100)),
+        is_active=payload.is_active,
+        scoring_config={"mode": "mock"},
+    )
+    if not template.title or not template.instruction or not template.target_text:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="训练材料标题、说明和文本不能为空")
+    db.add(template)
+    db.commit()
+    db.refresh(template)
+    return TaskTemplateRead.model_validate(template)
+
+
+def update_task_template(db: Session, template_id: UUID, payload: TaskTemplateUpdate) -> TaskTemplateRead:
+    template = db.get(TaskTemplate, template_id)
+    if not template:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="训练材料不存在")
+    for field in ["title", "instruction", "target_text", "content_level", "autonomy_level", "scene_prompt"]:
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(template, field, value.strip() if isinstance(value, str) else value)
+    if payload.tags is not None:
+        template.tags = [item.strip() for item in payload.tags if item.strip()]
+    if payload.recommendation_weight is not None:
+        template.recommendation_weight = max(0, min(payload.recommendation_weight, 100))
+    if payload.is_active is not None:
+        template.is_active = payload.is_active
+    if not template.title or not template.instruction or not template.target_text:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="训练材料标题、说明和文本不能为空")
+    db.commit()
+    db.refresh(template)
+    return TaskTemplateRead.model_validate(template)
 
 
 def get_training_recommendation(db: Session, user: User) -> TrainingRecommendationRead:
@@ -102,6 +289,13 @@ def get_patient_training_recommendation(
         therapist_notes=manual_note.next_strategy if manual_note else None,
         updated_at=manual_note.created_at if manual_note else None,
     )
+    if include_review_override:
+        review = latest_recommendation_review(db, patient_profile_id)
+        if review and review.review_status in {
+            RecommendationReviewStatus.confirmed,
+            RecommendationReviewStatus.adjusted,
+        }:
+            return recommendation_review_to_read(db, review)
     return system_recommendation
 
 
@@ -242,6 +436,17 @@ def get_family_observation(db: Session) -> FamilyObservationRead:
             level_items=family_empty_level_items(),
             trend_items=[],
         )
+    return build_family_observation_for_patient(db, patient.id)
+
+
+def build_family_observation_for_patient(
+    db: Session,
+    patient_user_id: UUID,
+    bound_patients: list[dict] | None = None,
+) -> FamilyObservationRead:
+    patient = db.get(User, patient_user_id)
+    if not patient or patient.role != UserRole.patient:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="患者不存在")
     profile = get_patient_profile_by_user_id(db, patient.id)
     recommendation = get_patient_training_recommendation(db, profile.id, include_review_override=True)
     effects = get_patient_recommendation_effects(db, patient.id)
@@ -262,6 +467,8 @@ def get_family_observation(db: Session) -> FamilyObservationRead:
         progress_percent=family_visuals["progress_percent"],
         level_items=family_visuals["level_items"],
         trend_items=family_visuals["trend_items"],
+        bound_patients=bound_patients or [],
+        selected_patient_user_id=patient.id,
     )
 
 
@@ -652,6 +859,12 @@ def build_recommendation_read(
         content_level=content_level,
         autonomy_level=autonomy_level,
     )
+    sequence = pick_task_sequence_for_recommendation(
+        db,
+        recommended_type=recommended_type,
+        content_level=content_level,
+        autonomy_level=autonomy_level,
+    )
     return TrainingRecommendationRead(
         id=review_id,
         recommended_type=recommended_type,
@@ -668,6 +881,7 @@ def build_recommendation_read(
         therapist_notes=therapist_notes,
         updated_at=updated_at,
         task_template=TaskTemplateRead.model_validate(template) if template else None,
+        task_sequence=[TaskTemplateRead.model_validate(item) for item in sequence],
     )
 
 
@@ -754,7 +968,14 @@ def pick_template_for_recommendation(
     content_level: str,
     autonomy_level: str,
 ) -> TaskTemplate | None:
-    templates = list(db.scalars(select(TaskTemplate).where(TaskTemplate.task_type == recommended_type)))
+    templates = list(
+        db.scalars(
+            select(TaskTemplate).where(
+                TaskTemplate.task_type == recommended_type,
+                TaskTemplate.is_active.is_(True),
+            )
+        )
+    )
     if not templates:
         return None
     return min(
@@ -762,9 +983,64 @@ def pick_template_for_recommendation(
         key=lambda template: (
             abs(level_number(template.content_level) - level_number(content_level)),
             abs(level_number(template.autonomy_level) - level_number(autonomy_level)),
+            -template.recommendation_weight,
             template.created_at,
         ),
     )
+
+
+def pick_task_sequence_for_recommendation(
+    db: Session,
+    recommended_type: TrainingType,
+    content_level: str,
+    autonomy_level: str,
+) -> list[TaskTemplate]:
+    content = level_number(content_level)
+    autonomy = level_number(autonomy_level)
+    candidates = list(
+        db.scalars(
+            select(TaskTemplate)
+            .where(TaskTemplate.is_active.is_(True))
+            .order_by(TaskTemplate.recommendation_weight.desc(), TaskTemplate.created_at.asc())
+        )
+    )
+    if not candidates:
+        return []
+
+    steps = [
+        ("热身", TrainingType.repeat, max(1, content - 1), max(1, autonomy - 1)),
+        ("主练", recommended_type, content, autonomy),
+        ("挑战", recommended_type, min(5, content + 1), min(4, autonomy + 1)),
+    ]
+    selected: list[TaskTemplate] = []
+    used_ids = set()
+    for _label, step_type, step_content, step_autonomy in steps:
+        pool = [item for item in candidates if item.task_type == step_type and item.id not in used_ids]
+        if _label == "挑战":
+            harder_pool = [
+                item
+                for item in pool
+                if level_number(item.content_level) >= content
+                and level_number(item.autonomy_level) >= max(1, autonomy - 1)
+            ]
+            if harder_pool:
+                pool = harder_pool
+        if not pool:
+            pool = [item for item in candidates if item.id not in used_ids]
+        if not pool:
+            break
+        best = min(
+            pool,
+            key=lambda template: (
+                abs(level_number(template.content_level) - step_content),
+                abs(level_number(template.autonomy_level) - step_autonomy),
+                -template.recommendation_weight,
+                template.created_at,
+            ),
+        )
+        selected.append(best)
+        used_ids.add(best.id)
+    return selected
 
 
 def level_number(level: str) -> int:
@@ -788,12 +1064,37 @@ def get_or_create_today_plan(db: Session, user: User) -> TrainingPlan:
     plan = TrainingPlan(patient_profile_id=profile.id, title="今日训练")
     db.add(plan)
     db.flush()
-    templates = list(db.scalars(select(TaskTemplate).order_by(TaskTemplate.created_at.asc())))
+    templates = list(
+        db.scalars(
+            select(TaskTemplate)
+            .where(TaskTemplate.is_active.is_(True))
+            .order_by(TaskTemplate.task_type.asc(), TaskTemplate.content_level.asc(), TaskTemplate.recommendation_weight.desc())
+        )
+    )
     for index, template in enumerate(templates):
         db.add(TrainingPlanItem(training_plan_id=plan.id, task_template_id=template.id, order_index=index))
     db.commit()
     return db.scalar(
         select(TrainingPlan).where(TrainingPlan.id == plan.id).options(selectinload(TrainingPlan.items))
+    )
+
+
+def get_today_training(db: Session, user: User) -> TodayTrainingRead:
+    plan = get_or_create_today_plan(db, user)
+    completed_recommended_sessions = db.scalar(
+        select(func.count(TrainingSession.id)).where(
+            TrainingSession.training_plan_id == plan.id,
+            TrainingSession.recommendation_source.is_not(None),
+            TrainingSession.status == TrainingStatus.completed,
+        )
+    )
+    return TodayTrainingRead(
+        plan_id=plan.id,
+        title=plan.title,
+        status=TrainingStatus.completed.value if completed_recommended_sessions else plan.status.value,
+        items_count=len(plan.items),
+        recommended_completed=bool(completed_recommended_sessions),
+        completed_recommended_sessions=completed_recommended_sessions or 0,
     )
 
 
@@ -804,20 +1105,31 @@ def create_session(
     recommendation_id: UUID | None = None,
     recommendation_source: str | None = None,
     recommendation_headline: str | None = None,
+    recommendation_task_ids: list[UUID] | None = None,
 ) -> TrainingSession:
     profile = get_patient_profile(db, user)
     if profile.current_agent_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先创建并选择智能体")
+    recommendation = get_training_recommendation(db, user) if recommendation_source else None
+    recommended_template = recommendation.task_template if recommendation else None
+    recommended_task_ids = recommendation_task_ids or [item.id for item in (recommendation.task_sequence if recommendation else [])]
     plan = get_or_create_today_plan(db, user)
-    plan_item = next((item for item in plan.items if item.task_template.task_type == training_type), None)
+    plan_item = None
+    if recommended_template and recommendation and recommendation.recommended_type == training_type:
+        plan_item = next((item for item in plan.items if item.task_template_id == recommended_template.id), None)
     if plan_item is None:
-        template = db.scalar(select(TaskTemplate).where(TaskTemplate.task_type == training_type))
+        plan_item = next((item for item in plan.items if item.task_template.task_type == training_type), None)
+    if plan_item is None:
+        template = db.scalar(
+            select(TaskTemplate)
+            .where(TaskTemplate.task_type == training_type, TaskTemplate.is_active.is_(True))
+            .order_by(TaskTemplate.recommendation_weight.desc(), TaskTemplate.created_at.asc())
+        )
         if not template:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="训练题不存在")
         plan_item = TrainingPlanItem(training_plan_id=plan.id, task_template_id=template.id, order_index=len(plan.items))
         db.add(plan_item)
         db.flush()
-    recommendation = get_training_recommendation(db, user) if recommendation_source else None
     session = TrainingSession(
         patient_profile_id=profile.id,
         agent_id=profile.current_agent_id,
@@ -830,14 +1142,34 @@ def create_session(
     )
     db.add(session)
     db.flush()
-    db.add(
-        SessionTask(
-            training_session_id=session.id,
-            training_plan_item_id=plan_item.id,
-            task_template_id=plan_item.task_template_id,
-            order_index=0,
+    session_plan_items = []
+    if recommendation_source and recommended_task_ids:
+        for index, task_template_id in enumerate(recommended_task_ids):
+            template = db.get(TaskTemplate, task_template_id)
+            if not template or not template.is_active:
+                continue
+            existing_plan_item = next((item for item in plan.items if item.task_template_id == template.id), None)
+            if existing_plan_item is None:
+                existing_plan_item = TrainingPlanItem(
+                    training_plan_id=plan.id,
+                    task_template_id=template.id,
+                    order_index=len(plan.items) + len(session_plan_items),
+                )
+                db.add(existing_plan_item)
+                db.flush()
+            session_plan_items.append(existing_plan_item)
+    if not session_plan_items:
+        session_plan_items = [plan_item]
+
+    for index, item in enumerate(session_plan_items):
+        db.add(
+            SessionTask(
+                training_session_id=session.id,
+                training_plan_item_id=item.id,
+                task_template_id=item.task_template_id,
+                order_index=index,
+            )
         )
-    )
     db.commit()
     return get_session(db, user, session.id)
 
@@ -857,6 +1189,7 @@ def build_session_recommendation_snapshot(
         "autonomy_level": recommendation.autonomy_level,
         "confidence": recommendation.confidence,
         "therapist_notes": recommendation.therapist_notes,
+        "task_sequence": [str(item.id) for item in recommendation.task_sequence],
     }
 
 
@@ -873,9 +1206,8 @@ def get_session(db: Session, user: User, session_id: UUID) -> TrainingSession:
 
 
 def complete_session_if_needed(db: Session, session: TrainingSession) -> None:
-    session.status = TrainingStatus.completed
-    for task in session.session_tasks:
-        task.status = TrainingStatus.completed
+    if all(task.status == TrainingStatus.completed for task in session.session_tasks):
+        session.status = TrainingStatus.completed
     db.commit()
 
 

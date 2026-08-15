@@ -47,6 +47,22 @@ export interface TaskTemplate {
   content_level: string
   autonomy_level: string
   scene_prompt?: string | null
+  tags: string[]
+  recommendation_weight: number
+  is_active: boolean
+}
+
+export interface TaskTemplatePayload {
+  task_type: 'repeat' | 'scenario'
+  title: string
+  instruction: string
+  target_text: string
+  content_level: string
+  autonomy_level: string
+  scene_prompt?: string | null
+  tags: string[]
+  recommendation_weight: number
+  is_active: boolean
 }
 
 export interface SessionTask {
@@ -86,6 +102,7 @@ export interface TrainingRecommendation {
   therapist_notes: string | null
   updated_at: string | null
   task_template: TaskTemplate | null
+  task_sequence: TaskTemplate[]
 }
 
 export interface TrainingRecommendationReviewPayload {
@@ -147,6 +164,16 @@ export interface TrainingSessionCreatePayload {
   recommendation_id?: string | null
   recommendation_source?: string | null
   recommendation_headline?: string | null
+  recommendation_task_ids?: string[] | null
+}
+
+export interface TodayTraining {
+  plan_id: string
+  title: string
+  status: string
+  items_count: number
+  recommended_completed: boolean
+  completed_recommended_sessions: number
 }
 
 export interface RecommendationEffect {
@@ -203,6 +230,18 @@ export interface FamilyObservation {
   progress_percent: number
   level_items: FamilyLevelItem[]
   trend_items: FamilyTrendItem[]
+  bound_patients: FamilyBoundPatient[]
+  selected_patient_user_id: string | null
+}
+
+export interface FamilyBoundPatient {
+  binding_id: string
+  patient_user_id: string
+  patient_profile_id: string
+  patient_username: string
+  relationship_label: string
+  status: string
+  created_at: string
 }
 
 export interface FamilyLevelItem {

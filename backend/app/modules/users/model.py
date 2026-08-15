@@ -53,6 +53,20 @@ class PatientProfile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     current_agent: Mapped["Agent | None"] = relationship("Agent", foreign_keys=[current_agent_id], post_update=True)
 
 
+class FamilyPatientBinding(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    __tablename__ = "family_patient_bindings"
+
+    family_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), index=True, nullable=False)
+    patient_profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("patient_profiles.id"), index=True, nullable=False
+    )
+    relationship_label: Mapped[str] = mapped_column(String(40), default="家属", nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
+
+    family_user: Mapped[User] = relationship("User", foreign_keys=[family_user_id])
+    patient_profile: Mapped[PatientProfile] = relationship("PatientProfile")
+
+
 from app.modules.agents.model import Agent  # noqa: E402
 
 PatientProfile.agents = relationship(

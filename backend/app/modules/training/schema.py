@@ -11,6 +11,7 @@ class TrainingSessionCreate(BaseModel):
     recommendation_id: UUID | None = None
     recommendation_source: str | None = None
     recommendation_headline: str | None = None
+    recommendation_task_ids: list[UUID] | None = None
 
 
 class TaskTemplateRead(BaseModel):
@@ -24,6 +25,34 @@ class TaskTemplateRead(BaseModel):
     content_level: str
     autonomy_level: str
     scene_prompt: str | None = None
+    tags: list[str] = []
+    recommendation_weight: int = 50
+    is_active: bool = True
+
+
+class TaskTemplateCreate(BaseModel):
+    task_type: TrainingType
+    title: str
+    instruction: str
+    target_text: str
+    content_level: str = "L1"
+    autonomy_level: str = "S1"
+    scene_prompt: str | None = None
+    tags: list[str] = []
+    recommendation_weight: int = 50
+    is_active: bool = True
+
+
+class TaskTemplateUpdate(BaseModel):
+    title: str | None = None
+    instruction: str | None = None
+    target_text: str | None = None
+    content_level: str | None = None
+    autonomy_level: str | None = None
+    scene_prompt: str | None = None
+    tags: list[str] | None = None
+    recommendation_weight: int | None = None
+    is_active: bool | None = None
 
 
 class SessionTaskRead(BaseModel):
@@ -56,6 +85,8 @@ class TodayTrainingRead(BaseModel):
     title: str
     status: str
     items_count: int
+    recommended_completed: bool = False
+    completed_recommended_sessions: int = 0
 
 
 class TrainingRecommendationRead(BaseModel):
@@ -74,6 +105,7 @@ class TrainingRecommendationRead(BaseModel):
     therapist_notes: str | None = None
     updated_at: datetime | None = None
     task_template: TaskTemplateRead | None = None
+    task_sequence: list[TaskTemplateRead] = []
 
 
 class TrainingRecommendationReviewUpdate(BaseModel):
@@ -141,6 +173,8 @@ class FamilyObservationRead(BaseModel):
     progress_percent: int = 0
     level_items: list[dict] = []
     trend_items: list[dict] = []
+    bound_patients: list[dict] = []
+    selected_patient_user_id: UUID | None = None
 
 
 class Phase3DemoStatusRead(BaseModel):

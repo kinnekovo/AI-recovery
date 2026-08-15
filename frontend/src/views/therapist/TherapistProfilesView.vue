@@ -181,6 +181,67 @@
           </div>
           <p v-if="ability" class="compact-profile-summary">{{ ability.assessment_summary }}</p>
         </article>
+
+        <article class="therapist-panel task-library-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>训练内容库</h2>
+              <p>{{ taskTemplates.length }} 条可用材料，推荐会按难度和权重自动匹配。</p>
+            </div>
+          </div>
+
+          <div class="task-template-list">
+            <article v-for="template in taskTemplates.slice(0, 5)" :key="template.id" class="task-template-row">
+              <div>
+                <strong>{{ template.title }}</strong>
+                <p>{{ template.target_text }}</p>
+              </div>
+              <div class="record-tags">
+                <span>{{ trainingTypeLabel(template.task_type) }}</span>
+                <span>{{ template.content_level }} / {{ template.autonomy_level }}</span>
+                <span>权重 {{ template.recommendation_weight }}</span>
+              </div>
+            </article>
+          </div>
+
+          <form class="task-template-form" @submit.prevent="saveTemplate">
+            <label>
+              材料标题
+              <input v-model="templateForm.title" maxlength="80" placeholder="例如：家庭问候短句" />
+            </label>
+            <label>
+              训练文本
+              <textarea v-model="templateForm.target_text" maxlength="180" rows="3" placeholder="请输入患者需要练习的句子或表达内容。"></textarea>
+            </label>
+            <div class="template-form-grid">
+              <label>
+                类型
+                <select v-model="templateForm.task_type">
+                  <option value="repeat">跟读训练</option>
+                  <option value="scenario">场景表达</option>
+                </select>
+              </label>
+              <label>
+                难度
+                <select v-model="templateForm.content_level">
+                  <option v-for="level in contentLevels" :key="level" :value="level">{{ level }}</option>
+                </select>
+              </label>
+              <label>
+                自主
+                <select v-model="templateForm.autonomy_level">
+                  <option v-for="level in autonomyLevels" :key="level" :value="level">{{ level }}</option>
+                </select>
+              </label>
+            </div>
+            <div class="form-actions">
+              <button class="app-button secondary" type="submit" :disabled="savingTemplate">
+                {{ savingTemplate ? '保存中' : '新增材料' }}
+              </button>
+            </div>
+            <p v-if="templateSaved" class="success-text">{{ templateSaved }}</p>
+          </form>
+        </article>
       </aside>
     </section>
   </section>
@@ -191,6 +252,8 @@ import { computed, onMounted, ref } from 'vue'
 import { therapistApi } from '@/api/therapist'
 import type {
   AbilityProfile,
+  TaskTemplate,
+  TaskTemplatePayload,
   TherapistPatient,
   TherapistTrainingRecord,
   TherapistTrainingTrends,
@@ -203,18 +266,36 @@ const ability = ref<AbilityProfile | null>(null)
 const recommendation = ref<TrainingRecommendation | null>(null)
 const records = ref<TherapistTrainingRecord[]>([])
 const trends = ref<TherapistTrainingTrends | null>(null)
+const taskTemplates = ref<TaskTemplate[]>([])
 const noteText = ref('')
+const templateForm = ref<TaskTemplatePayload>({
+  task_type: 'repeat',
+  title: '',
+  instruction: '请跟我说这一句。',
+  target_text: '',
+  content_level: 'L2',
+  autonomy_level: 'S1',
+  scene_prompt: null,
+  tags: [],
+  recommendation_weight: 60,
+  is_active: true
+})
 const loading = ref(true)
 const loadingPatientData = ref(false)
 const savingNote = ref(false)
+const savingTemplate = ref(false)
 const pageError = ref('')
 const noteSaved = ref('')
+const templateSaved = ref('')
+const contentLevels = ['L1', 'L2', 'L3', 'L4', 'L5']
+const autonomyLevels = ['S1', 'S2', 'S3', 'S4']
 
 const selectedPatient = computed(() => patients.value.find((item) => item.user_id === selectedPatientId.value))
 
 onMounted(async () => {
   try {
     patients.value = await therapistApi.patients()
+    taskTemplates.value = await therapistApi.taskTemplates()
     patients.value.sort((left, right) => right.pending_review_count - left.pending_review_count)
     if (patients.value[0]) await selectPatient(patients.value[0].user_id)
   } catch (err) {
@@ -275,6 +356,30 @@ async function saveNote() {
 
 function clearNote() {
   noteText.value = ''
+}
+
+async function saveTemplate() {
+  savingTemplate.value = true
+  templateSaved.value = ''
+  pageError.value = ''
+  try {
+    const payload: TaskTemplatePayload = {
+      ...templateForm.value,
+      title: templateForm.value.title.trim(),
+      instruction: templateForm.value.task_type === 'scenario' ? '请围绕这个场景说清楚自己的需求。' : '请跟我说这一句。',
+      target_text: templateForm.value.target_text.trim(),
+      tags: templateForm.value.tags || []
+    }
+    await therapistApi.createTaskTemplate(payload)
+    taskTemplates.value = await therapistApi.taskTemplates()
+    templateForm.value.title = ''
+    templateForm.value.target_text = ''
+    templateSaved.value = '训练材料已加入内容库。'
+  } catch (err) {
+    pageError.value = err instanceof Error ? err.message : '训练材料保存失败'
+  } finally {
+    savingTemplate.value = false
+  }
 }
 
 function trainingTypeLabel(type: string) {

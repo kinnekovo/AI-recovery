@@ -18,7 +18,7 @@ from app.modules.scoring.schema import (
     TrainingFeedbackItem,
     TrainingFeedbackRead,
 )
-from app.modules.training.model import SessionTask, TaskTemplate
+from app.modules.training.model import SessionTask, TaskTemplate, TrainingStatus
 from app.modules.training.service import complete_session_if_needed
 
 
@@ -99,6 +99,8 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
     from app.modules.profiles.service import refresh_ability_profile
 
     refresh_ability_profile(db, task.session.patient_profile_id)
+    task.status = TrainingStatus.completed
+    db.flush()
     complete_session_if_needed(db, task.session)
     db.refresh(score)
     return to_training_feedback_read(db, attempt.id, transcript=transcript)

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.response import api_success
 from app.database.session import get_db
 from app.modules.training import service
-from app.modules.training.schema import TodayTrainingRead, TrainingSessionCreate, TrainingSessionRead
+from app.modules.training.schema import TrainingSessionCreate, TrainingSessionRead
 from app.modules.users.model import User
 from app.modules.users.service import require_patient
 
@@ -20,8 +20,7 @@ def training_types():
 
 @router.get("/today")
 def today(current_user: User = Depends(require_patient), db: Session = Depends(get_db)):
-    plan = service.get_or_create_today_plan(db, current_user)
-    data = TodayTrainingRead(plan_id=plan.id, title=plan.title, status=plan.status.value, items_count=len(plan.items))
+    data = service.get_today_training(db, current_user)
     return api_success(data.model_dump(mode="json"))
 
 
@@ -44,6 +43,7 @@ def create_session(
         recommendation_id=payload.recommendation_id,
         recommendation_source=payload.recommendation_source,
         recommendation_headline=payload.recommendation_headline,
+        recommendation_task_ids=payload.recommendation_task_ids,
     )
     return api_success(TrainingSessionRead.model_validate(session).model_dump(mode="json"))
 

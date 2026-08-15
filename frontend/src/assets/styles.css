@@ -433,6 +433,99 @@ textarea {
   font-weight: 700;
 }
 
+.training-group-panel {
+  align-items: start;
+}
+
+.recommendation-panel.completed,
+.home-recommendation.completed {
+  background: #eef8f2;
+}
+
+.recommendation-panel.completed .recommendation-label,
+.home-recommendation.completed span {
+  color: #1d6f51;
+}
+
+.recommended-task-sequence {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.recommended-task-step {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  padding: 16px;
+  border-radius: 8px;
+  background: #f7faf8;
+}
+
+.step-index {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: #eaf1ff;
+  color: #1f4fb8;
+  font-weight: 850;
+}
+
+.recommended-task-step span {
+  color: #66756f;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.recommended-task-step strong {
+  display: block;
+  margin-top: 6px;
+  color: #20302a;
+  overflow-wrap: anywhere;
+}
+
+.recommended-task-step p {
+  margin: 8px 0 0;
+  color: #40524b;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.manual-choice {
+  margin-top: 10px;
+}
+
+.session-step-strip {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.session-step-strip span {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: #f1f5f3;
+  color: #66756f;
+  font-weight: 850;
+}
+
+.session-step-strip span.active {
+  background: #eaf1ff;
+  color: #1f4fb8;
+}
+
+.session-step-strip span.done {
+  background: #dff3eb;
+  color: #1d6f51;
+}
+
 .home-recommendation {
   display: grid;
   gap: 8px;
@@ -1261,6 +1354,37 @@ textarea {
   gap: 18px;
 }
 
+.family-bound-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.family-bound-switcher button {
+  min-height: 54px;
+  border: 0;
+  border-radius: 8px;
+  display: grid;
+  gap: 3px;
+  padding: 10px 14px;
+  background: #ffffff;
+  color: #20302a;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 12px 32px rgba(31, 50, 42, 0.06);
+}
+
+.family-bound-switcher button.active,
+.family-bound-switcher button:hover {
+  background: #eaf1ff;
+  color: #1f4fb8;
+}
+
+.family-bound-switcher span {
+  color: #66756f;
+  font-size: 0.9rem;
+}
+
 .family-status-panel {
   min-height: 210px;
   display: grid;
@@ -1493,6 +1617,59 @@ textarea {
   align-items: start;
   background: #eef6f2;
   color: #1d6f51;
+}
+
+.family-binding-empty small {
+  display: block;
+  margin-top: 8px;
+  color: #66756f;
+}
+
+.task-library-panel {
+  position: static;
+}
+
+.task-template-list {
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.task-template-row {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f7faf8;
+}
+
+.task-template-row strong {
+  color: #20302a;
+}
+
+.task-template-row p {
+  margin: 6px 0 0;
+  color: #40524b;
+  line-height: 1.55;
+}
+
+.task-template-form {
+  display: grid;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.task-template-form label {
+  color: #20302a;
+  font-weight: 800;
+}
+
+.template-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .family-focus-card,
@@ -2137,10 +2314,12 @@ textarea {
   .ability-level-row,
   .recommendation-review-form,
   .recommendation-effect-row,
-  .training-record-row,
-  .trend-window-grid,
-  .family-level-grid,
+    .training-record-row,
+    .trend-window-grid,
+    .recommended-task-sequence,
+    .family-level-grid,
   .family-trend-track,
+  .template-form-grid,
   .assessment-history-row {
     grid-template-columns: 1fr;
   }

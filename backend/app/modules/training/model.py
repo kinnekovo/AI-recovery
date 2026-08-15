@@ -1,7 +1,7 @@
 import enum
 import uuid
 
-from sqlalchemy import Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -42,6 +42,9 @@ class TaskTemplate(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     autonomy_level: Mapped[str] = mapped_column(String(8), default="S1", nullable=False)
     scene_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     scoring_config: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    tags: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
+    recommendation_weight: Mapped[int] = mapped_column(Integer, default=50, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
 class TrainingPlan(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -131,7 +134,11 @@ class TrainingSession(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         Enum(TrainingStatus, name="session_status"), default=TrainingStatus.in_progress, nullable=False
     )
 
-    session_tasks: Mapped[list["SessionTask"]] = relationship(back_populates="session", cascade="all, delete-orphan")
+    session_tasks: Mapped[list["SessionTask"]] = relationship(
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="SessionTask.order_index",
+    )
     recommendation_review = relationship("TrainingRecommendationReview")
 
 

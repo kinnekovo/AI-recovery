@@ -15,6 +15,8 @@ import type {
   StrategyFeedbackPayload,
   TherapistTrainingRecord,
   TherapistTrainingTrends,
+  TaskTemplate,
+  TaskTemplatePayload,
   TrainingRecommendation,
   TrainingRecommendationReviewPayload,
   TherapistPatient
@@ -23,6 +25,16 @@ import type {
 export const therapistApi = {
   patients() {
     return request<TherapistPatient[]>(http.get('/therapist/patients'))
+  },
+  taskTemplates(includeInactive = false) {
+    return request<TaskTemplate[]>(
+      http.get('/therapist/task-templates', {
+        params: { include_inactive: includeInactive }
+      })
+    )
+  },
+  createTaskTemplate(payload: TaskTemplatePayload) {
+    return request<TaskTemplate>(http.post('/therapist/task-templates', payload))
   },
   createAssessment(patientUserId: string, payload: AssessmentCreatePayload) {
     return request<AssessmentSession>(http.post(`/therapist/patients/${patientUserId}/assessments`, payload))

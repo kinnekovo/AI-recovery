@@ -11,14 +11,18 @@ from app.modules.profiles.service import get_patient_ability_profile
 from app.modules.therapist import service
 from app.modules.training.schema import TrainingRecommendationReviewUpdate
 from app.modules.training.service import (
+    create_task_template,
     create_strategy_feedback,
     get_phase3_demo_status,
     get_patient_recommendation_effects,
     get_patient_recommendation_for_therapist,
+    list_task_templates,
     save_patient_recommendation_review,
+    update_task_template,
 )
 from app.modules.therapist.schema import RecommendationNoteCreate
-from app.modules.training.schema import StrategyFeedbackCreate
+from app.modules.training.model import TrainingType
+from app.modules.training.schema import StrategyFeedbackCreate, TaskTemplateCreate, TaskTemplateUpdate
 from app.modules.users.model import User
 from app.modules.users.service import require_therapist
 
@@ -32,6 +36,38 @@ def patients(
 ):
     result = service.list_patients(db)
     return api_success([item.model_dump(mode="json") for item in result])
+
+
+@router.get("/task-templates")
+def task_templates(
+    training_type: TrainingType | None = None,
+    include_inactive: bool = False,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    result = list_task_templates(db, training_type=training_type, include_inactive=include_inactive)
+    return api_success([item.model_dump(mode="json") for item in result])
+
+
+@router.post("/task-templates")
+def create_template(
+    payload: TaskTemplateCreate,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    result = create_task_template(db, payload)
+    return api_success(result.model_dump(mode="json"))
+
+
+@router.patch("/task-templates/{template_id}")
+def update_template(
+    template_id: UUID,
+    payload: TaskTemplateUpdate,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    result = update_task_template(db, template_id, payload)
+    return api_success(result.model_dump(mode="json"))
 
 
 @router.post("/patients/{patient_user_id}/assessments")

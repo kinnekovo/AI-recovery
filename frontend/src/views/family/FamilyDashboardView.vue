@@ -6,6 +6,19 @@
       <p>这里把训练结果转换成家属容易理解的图标和趋势，不展示治疗师用的专业量表。</p>
     </div>
 
+    <section v-if="boundPatients.length" class="family-bound-switcher" aria-label="绑定患者">
+      <button
+        v-for="patient in boundPatients"
+        :key="patient.patient_user_id"
+        type="button"
+        :class="{ active: patient.patient_user_id === selectedPatientId }"
+        @click="selectPatient(patient.patient_user_id)"
+      >
+        <strong>{{ patient.patient_username }}</strong>
+        <span>{{ patient.relationship_label }}</span>
+      </button>
+    </section>
+
     <p v-if="loading" class="success-text">正在加载陪伴观察。</p>
     <p v-if="error" class="error-text">{{ error }}</p>
 
@@ -92,8 +105,9 @@
         </div>
       </article>
     </section>
-    <div v-else-if="!loading && !error" class="empty-state">
-      <p>暂时没有可观察的训练信息。</p>
+    <div v-else-if="!loading && !error" class="empty-state family-binding-empty">
+      <p>当前家属账号还没有绑定患者。</p>
+      <small>请先由管理员或治疗师建立家属-患者绑定，再查看陪伴观察。</small>
     </div>
   </section>
 </template>
@@ -109,9 +123,11 @@ import {
   Volume2
 } from 'lucide-vue-next'
 import { familyApi } from '@/api/family'
-import type { FamilyObservation } from '@/types/api'
+import type { FamilyBoundPatient, FamilyObservation } from '@/types/api'
 
 const observation = ref<FamilyObservation | null>(null)
+const boundPatients = ref<FamilyBoundPatient[]>([])
+const selectedPatientId = ref<string | null>(null)
 const loading = ref(true)
 const error = ref('')
 
@@ -119,13 +135,30 @@ const progressDegrees = computed(() => `${Math.min(Math.max(observation.value?.p
 
 onMounted(async () => {
   try {
-    observation.value = await familyApi.observation()
+    const [patients, initialObservation] = await Promise.all([familyApi.patients(), familyApi.observation()])
+    boundPatients.value = patients.length ? patients : initialObservation.bound_patients
+    observation.value = initialObservation.selected_patient_user_id ? initialObservation : null
+    selectedPatientId.value = initialObservation.selected_patient_user_id
   } catch (err) {
     error.value = err instanceof Error ? err.message : '陪伴观察加载失败'
   } finally {
     loading.value = false
   }
 })
+
+async function selectPatient(patientUserId: string) {
+  selectedPatientId.value = patientUserId
+  loading.value = true
+  error.value = ''
+  try {
+    observation.value = await familyApi.observation(patientUserId)
+    boundPatients.value = observation.value.bound_patients
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '陪伴观察加载失败'
+  } finally {
+    loading.value = false
+  }
+}
 
 function iconFor(name: string) {
   const icons = {

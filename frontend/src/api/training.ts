@@ -1,12 +1,12 @@
 import { http, request } from './http'
-import type { TrainingRecommendation, TrainingSession, TrainingSessionCreatePayload } from '@/types/api'
+import type { TodayTraining, TrainingRecommendation, TrainingSession, TrainingSessionCreatePayload } from '@/types/api'
 
 export const trainingApi = {
   types() {
     return request<string[]>(http.get('/training/types'))
   },
   today() {
-    return request<{ plan_id: string; title: string; status: string; items_count: number }>(http.get('/training/today'))
+    return request<TodayTraining>(http.get('/training/today'))
   },
   recommendation() {
     return request<TrainingRecommendation>(http.get('/training/recommendation'))

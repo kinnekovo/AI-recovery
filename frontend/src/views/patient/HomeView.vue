@@ -2,23 +2,36 @@
   <section class="page-stack">
     <div class="page-heading">
       <span class="kicker">今日闭环</span>
-      <h1>准备开始一次轻量训练</h1>
-      <p>先选择或创建陪伴智能体，再完成一题跟读或场景表达。</p>
+      <h1>{{ isTodayRecommendationCompleted ? '今日建议任务已完成' : '准备开始今天的任务组' }}</h1>
+      <p>
+        {{
+          isTodayRecommendationCompleted
+            ? '今天的建议训练已经完成，接下来可以休息，也可以自主安排轻量练习。'
+            : '先选择或创建陪伴智能体，再完成一组从易到难的小任务。'
+        }}
+      </p>
     </div>
     <section class="home-grid">
       <div class="primary-panel">
         <h2>当前进度</h2>
-        <p v-if="today">今日计划包含 {{ today.items_count }} 项任务，状态：{{ today.status }}</p>
+        <p v-if="today">
+          {{
+            isTodayRecommendationCompleted
+              ? `今日建议任务已完成，已完成 ${today.completed_recommended_sessions} 组推荐训练。`
+              : `今日计划包含 ${today.items_count} 项任务，状态：${today.status}`
+          }}
+        </p>
         <p v-else>正在获取今日训练。</p>
-        <div v-if="recommendation" class="home-recommendation">
-          <span>{{ recommendation.source === 'therapist' ? '治疗师建议' : '系统建议' }}</span>
-          <strong>{{ recommendation.headline }}</strong>
-          <p>{{ recommendation.reason }}</p>
-          <small v-if="recommendation.therapist_notes">治疗师备注：{{ recommendation.therapist_notes }}</small>
+        <div v-if="recommendation" class="home-recommendation" :class="{ completed: isTodayRecommendationCompleted }">
+          <span>{{ isTodayRecommendationCompleted ? '今日已完成' : recommendation.source === 'therapist' ? '治疗师建议' : '系统建议' }}</span>
+          <strong>{{ isTodayRecommendationCompleted ? '可自主安排训练' : recommendation.headline }}</strong>
+          <p>{{ isTodayRecommendationCompleted ? '今天的建议任务组已经完成。后续练习可以按自己的状态选择，感觉疲劳时也可以到此为止。' : recommendation.reason }}</p>
+          <small v-if="recommendation.task_sequence?.length && !isTodayRecommendationCompleted">今日建议 {{ recommendation.task_sequence.length }} 项：{{ recommendation.task_sequence.map((task) => task.title).join('、') }}</small>
+          <small v-if="recommendation.therapist_notes && !isTodayRecommendationCompleted">治疗师备注：{{ recommendation.therapist_notes }}</small>
         </div>
         <p v-if="recommendationError" class="error-text">{{ recommendationError }}</p>
-        <RouterLink class="primary-link" :to="recommendation ? recommendedTrainingLink(recommendation) : '/training'">
-          按建议开始
+        <RouterLink class="primary-link" :to="isTodayRecommendationCompleted || !recommendation ? '/training' : recommendedTrainingLink(recommendation)">
+          {{ isTodayRecommendationCompleted ? '自主安排训练' : '按建议开始' }}
         </RouterLink>
       </div>
       <div class="side-panel">
@@ -39,17 +52,18 @@ import AgentCard from '@/components/agent/AgentCard.vue'
 import { trainingApi } from '@/api/training'
 import { useAgentStore } from '@/stores/agent'
 import { useAuthStore } from '@/stores/auth'
-import type { TrainingRecommendation } from '@/types/api'
+import type { TodayTraining, TrainingRecommendation } from '@/types/api'
 
 const agentStore = useAgentStore()
 const auth = useAuthStore()
-const today = ref<{ plan_id: string; title: string; status: string; items_count: number } | null>(null)
+const today = ref<TodayTraining | null>(null)
 const recommendation = ref<TrainingRecommendation | null>(null)
 const recommendationError = ref('')
 
 const currentAgent = computed(() =>
   agentStore.agents.find((agent) => agent.id === auth.me?.patient_profile?.current_agent_id) || agentStore.agents[0]
 )
+const isTodayRecommendationCompleted = computed(() => Boolean(today.value?.recommended_completed))
 
 onMounted(async () => {
   await agentStore.loadAgents()
@@ -71,7 +85,8 @@ function recommendedTrainingLink(item: TrainingRecommendation) {
       recommended: '1',
       source: item.source,
       ...(item.id ? { recommendation_id: item.id } : {}),
-      headline: item.headline
+      headline: item.headline,
+      tasks: (item.task_sequence || []).map((task) => task.id).join(',')
     }
   }
 }
