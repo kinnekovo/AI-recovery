@@ -25,6 +25,8 @@
           }}
         </p>
         <small v-if="recommendation.therapist_notes && !isTodayRecommendationCompleted">治疗师备注：{{ recommendation.therapist_notes }}</small>
+        <small v-if="recommendation.adaptation_note && !isTodayRecommendationCompleted">{{ recommendation.adaptation_note }}</small>
+        <small v-if="recommendation.reminder && !isTodayRecommendationCompleted">{{ recommendation.reminder }}</small>
       </div>
       <div v-if="!isTodayRecommendationCompleted" class="recommendation-action">
         <span>{{ recommendation.suggested_minutes }} 分钟</span>

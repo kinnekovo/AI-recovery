@@ -103,6 +103,9 @@ export interface TrainingRecommendation {
   updated_at: string | null
   task_template: TaskTemplate | null
   task_sequence: TaskTemplate[]
+  policy_version: string
+  adaptation_note: string | null
+  reminder: string | null
 }
 
 export interface TrainingRecommendationReviewPayload {
@@ -196,6 +199,11 @@ export interface RecommendationEffectSummary {
   trend_summary: string
   strategy_hint: string
   evidence_points: string[]
+  attribution_points: string[]
+  reminder_level: 'info' | 'success' | 'warning' | string
+  patient_reminder: string | null
+  family_reminder: string | null
+  therapist_reminder: string | null
   latest: RecommendationEffect[]
 }
 
@@ -225,6 +233,8 @@ export interface FamilyObservation {
   trend_summary: string
   strategy_hint: string
   therapist_note: string | null
+  reminder_level: 'info' | 'success' | 'warning' | string
+  family_reminder: string | null
   current_level_label: string
   progress_label: string
   progress_percent: number

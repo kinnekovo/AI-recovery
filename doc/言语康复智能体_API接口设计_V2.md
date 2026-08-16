@@ -168,6 +168,47 @@ GET
 
     /api/training/today
 
+返回：
+
+``` json
+{
+"plan_id":"uuid",
+"title":"今日训练",
+"status":"completed",
+"items_count":6,
+"recommended_completed":true,
+"completed_recommended_sessions":1
+}
+```
+
+------------------------------------------------------------------------
+
+## 获取训练推荐
+
+GET
+
+    /api/training/recommendation
+
+当前主路径为算法推荐，不需要治疗师逐条审批。推荐由能力画像、趋势归因和自适应策略共同生成。
+
+返回：
+
+``` json
+{
+"recommended_type":"repeat",
+"headline":"练一组连贯短句",
+"reason":"最近说话节奏偏慢，可以用熟悉短句练习连续表达。",
+"focus_points":["一句话尽量连起来","停顿少一点"],
+"suggested_minutes":12,
+"content_level":"L2",
+"autonomy_level":"S2",
+"policy_version":"phase4.3",
+"adaptation_note":"近期表现有波动，系统暂时保持当前难度。",
+"reminder":"今天保持当前节奏，完成一组就可以。",
+"task_sequence":[]
+}
+```
+
 ------------------------------------------------------------------------
 
 ## 创建训练会话
@@ -180,9 +221,14 @@ POST
 
 ``` json
 {
-"type":"repeat"
+"type":"repeat",
+"recommendation_source":"system",
+"recommendation_headline":"练一组连贯短句",
+"recommendation_task_ids":["uuid-1","uuid-2","uuid-3"]
 }
 ```
+
+推荐入口会一次创建任务组中的多个 `session_tasks`。自选训练仍可只传 `type`。
 
 ------------------------------------------------------------------------
 
@@ -382,12 +428,21 @@ Phase 2.3 起，该接口返回训练反馈结构，不再返回旧的 `overall_
 }
 ```
 
-未来内部替换：
+Phase 4.4 起，内部 provider 可通过环境变量替换，但接口字段和评分口径保持稳定：
 
--   ASR
--   声学分析
--   规则评价
--   LLM反馈生成
+``` env
+SPEECH_EVAL_PROVIDER=mock
+ASR_PROVIDER=mock
+ACOUSTIC_PROVIDER=mock
+LLM_FEEDBACK_PROVIDER=mock
+```
+
+真实服务接入后仍应映射到：
+
+- script_accuracy
+- error_count
+- speech_rate
+- loudness
 
 不影响接口。
 
@@ -551,3 +606,102 @@ POST
 GET
 
     /api/profile/ability
+
+------------------------------------------------------------------------
+
+# 10. 三端协作接口
+
+## 治疗师：患者列表
+
+GET
+
+    /api/therapist/patients
+
+## 治疗师：训练记录
+
+GET
+
+    /api/therapist/patients/{patient_user_id}/training-records
+
+## 治疗师：训练趋势
+
+GET
+
+    /api/therapist/patients/{patient_user_id}/training-trends
+
+## 治疗师：当前算法推荐
+
+GET
+
+    /api/therapist/patients/{patient_user_id}/training-recommendation
+
+## 治疗师：推荐效果、趋势归因与提醒
+
+GET
+
+    /api/therapist/patients/{patient_user_id}/training-recommendation/effects
+
+返回包含：
+
+``` text
+trend_status
+trend_summary
+strategy_hint
+evidence_points
+attribution_points
+patient_reminder
+family_reminder
+therapist_reminder
+```
+
+## 治疗师：自然语言调整说明
+
+GET
+
+    /api/therapist/patients/{patient_user_id}/recommendation-note
+
+POST
+
+    /api/therapist/patients/{patient_user_id}/recommendation-note
+
+该接口是治疗师影响推荐的当前主入口。治疗师不审批每条推荐，只补充下一次训练方向。
+
+## 家属：绑定患者列表
+
+GET
+
+    /api/family/patients
+
+## 家属：陪伴观察
+
+GET
+
+    /api/family/observation?patient_user_id=uuid
+
+返回家属可理解的水平、趋势和陪伴提醒，不展示治疗师级专业量表。
+
+------------------------------------------------------------------------
+
+# 11. Deprecated 兼容接口
+
+以下接口保留用于 Phase 3 历史兼容，不再作为推荐主路径。前端主界面不应再依赖这些接口。
+
+## Deprecated：治疗师推荐复核
+
+POST
+
+    /api/therapist/patients/{patient_user_id}/training-recommendation/review
+
+历史用途：治疗师确认或调整系统推荐。
+
+当前替代：`POST /api/therapist/patients/{patient_user_id}/recommendation-note`
+
+## Deprecated：推荐策略反馈
+
+POST
+
+    /api/therapist/patients/{patient_user_id}/training-recommendation/strategy-feedback
+
+历史用途：治疗师记录推荐效果判断。
+
+当前替代：`GET /api/therapist/patients/{patient_user_id}/training-recommendation/effects` 自动返回趋势归因与提醒。

@@ -96,6 +96,13 @@
           <h2>{{ observation.recommendation_headline }}</h2>
           <p>{{ observation.strategy_hint }}</p>
         </div>
+        <div v-if="observation.family_reminder" class="family-note" :class="observation.reminder_level">
+          <HeartHandshake aria-hidden="true" :size="22" />
+          <div>
+            <strong>陪伴提醒</strong>
+            <p>{{ observation.family_reminder }}</p>
+          </div>
+        </div>
         <div v-if="observation.therapist_note" class="family-note">
           <HeartHandshake aria-hidden="true" :size="22" />
           <div>

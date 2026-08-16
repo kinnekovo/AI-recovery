@@ -133,7 +133,16 @@
               <span>{{ trainingTypeLabel(recommendation.recommended_type) }}</span>
               <span>{{ recommendation.suggested_minutes }} 分钟</span>
               <span>置信度 {{ Math.round(recommendation.confidence * 100) }}%</span>
+              <span>策略 {{ recommendation.policy_version }}</span>
             </div>
+          </div>
+
+          <div v-if="effects" class="trend-attribution-box" :class="effects.reminder_level">
+            <span>趋势归因与提醒</span>
+            <strong>{{ effects.therapist_reminder || effects.strategy_hint }}</strong>
+            <ul v-if="effects.attribution_points.length">
+              <li v-for="point in effects.attribution_points" :key="point">{{ point }}</li>
+            </ul>
           </div>
 
           <form class="recommendation-note-form" @submit.prevent="saveNote">
@@ -257,13 +266,15 @@ import type {
   TherapistPatient,
   TherapistTrainingRecord,
   TherapistTrainingTrends,
-  TrainingRecommendation
+  TrainingRecommendation,
+  RecommendationEffectSummary
 } from '@/types/api'
 
 const patients = ref<TherapistPatient[]>([])
 const selectedPatientId = ref('')
 const ability = ref<AbilityProfile | null>(null)
 const recommendation = ref<TrainingRecommendation | null>(null)
+const effects = ref<RecommendationEffectSummary | null>(null)
 const records = ref<TherapistTrainingRecord[]>([])
 const trends = ref<TherapistTrainingTrends | null>(null)
 const taskTemplates = ref<TaskTemplate[]>([])
@@ -316,17 +327,19 @@ async function reloadSelected() {
   pageError.value = ''
   noteSaved.value = ''
   try {
-    const [abilityResult, recommendationResult, recordsResult, trendsResult, noteResult] = await Promise.all([
+    const [abilityResult, recommendationResult, recordsResult, trendsResult, noteResult, effectsResult] = await Promise.all([
       therapistApi.abilityProfile(selectedPatientId.value),
       therapistApi.trainingRecommendation(selectedPatientId.value),
       therapistApi.trainingRecords(selectedPatientId.value),
       therapistApi.trainingTrends(selectedPatientId.value),
-      therapistApi.recommendationNote(selectedPatientId.value)
+      therapistApi.recommendationNote(selectedPatientId.value),
+      therapistApi.recommendationEffects(selectedPatientId.value)
     ])
     ability.value = abilityResult
     recommendation.value = recommendationResult
     records.value = recordsResult
     trends.value = trendsResult
+    effects.value = effectsResult
     noteText.value = noteResult.note || recommendationResult.therapist_notes || ''
   } catch (err) {
     pageError.value = err instanceof Error ? err.message : '患者训练数据加载失败'

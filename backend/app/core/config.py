@@ -23,6 +23,17 @@ class Settings:
     access_token_expire_minutes: int
     backend_cors_origins: list[str]
     storage_root: Path
+    speech_eval_provider: str
+    asr_provider: str
+    asr_api_key: str | None
+    asr_base_url: str | None
+    acoustic_provider: str
+    acoustic_api_key: str | None
+    acoustic_base_url: str | None
+    llm_feedback_provider: str
+    llm_feedback_api_key: str | None
+    llm_feedback_base_url: str | None
+    llm_feedback_model: str | None
 
     def __init__(self) -> None:
         backend_dir = Path(__file__).resolve().parents[2]
@@ -41,6 +52,18 @@ class Settings:
         if not storage_root.is_absolute():
             storage_root = backend_dir / storage_root
         self.storage_root = storage_root.resolve()
+
+        self.speech_eval_provider = os.getenv("SPEECH_EVAL_PROVIDER", "mock").strip().lower() or "mock"
+        self.asr_provider = os.getenv("ASR_PROVIDER", "mock").strip().lower() or "mock"
+        self.asr_api_key = os.getenv("ASR_API_KEY")
+        self.asr_base_url = os.getenv("ASR_BASE_URL")
+        self.acoustic_provider = os.getenv("ACOUSTIC_PROVIDER", "mock").strip().lower() or "mock"
+        self.acoustic_api_key = os.getenv("ACOUSTIC_API_KEY")
+        self.acoustic_base_url = os.getenv("ACOUSTIC_BASE_URL")
+        self.llm_feedback_provider = os.getenv("LLM_FEEDBACK_PROVIDER", "mock").strip().lower() or "mock"
+        self.llm_feedback_api_key = os.getenv("LLM_FEEDBACK_API_KEY")
+        self.llm_feedback_base_url = os.getenv("LLM_FEEDBACK_BASE_URL")
+        self.llm_feedback_model = os.getenv("LLM_FEEDBACK_MODEL")
 
 
 @lru_cache

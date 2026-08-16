@@ -28,6 +28,8 @@
           <p>{{ isTodayRecommendationCompleted ? '今天的建议任务组已经完成。后续练习可以按自己的状态选择，感觉疲劳时也可以到此为止。' : recommendation.reason }}</p>
           <small v-if="recommendation.task_sequence?.length && !isTodayRecommendationCompleted">今日建议 {{ recommendation.task_sequence.length }} 项：{{ recommendation.task_sequence.map((task) => task.title).join('、') }}</small>
           <small v-if="recommendation.therapist_notes && !isTodayRecommendationCompleted">治疗师备注：{{ recommendation.therapist_notes }}</small>
+          <small v-if="recommendation.adaptation_note && !isTodayRecommendationCompleted">{{ recommendation.adaptation_note }}</small>
+          <small v-if="recommendation.reminder && !isTodayRecommendationCompleted">{{ recommendation.reminder }}</small>
         </div>
         <p v-if="recommendationError" class="error-text">{{ recommendationError }}</p>
         <RouterLink class="primary-link" :to="isTodayRecommendationCompleted || !recommendation ? '/training' : recommendedTrainingLink(recommendation)">

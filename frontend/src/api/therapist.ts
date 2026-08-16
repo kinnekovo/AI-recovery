@@ -72,6 +72,8 @@ export const therapistApi = {
   saveRecommendationNote(patientUserId: string, payload: RecommendationNotePayload) {
     return request<RecommendationNote>(http.post(`/therapist/patients/${patientUserId}/recommendation-note`, payload))
   },
+  // Deprecated compatibility wrapper. The therapist UI should use recommendationNote
+  // instead of making recommendation review a required approval step.
   reviewTrainingRecommendation(patientUserId: string, payload: TrainingRecommendationReviewPayload) {
     return request<TrainingRecommendation>(
       http.post(`/therapist/patients/${patientUserId}/training-recommendation/review`, payload)
@@ -82,6 +84,7 @@ export const therapistApi = {
       http.get(`/therapist/patients/${patientUserId}/training-recommendation/effects`)
     )
   },
+  // Deprecated compatibility wrapper. Trend attribution now comes from recommendationEffects.
   createStrategyFeedback(patientUserId: string, payload: StrategyFeedbackPayload) {
     return request<StrategyFeedback>(
       http.post(`/therapist/patients/${patientUserId}/training-recommendation/strategy-feedback`, payload)

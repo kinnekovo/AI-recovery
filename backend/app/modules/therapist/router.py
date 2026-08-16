@@ -166,7 +166,12 @@ def save_recommendation_note(
     return api_success(result.model_dump(mode="json"))
 
 
-@router.post("/patients/{patient_user_id}/training-recommendation/review")
+@router.post(
+    "/patients/{patient_user_id}/training-recommendation/review",
+    deprecated=True,
+    summary="Deprecated: legacy recommendation review compatibility endpoint",
+    description="保留用于兼容 Phase 3 历史数据。当前推荐主路径由算法策略生成，治疗师仅通过 recommendation-note 做自然语言补充。",
+)
 def review_training_recommendation(
     patient_user_id: UUID,
     payload: TrainingRecommendationReviewUpdate,
@@ -187,7 +192,12 @@ def training_recommendation_effects(
     return api_success(result.model_dump(mode="json"))
 
 
-@router.post("/patients/{patient_user_id}/training-recommendation/strategy-feedback")
+@router.post(
+    "/patients/{patient_user_id}/training-recommendation/strategy-feedback",
+    deprecated=True,
+    summary="Deprecated: legacy strategy feedback compatibility endpoint",
+    description="保留用于兼容 Phase 3 历史策略反馈。当前趋势归因和自适应推荐由 recommendation_policy 生成。",
+)
 def strategy_feedback(
     patient_user_id: UUID,
     payload: StrategyFeedbackCreate,

@@ -106,6 +106,9 @@ class TrainingRecommendationRead(BaseModel):
     updated_at: datetime | None = None
     task_template: TaskTemplateRead | None = None
     task_sequence: list[TaskTemplateRead] = []
+    policy_version: str = "phase4.3"
+    adaptation_note: str | None = None
+    reminder: str | None = None
 
 
 class TrainingRecommendationReviewUpdate(BaseModel):
@@ -137,6 +140,11 @@ class RecommendationEffectSummaryRead(BaseModel):
     trend_summary: str
     strategy_hint: str
     evidence_points: list[str]
+    attribution_points: list[str] = []
+    reminder_level: str = "info"
+    patient_reminder: str | None = None
+    family_reminder: str | None = None
+    therapist_reminder: str | None = None
     latest: list[RecommendationEffectRead]
 
 
@@ -168,6 +176,8 @@ class FamilyObservationRead(BaseModel):
     trend_summary: str
     strategy_hint: str
     therapist_note: str | None = None
+    reminder_level: str = "info"
+    family_reminder: str | None = None
     current_level_label: str = "观察中"
     progress_label: str = "继续观察"
     progress_percent: int = 0

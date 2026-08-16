@@ -48,15 +48,20 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
     from app.modules.evaluations.service import ensure_default_metrics
 
     ensure_default_metrics(db)
-    transcript = get_asr_provider().transcribe(audio.storage_path)
-    acoustic = get_acoustic_analysis_provider().analyze(audio.storage_path)
+    asr_provider = get_asr_provider()
+    acoustic_provider = get_acoustic_analysis_provider()
+    llm_provider = get_llm_scoring_provider()
+    transcript = asr_provider.transcribe(audio.storage_path)
+    acoustic = acoustic_provider.analyze(audio.storage_path)
     process_evaluation = generate_process_evaluation(template, transcript, acoustic)
-    result = get_llm_scoring_provider().evaluate(template.target_text, transcript, template.task_type.value)
+    result = llm_provider.evaluate(template.target_text, transcript, template.task_type.value)
     analysis = AttemptAnalysisResult(
         attempt_id=attempt.id,
         asr_text=transcript,
         acoustic_metrics={
             "quality": "mock_pass",
+            "provider": acoustic_provider.provider_name,
+            "requested_provider": getattr(acoustic_provider, "requested_provider", acoustic_provider.provider_name),
             "speaking_duration_seconds": acoustic.speaking_duration_seconds,
             "loudness_dba": acoustic.loudness_dba,
             "long_pause_over_3s_count": acoustic.long_pause_over_3s_count,
@@ -64,8 +69,14 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
         semantic_metrics={
             "target_text": template.target_text,
             "process_monitoring": process_evaluation.model_dump(mode="json"),
+            "asr_provider": asr_provider.provider_name,
+            "requested_asr_provider": getattr(asr_provider, "requested_provider", asr_provider.provider_name),
         },
-        raw_model_output={"llm_scoring": result},
+        raw_model_output={
+            "llm_scoring": result,
+            "llm_provider": llm_provider.provider_name,
+            "requested_llm_provider": getattr(llm_provider, "requested_provider", llm_provider.provider_name),
+        },
     )
     score = AttemptScore(
         attempt_id=attempt.id,

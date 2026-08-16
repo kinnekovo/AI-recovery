@@ -17,6 +17,12 @@ from app.modules.training.model import (
     TrainingStatus,
     TrainingType,
 )
+from app.modules.training.recommendation_policy import (
+    RECOMMENDATION_POLICY,
+    analyze_trend_by_policy,
+    decide_recommendation_by_policy,
+    sequence_steps,
+)
 from app.modules.attempts.model import Attempt
 from app.modules.evaluations.model import AttemptEvaluation, EvaluationMetric, EvaluationSource
 from app.modules.evaluations.service import PROCESS_METRIC_NAMES
@@ -271,31 +277,29 @@ def get_patient_training_recommendation(
     from app.modules.profiles.service import refresh_ability_profile
 
     ability = refresh_ability_profile(db, patient_profile_id)
-    recommended_type, headline, reason, focus_points, minutes = decide_recommendation(ability)
+    recent_effects = recent_recommendation_effects_by_profile(db, patient_profile_id)
+    completed_effects = [effect for effect in reversed(recent_effects) if effect.status == TrainingStatus.completed.value and effect.metrics]
+    trend = analyze_trend_by_policy(completed_effects)
+    decision = decide_recommendation_by_policy(ability, trend)
     manual_note = latest_recommendation_note(db, patient_profile_id)
     system_recommendation = build_recommendation_read(
         db=db,
-        recommended_type=recommended_type,
-        headline=headline,
-        reason=reason,
-        focus_points=focus_points,
-        suggested_minutes=minutes,
-        content_level=ability.current_content_level,
-        autonomy_level=ability.current_autonomy_level,
+        recommended_type=decision.recommended_type,
+        headline=decision.headline,
+        reason=decision.reason,
+        focus_points=decision.focus_points,
+        suggested_minutes=decision.suggested_minutes,
+        content_level=decision.content_level,
+        autonomy_level=decision.autonomy_level,
         confidence=ability.confidence,
         profile_summary=ability.assessment_summary,
         source="system",
         review_status=RecommendationReviewStatus.pending_review.value,
         therapist_notes=manual_note.next_strategy if manual_note else None,
         updated_at=manual_note.created_at if manual_note else None,
+        adaptation_note=decision.adaptation_note,
+        reminder=trend.patient_reminder,
     )
-    if include_review_override:
-        review = latest_recommendation_review(db, patient_profile_id)
-        if review and review.review_status in {
-            RecommendationReviewStatus.confirmed,
-            RecommendationReviewStatus.adjusted,
-        }:
-            return recommendation_review_to_read(db, review)
     return system_recommendation
 
 
@@ -346,18 +350,7 @@ def save_patient_recommendation_review(
 
 def get_patient_recommendation_effects(db: Session, patient_user_id: UUID) -> RecommendationEffectSummaryRead:
     profile = get_patient_profile_by_user_id(db, patient_user_id)
-    sessions = list(
-        db.scalars(
-            select(TrainingSession)
-            .where(
-                TrainingSession.patient_profile_id == profile.id,
-                TrainingSession.recommendation_source.is_not(None),
-            )
-            .order_by(TrainingSession.created_at.desc())
-            .limit(8)
-        )
-    )
-    effects = [build_recommendation_effect(db, session) for session in sessions]
+    effects = recent_recommendation_effects_by_profile(db, profile.id)
     completed_count = sum(1 for effect in effects if effect.status == TrainingStatus.completed.value)
     matched_count = sum(1 for effect in effects if effect.recommendation_matched)
     trend = analyze_recommendation_trend(effects)
@@ -369,8 +362,28 @@ def get_patient_recommendation_effects(db: Session, patient_user_id: UUID) -> Re
         trend_summary=trend["summary"],
         strategy_hint=trend["hint"],
         evidence_points=trend["evidence"],
+        attribution_points=trend["attribution_points"],
+        reminder_level=trend["reminder_level"],
+        patient_reminder=trend["patient_reminder"],
+        family_reminder=trend["family_reminder"],
+        therapist_reminder=trend["therapist_reminder"],
         latest=effects,
     )
+
+
+def recent_recommendation_effects_by_profile(db: Session, patient_profile_id: UUID) -> list[RecommendationEffectRead]:
+    sessions = list(
+        db.scalars(
+            select(TrainingSession)
+            .where(
+                TrainingSession.patient_profile_id == patient_profile_id,
+                TrainingSession.recommendation_source.is_not(None),
+            )
+            .order_by(TrainingSession.created_at.desc())
+            .limit(8)
+        )
+    )
+    return [build_recommendation_effect(db, session) for session in sessions]
 
 
 def create_strategy_feedback(
@@ -430,6 +443,8 @@ def get_family_observation(db: Session) -> FamilyObservationRead:
             trend_summary="还没有可观察的训练记录。",
             strategy_hint="请等待患者完成训练后再查看。",
             therapist_note=None,
+            reminder_level="info",
+            family_reminder="患者完成训练后，这里会显示陪伴提醒。",
             current_level_label="等待开始",
             progress_label="暂无趋势",
             progress_percent=0,
@@ -460,8 +475,10 @@ def build_family_observation_for_patient(
         recommendation_headline=recommendation.headline,
         recommendation_source=recommendation.source,
         trend_summary=effects.trend_summary,
-        strategy_hint=feedback.next_strategy if feedback and feedback.next_strategy else effects.strategy_hint,
+        strategy_hint=feedback.next_strategy if feedback and feedback.next_strategy else effects.family_reminder or effects.strategy_hint,
         therapist_note=feedback.reason if feedback and feedback.reason else recommendation.therapist_notes,
+        reminder_level=effects.reminder_level,
+        family_reminder=effects.family_reminder,
         current_level_label=family_visuals["current_level_label"],
         progress_label=family_visuals["progress_label"],
         progress_percent=family_visuals["progress_percent"],
@@ -744,52 +761,17 @@ def effect_summary(metrics: dict[str, float], completed: bool) -> str:
 
 def analyze_recommendation_trend(effects: list[RecommendationEffectRead]) -> dict:
     completed = [effect for effect in reversed(effects) if effect.status == TrainingStatus.completed.value and effect.metrics]
-    if len(completed) < 2:
-        return {
-            "status": "observing",
-            "summary": "推荐后完成训练次数还不够，暂时只适合观察。",
-            "hint": "建议继续保持当前推荐，并等待至少两次完成评分后再判断是否调整。",
-            "evidence": [f"已完成推荐训练 {len(completed)} 次"],
-        }
-
-    first = completed[0]
-    latest = completed[-1]
-    deltas = metric_deltas(first.metrics, latest.metrics)
-    evidence = build_trend_evidence(deltas)
-    positive = 0
-    negative = 0
-    if deltas.get("script_accuracy", 0) >= 3:
-        positive += 1
-    elif deltas.get("script_accuracy", 0) <= -3:
-        negative += 1
-    if deltas.get("error_count", 0) <= -1:
-        positive += 1
-    elif deltas.get("error_count", 0) >= 1:
-        negative += 1
-    if "speech_rate" in deltas and speech_rate_better(first.metrics.get("speech_rate"), latest.metrics.get("speech_rate")):
-        positive += 1
-    if "loudness" in deltas and loudness_better(first.metrics.get("loudness"), latest.metrics.get("loudness")):
-        positive += 1
-
-    if positive >= 2 and negative == 0:
-        return {
-            "status": "effective",
-            "summary": "推荐后的训练表现正在变好。",
-            "hint": "建议继续使用当前推荐方向，下一次可小幅增加句子长度或自主表达比例。",
-            "evidence": evidence,
-        }
-    if negative >= 2:
-        return {
-            "status": "needs_adjustment",
-            "summary": "推荐后的表现没有稳定改善。",
-            "hint": "建议治疗师重新检查推荐方向，必要时降低难度或改回更熟悉的跟读训练。",
-            "evidence": evidence,
-        }
+    result = analyze_trend_by_policy(completed)
     return {
-        "status": "mixed",
-        "summary": "推荐后的表现有变化，但趋势还不稳定。",
-        "hint": "建议保持当前推荐一到两次，同时关注错误次数和说话节奏是否继续改善。",
-        "evidence": evidence,
+        "status": result.status,
+        "summary": result.summary,
+        "hint": result.hint,
+        "evidence": result.evidence,
+        "attribution_points": result.attribution_points,
+        "reminder_level": result.reminder_level,
+        "patient_reminder": result.patient_reminder,
+        "family_reminder": result.family_reminder,
+        "therapist_reminder": result.therapist_reminder,
     }
 
 
@@ -852,6 +834,8 @@ def build_recommendation_read(
     review_id: UUID | None = None,
     therapist_notes: str | None = None,
     updated_at=None,
+    adaptation_note: str | None = None,
+    reminder: str | None = None,
 ) -> TrainingRecommendationRead:
     template = pick_template_for_recommendation(
         db,
@@ -882,6 +866,9 @@ def build_recommendation_read(
         updated_at=updated_at,
         task_template=TaskTemplateRead.model_validate(template) if template else None,
         task_sequence=[TaskTemplateRead.model_validate(item) for item in sequence],
+        policy_version=RECOMMENDATION_POLICY["version"],
+        adaptation_note=adaptation_note,
+        reminder=reminder,
     )
 
 
@@ -1007,16 +994,23 @@ def pick_task_sequence_for_recommendation(
     if not candidates:
         return []
 
-    steps = [
-        ("热身", TrainingType.repeat, max(1, content - 1), max(1, autonomy - 1)),
-        ("主练", recommended_type, content, autonomy),
-        ("挑战", recommended_type, min(5, content + 1), min(4, autonomy + 1)),
-    ]
+    steps = []
+    for step in sequence_steps():
+        step_type = TrainingType.repeat if step["type"] == "repeat" else recommended_type
+        steps.append(
+            (
+                step["label"],
+                step_type,
+                max(1, min(5, content + step["content_delta"])),
+                max(1, min(4, autonomy + step["autonomy_delta"])),
+                bool(step.get("not_easier")),
+            )
+        )
     selected: list[TaskTemplate] = []
     used_ids = set()
-    for _label, step_type, step_content, step_autonomy in steps:
+    for _label, step_type, step_content, step_autonomy, not_easier in steps:
         pool = [item for item in candidates if item.task_type == step_type and item.id not in used_ids]
-        if _label == "挑战":
+        if not_easier:
             harder_pool = [
                 item
                 for item in pool
