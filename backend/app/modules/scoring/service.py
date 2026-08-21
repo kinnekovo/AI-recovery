@@ -53,7 +53,13 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
     llm_provider = get_llm_scoring_provider()
     transcript = asr_provider.transcribe(audio.storage_path)
     acoustic = acoustic_provider.analyze(audio.storage_path)
-    process_evaluation = generate_process_evaluation(template, transcript, acoustic)
+    process_evaluation = generate_process_evaluation(
+        template,
+        transcript,
+        acoustic,
+        asr_provider_name=asr_provider.provider_name,
+        acoustic_provider_name=acoustic_provider.provider_name,
+    )
     result = llm_provider.evaluate(template.target_text, transcript, template.task_type.value)
     analysis = AttemptAnalysisResult(
         attempt_id=attempt.id,
@@ -162,9 +168,17 @@ def ensure_process_evaluation(db: Session, attempt: Attempt) -> None:
     analysis = db.scalar(select(AttemptAnalysisResult).where(AttemptAnalysisResult.attempt_id == attempt.id))
     if not audio or not task or not template:
         return
-    transcript = analysis.asr_text if analysis else get_asr_provider().transcribe(audio.storage_path)
-    acoustic = get_acoustic_analysis_provider().analyze(audio.storage_path)
-    process_evaluation = generate_process_evaluation(template, transcript, acoustic)
+    asr_provider = get_asr_provider()
+    acoustic_provider = get_acoustic_analysis_provider()
+    transcript = analysis.asr_text if analysis else asr_provider.transcribe(audio.storage_path)
+    acoustic = acoustic_provider.analyze(audio.storage_path)
+    process_evaluation = generate_process_evaluation(
+        template,
+        transcript,
+        acoustic,
+        asr_provider_name="stored" if analysis else asr_provider.provider_name,
+        acoustic_provider_name=acoustic_provider.provider_name,
+    )
     save_process_evaluation(db, attempt.id, process_evaluation)
     db.commit()
 

@@ -36,6 +36,9 @@ class Settings:
     acoustic_provider: str
     acoustic_api_key: str | None
     acoustic_base_url: str | None
+    ffmpeg_bin: str | None
+    acoustic_dba_calibration_offset: float
+    acoustic_voice_threshold_dbfs: float
     llm_feedback_provider: str
     llm_feedback_api_key: str | None
     llm_feedback_base_url: str | None
@@ -72,6 +75,9 @@ class Settings:
         self.acoustic_provider = os.getenv("ACOUSTIC_PROVIDER", "mock").strip().lower() or "mock"
         self.acoustic_api_key = os.getenv("ACOUSTIC_API_KEY")
         self.acoustic_base_url = os.getenv("ACOUSTIC_BASE_URL")
+        self.ffmpeg_bin = os.getenv("FFMPEG_BIN")
+        self.acoustic_dba_calibration_offset = float(os.getenv("ACOUSTIC_DBA_CALIBRATION_OFFSET", "90"))
+        self.acoustic_voice_threshold_dbfs = float(os.getenv("ACOUSTIC_VOICE_THRESHOLD_DBFS", "-45"))
         self.llm_feedback_provider = os.getenv("LLM_FEEDBACK_PROVIDER", "mock").strip().lower() or "mock"
         self.llm_feedback_api_key = os.getenv("LLM_FEEDBACK_API_KEY")
         self.llm_feedback_base_url = os.getenv("LLM_FEEDBACK_BASE_URL")
