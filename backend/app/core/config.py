@@ -27,6 +27,12 @@ class Settings:
     asr_provider: str
     asr_api_key: str | None
     asr_base_url: str | None
+    tencentcloud_secret_id: str | None
+    tencentcloud_secret_key: str | None
+    tencent_asr_app_id: str | None
+    tencent_asr_region: str
+    tencent_asr_engine_model_type: str
+    tencent_asr_voice_format: str
     acoustic_provider: str
     acoustic_api_key: str | None
     acoustic_base_url: str | None
@@ -57,6 +63,12 @@ class Settings:
         self.asr_provider = os.getenv("ASR_PROVIDER", "mock").strip().lower() or "mock"
         self.asr_api_key = os.getenv("ASR_API_KEY")
         self.asr_base_url = os.getenv("ASR_BASE_URL")
+        self.tencentcloud_secret_id = os.getenv("TENCENTCLOUD_SECRET_ID")
+        self.tencentcloud_secret_key = os.getenv("TENCENTCLOUD_SECRET_KEY")
+        self.tencent_asr_app_id = os.getenv("TENCENT_ASR_APP_ID")
+        self.tencent_asr_region = os.getenv("TENCENT_ASR_REGION", "ap-guangzhou")
+        self.tencent_asr_engine_model_type = os.getenv("TENCENT_ASR_ENGINE_MODEL_TYPE", "16k_zh")
+        self.tencent_asr_voice_format = os.getenv("TENCENT_ASR_VOICE_FORMAT", "ogg-opus")
         self.acoustic_provider = os.getenv("ACOUSTIC_PROVIDER", "mock").strip().lower() or "mock"
         self.acoustic_api_key = os.getenv("ACOUSTIC_API_KEY")
         self.acoustic_base_url = os.getenv("ACOUSTIC_BASE_URL")
