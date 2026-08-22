@@ -20,7 +20,7 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import AppButton from '@/components/common/AppButton.vue'
 import { RecorderService } from '@/services/recorder'
 
-const emit = defineEmits<{ recorded: [blob: Blob] }>()
+const emit = defineEmits<{ recorded: [blob: Blob]; recordingState: [recording: boolean] }>()
 const recorder = new RecorderService()
 const recording = ref(false)
 const audioBlob = ref<Blob | null>(null)
@@ -32,12 +32,14 @@ async function start() {
   audioBlob.value = null
   await recorder.start()
   recording.value = true
+  emit('recordingState', true)
 }
 
 async function stop() {
   audioBlob.value = await recorder.stop()
   audioUrl.value = URL.createObjectURL(audioBlob.value)
   recording.value = false
+  emit('recordingState', false)
   emit('recorded', audioBlob.value)
 }
 

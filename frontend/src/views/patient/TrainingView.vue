@@ -11,6 +11,13 @@
         }}
       </p>
     </div>
+    <AvatarCoachPanel :snapshot="avatar.snapshot" title="今天由数字人陪你练">
+      <template #actions>
+        <button class="app-button secondary avatar-action-button" type="button" :disabled="avatar.isBusy.value" @click="playCoachIntro">
+          {{ avatar.isBusy.value ? '正在说明' : '听数字人说明' }}
+        </button>
+      </template>
+    </AvatarCoachPanel>
     <section v-if="recommendation" class="recommendation-panel training-group-panel" :class="{ completed: isTodayRecommendationCompleted }">
       <div class="recommendation-copy">
         <span class="recommendation-label">
@@ -68,12 +75,15 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import AvatarCoachPanel from '@/components/avatar/AvatarCoachPanel.vue'
 import { trainingApi } from '@/api/training'
+import { useAvatarRuntime } from '@/composables/useAvatarRuntime'
 import type { TodayTraining, TrainingRecommendation } from '@/types/api'
 
 const today = ref<TodayTraining | null>(null)
 const recommendation = ref<TrainingRecommendation | null>(null)
 const error = ref('')
+const avatar = useAvatarRuntime()
 const recommendedTasks = computed(() => recommendation.value?.task_sequence?.length ? recommendation.value.task_sequence : [])
 const isTodayRecommendationCompleted = computed(() => Boolean(today.value?.recommended_completed))
 
@@ -87,6 +97,7 @@ onMounted(async () => {
   } else {
     error.value = recommendationResult.reason instanceof Error ? recommendationResult.reason.message : '暂时无法读取训练建议，可以先手动选择训练。'
   }
+  avatar.encourage(coachIntroText())
 })
 
 function recommendedTrainingLink(item: TrainingRecommendation) {
@@ -108,5 +119,23 @@ function stepLabel(index: number) {
 
 function trainingTypeLabel(type: string) {
   return type === 'scenario' ? '场景表达' : '跟读'
+}
+
+async function playCoachIntro() {
+  await avatar.speak(coachIntroText())
+}
+
+function coachIntroText() {
+  if (isTodayRecommendationCompleted.value) {
+    return '今天的建议任务已经完成了。接下来你可以自己选择想练的内容，也可以休息一下。'
+  }
+  const tasksCount = recommendedTasks.value.length
+  if (recommendation.value && tasksCount > 1) {
+    return `今天我们练 ${tasksCount} 个小任务，从简单到稍难。我会先陪你看清楚要说什么，再等你录音。`
+  }
+  if (recommendation.value) {
+    return `今天建议先练${recommendation.value.headline}。不用着急，我们一次只完成一小步。`
+  }
+  return '暂时没有读取到建议任务，你可以先选择跟读训练或场景表达，我会陪你完成。'
 }
 </script>
