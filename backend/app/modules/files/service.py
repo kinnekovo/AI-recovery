@@ -2,11 +2,14 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.modules.attempts.model import Attempt
 from app.modules.files.model import FileAsset, FileType
-from app.modules.users.model import User
+from app.modules.training.model import SessionTask, TrainingSession
+from app.modules.users.model import FamilyPatientBinding, PatientProfile, User, UserRole
 
 
 FILE_TYPE_DIRS = {
@@ -52,6 +55,32 @@ def save_upload(db: Session, user: User, upload: UploadFile, file_type: FileType
 
 def get_accessible_file(db: Session, user: User, file_id) -> FileAsset:
     asset = db.get(FileAsset, file_id)
-    if not asset or asset.owner_user_id != user.id:
+    if not asset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文件不存在")
-    return asset
+    if asset.owner_user_id == user.id:
+        return asset
+    if asset.file_type == FileType.training_audio and can_access_training_audio(db, user, asset):
+        return asset
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文件不存在")
+
+
+def can_access_training_audio(db: Session, user: User, asset: FileAsset) -> bool:
+    if user.role in {UserRole.therapist, UserRole.admin}:
+        return bool(db.scalar(select(Attempt.id).where(Attempt.audio_file_id == asset.id).limit(1)))
+    if user.role != UserRole.family:
+        return False
+    return bool(
+        db.scalar(
+            select(Attempt.id)
+            .join(SessionTask, SessionTask.id == Attempt.session_task_id)
+            .join(TrainingSession, TrainingSession.id == SessionTask.training_session_id)
+            .join(PatientProfile, PatientProfile.id == TrainingSession.patient_profile_id)
+            .join(FamilyPatientBinding, FamilyPatientBinding.patient_profile_id == PatientProfile.id)
+            .where(
+                Attempt.audio_file_id == asset.id,
+                FamilyPatientBinding.family_user_id == user.id,
+                FamilyPatientBinding.status == "active",
+            )
+            .limit(1)
+        )
+    )

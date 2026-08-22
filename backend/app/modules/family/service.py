@@ -57,6 +57,7 @@ def get_observation_for_family(
             progress_percent=0,
             level_items=[],
             trend_items=[],
+            recent_records=[],
             bound_patients=[item.model_dump(mode="json") for item in bindings],
             selected_patient_user_id=None,
         )

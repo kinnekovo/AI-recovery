@@ -66,6 +66,10 @@ class ProcessTrendPoint(BaseModel):
     attempt_id: UUID
     created_at: datetime
     metrics: dict[str, float]
+    audio_url: str | None = None
+    asr_text: str | None = None
+    target_text: str | None = None
+    process_details: dict | None = None
 
 
 class ProcessTrendRead(BaseModel):

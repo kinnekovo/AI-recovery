@@ -9,6 +9,7 @@ from app.modules.attempts.model import AnalysisStatus, Attempt
 from app.modules.evaluations.model import AttemptEvaluation, EvaluationMetric, EvaluationSource
 from app.modules.evaluations.service import generate_process_evaluation, save_process_evaluation
 from app.modules.files.model import FileAsset
+from app.modules.files.service import public_url
 from app.modules.scoring.model import AttemptAnalysisResult, AttemptScore
 from app.modules.scoring.schema import (
     ProcessMetricsRead,
@@ -213,6 +214,8 @@ def _metric_values(db: Session, attempt_id) -> dict[str, float]:
 
 
 def to_training_feedback_read(db: Session, attempt_id, transcript: str | None) -> TrainingFeedbackRead:
+    attempt = db.get(Attempt, attempt_id)
+    analysis = db.scalar(select(AttemptAnalysisResult).where(AttemptAnalysisResult.attempt_id == attempt_id))
     values = _metric_values(db, attempt_id)
     metrics = ProcessMetricsRead(
         script_accuracy=values.get("script_accuracy", 0.0),
@@ -224,7 +227,9 @@ def to_training_feedback_read(db: Session, attempt_id, transcript: str | None) -
         attempt_id=attempt_id,
         process_metrics=metrics,
         feedback=build_feedback(metrics),
-        transcript=transcript,
+        transcript=transcript or analysis.asr_text if analysis else transcript,
+        audio_url=public_url(attempt.audio_file) if attempt and attempt.audio_file else None,
+        process_details=analysis.semantic_metrics.get("process_monitoring") if analysis else None,
     )
 
 

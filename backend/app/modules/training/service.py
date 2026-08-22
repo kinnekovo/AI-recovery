@@ -26,6 +26,8 @@ from app.modules.training.recommendation_policy import (
 from app.modules.attempts.model import Attempt
 from app.modules.evaluations.model import AttemptEvaluation, EvaluationMetric, EvaluationSource
 from app.modules.evaluations.service import PROCESS_METRIC_NAMES
+from app.modules.files.service import public_url
+from app.modules.scoring.model import AttemptAnalysisResult
 from app.modules.training.schema import (
     FamilyObservationRead,
     Phase3DemoStatusRead,
@@ -447,10 +449,11 @@ def get_family_observation(db: Session) -> FamilyObservationRead:
             family_reminder="患者完成训练后，这里会显示陪伴提醒。",
             current_level_label="等待开始",
             progress_label="暂无趋势",
-            progress_percent=0,
-            level_items=family_empty_level_items(),
-            trend_items=[],
-        )
+        progress_percent=0,
+        level_items=family_empty_level_items(),
+        trend_items=[],
+        recent_records=[],
+    )
     return build_family_observation_for_patient(db, patient.id)
 
 
@@ -484,6 +487,7 @@ def build_family_observation_for_patient(
         progress_percent=family_visuals["progress_percent"],
         level_items=family_visuals["level_items"],
         trend_items=family_visuals["trend_items"],
+        recent_records=family_recent_training_records(db, profile.id),
         bound_patients=bound_patients or [],
         selected_patient_user_id=patient.id,
     )
@@ -654,6 +658,62 @@ def family_trend_items(effects: list[RecommendationEffectRead]) -> list[dict]:
             }
         )
     return items
+
+
+def family_recent_training_records(db: Session, patient_profile_id: UUID, limit: int = 5) -> list[dict]:
+    rows = db.execute(
+        select(Attempt, TrainingSession, SessionTask, AttemptAnalysisResult)
+        .join(SessionTask, SessionTask.id == Attempt.session_task_id)
+        .join(TrainingSession, TrainingSession.id == SessionTask.training_session_id)
+        .outerjoin(AttemptAnalysisResult, AttemptAnalysisResult.attempt_id == Attempt.id)
+        .where(TrainingSession.patient_profile_id == patient_profile_id)
+        .order_by(Attempt.created_at.desc())
+        .limit(limit)
+    ).all()
+    records = []
+    for attempt, session, task, analysis in rows:
+        metrics = attempt_process_metrics(db, attempt.id)
+        records.append(
+            {
+                "attempt_id": str(attempt.id),
+                "created_at": attempt.created_at.isoformat(),
+                "training_type": session.training_type.value,
+                "task_title": task.task_template.title,
+                "target_text": task.task_template.target_text,
+                "audio_url": public_url(attempt.audio_file) if attempt.audio_file else None,
+                "asr_text": analysis.asr_text if analysis else None,
+                "summary": family_record_summary(metrics, attempt.analysis_status.value),
+                "metrics": metrics,
+            }
+        )
+    return records
+
+
+def attempt_process_metrics(db: Session, attempt_id: UUID) -> dict[str, float]:
+    rows = db.execute(
+        select(EvaluationMetric.name, AttemptEvaluation.value)
+        .join(AttemptEvaluation, AttemptEvaluation.metric_id == EvaluationMetric.id)
+        .where(
+            AttemptEvaluation.attempt_id == attempt_id,
+            AttemptEvaluation.evaluation_source == EvaluationSource.mock_ai,
+            EvaluationMetric.name.in_(PROCESS_METRIC_NAMES),
+        )
+    ).all()
+    return {name: round(float(value), 1) for name, value in rows}
+
+
+def family_record_summary(metrics: dict[str, float], status: str) -> str:
+    if status != TrainingStatus.completed.value:
+        return "这次训练还没有完成分析。"
+    accuracy = metrics.get("script_accuracy")
+    errors = metrics.get("error_count")
+    if accuracy is None:
+        return "这次训练已保存，暂时没有完整评分。"
+    if accuracy >= 90 and (errors is None or errors <= 1):
+        return "这次表达比较完整，状态较稳定。"
+    if accuracy >= 70:
+        return "这次能完成主要内容，可以继续陪伴巩固。"
+    return "这次有些地方没有说完整，陪伴时可以先练短句。"
 
 
 def get_phase3_demo_status(db: Session) -> Phase3DemoStatusRead:

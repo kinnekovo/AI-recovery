@@ -22,6 +22,8 @@ from app.modules.evaluations.schema import (
 )
 from app.modules.training.model import SessionTask, TaskTemplate, TrainingSession, TrainingType
 from app.modules.users.model import User
+from app.modules.files.service import public_url
+from app.modules.scoring.model import AttemptAnalysisResult
 
 
 DEFAULT_METRICS = [
@@ -212,15 +214,19 @@ def list_process_trend(db: Session, user: User, limit: int = 20) -> ProcessTrend
     profile = get_patient_profile(db, user)
     rows = db.execute(
         select(
-            Attempt.id,
+            Attempt,
             Attempt.created_at,
             EvaluationMetric.name,
             AttemptEvaluation.value,
+            AttemptAnalysisResult,
+            TaskTemplate.target_text,
         )
         .join(AttemptEvaluation, AttemptEvaluation.attempt_id == Attempt.id)
         .join(EvaluationMetric, EvaluationMetric.id == AttemptEvaluation.metric_id)
         .join(SessionTask, SessionTask.id == Attempt.session_task_id)
+        .join(TaskTemplate, TaskTemplate.id == SessionTask.task_template_id)
         .join(TrainingSession, TrainingSession.id == SessionTask.training_session_id)
+        .outerjoin(AttemptAnalysisResult, AttemptAnalysisResult.attempt_id == Attempt.id)
         .where(
             TrainingSession.patient_profile_id == profile.id,
             AttemptEvaluation.evaluation_source == EvaluationSource.mock_ai,
@@ -229,13 +235,29 @@ def list_process_trend(db: Session, user: User, limit: int = 20) -> ProcessTrend
         .order_by(Attempt.created_at.desc())
     ).all()
     grouped: dict = {}
-    for attempt_id, created_at, metric_name, value in rows:
+    for attempt, created_at, metric_name, value, analysis, target_text in rows:
+        attempt_id = attempt.id
         if attempt_id not in grouped:
-            grouped[attempt_id] = {"created_at": created_at, "metrics": {}}
+            grouped[attempt_id] = {
+                "created_at": created_at,
+                "metrics": {},
+                "audio_url": public_url(attempt.audio_file) if attempt.audio_file else None,
+                "asr_text": analysis.asr_text if analysis else None,
+                "target_text": target_text,
+                "process_details": analysis.semantic_metrics.get("process_monitoring") if analysis else None,
+            }
         grouped[attempt_id]["metrics"][metric_name] = float(value)
 
     points = [
-        ProcessTrendPoint(attempt_id=attempt_id, created_at=data["created_at"], metrics=data["metrics"])
+        ProcessTrendPoint(
+            attempt_id=attempt_id,
+            created_at=data["created_at"],
+            metrics=data["metrics"],
+            audio_url=data["audio_url"],
+            asr_text=data["asr_text"],
+            target_text=data["target_text"],
+            process_details=data["process_details"],
+        )
         for attempt_id, data in grouped.items()
         if PROCESS_METRIC_NAMES.issubset(data["metrics"].keys())
     ]

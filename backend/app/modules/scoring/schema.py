@@ -44,3 +44,5 @@ class TrainingFeedbackRead(BaseModel):
     process_metrics: ProcessMetricsRead
     feedback: list[TrainingFeedbackItem]
     transcript: str | None = None
+    audio_url: str | None = None
+    process_details: dict | None = None

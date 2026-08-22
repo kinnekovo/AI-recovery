@@ -19,7 +19,8 @@ from app.modules.assessment.schema import (
 from app.modules.assessment.service import calculate_change, to_read
 from app.modules.attempts.model import AnalysisStatus, Attempt
 from app.modules.evaluations.model import AttemptEvaluation, EvaluationMetric, EvaluationSource
-from app.modules.scoring.model import AttemptScore
+from app.modules.files.service import public_url
+from app.modules.scoring.model import AttemptAnalysisResult, AttemptScore
 from app.modules.therapist.schema import (
     RecommendationNoteRead,
     TherapistPatientRead,
@@ -131,10 +132,11 @@ def list_patient_training_records(
 ) -> list[TherapistTrainingRecordRead]:
     profile = get_patient_profile_by_user_id(db, patient_user_id)
     rows = db.execute(
-        select(Attempt, TrainingSession, SessionTask, AttemptScore)
+        select(Attempt, TrainingSession, SessionTask, AttemptScore, AttemptAnalysisResult)
         .join(SessionTask, SessionTask.id == Attempt.session_task_id)
         .join(TrainingSession, TrainingSession.id == SessionTask.training_session_id)
         .outerjoin(AttemptScore, AttemptScore.attempt_id == Attempt.id)
+        .outerjoin(AttemptAnalysisResult, AttemptAnalysisResult.attempt_id == Attempt.id)
         .where(TrainingSession.patient_profile_id == profile.id)
         .order_by(Attempt.created_at.desc())
         .limit(limit)
@@ -154,11 +156,14 @@ def list_patient_training_records(
             fluency_score=score.fluency_score if score else None,
             loudness_score=score.loudness_score if score else None,
             process_metrics=process_metrics_for_attempt(db, attempt.id),
+            process_details=analysis.semantic_metrics.get("process_monitoring") if analysis else None,
+            audio_url=public_url(attempt.audio_file) if attempt.audio_file else None,
+            asr_text=analysis.asr_text if analysis else None,
             feedback_summary=score.suggestion if score else attempt_status_summary(attempt),
             recommendation_source=session.recommendation_source,
             recommendation_matched=session.recommendation_matched,
         )
-        for attempt, session, task, score in rows
+        for attempt, session, task, score, analysis in rows
     ]
 
 
@@ -322,7 +327,7 @@ def create_patient_assessment(
 
     refresh_ability_profile(db, profile.id)
     db.refresh(assessment)
-    return to_read(assessment)
+    return enrich_assessment_read(db, to_read(assessment))
 
 
 def list_patient_assessments(
@@ -343,7 +348,7 @@ def list_patient_assessments(
         stmt = stmt.where(AssessmentSession.assessment_type == assessment_type)
     if review_status:
         stmt = stmt.where(AssessmentSession.review_status == review_status.value)
-    return [to_read(item) for item in db.scalars(stmt)]
+    return [enrich_assessment_read(db, to_read(item)) for item in db.scalars(stmt)]
 
 
 def review_patient_assessment(
@@ -384,8 +389,8 @@ def compare_patient_assessments(
     current = get_owned_assessment(db, patient_user_id, current_id) if current_id else history[-1]
     metric_names = sorted(LONG_TERM_METRIC_NAMES | PROCESS_METRIC_NAMES | set(baseline.metrics.keys()) | set(current.metrics.keys()))
     return AssessmentCompareRead(
-        baseline_assessment=to_read(baseline),
-        current_assessment=to_read(current),
+        baseline_assessment=enrich_assessment_read(db, to_read(baseline)),
+        current_assessment=enrich_assessment_read(db, to_read(current)),
         metrics={
             name: MetricComparison(
                 baseline=baseline.metrics.get(name),
@@ -414,6 +419,24 @@ def get_owned_assessment(db: Session, patient_user_id: UUID, assessment_id: UUID
     if not assessment or assessment.patient_profile_id != profile.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="阶段性评估不存在")
     return assessment
+
+
+def enrich_assessment_read(db: Session, assessment):
+    if not assessment.source_attempt_id:
+        return assessment
+    attempt = db.get(Attempt, assessment.source_attempt_id)
+    if not attempt:
+        return assessment
+    task = db.get(SessionTask, attempt.session_task_id)
+    analysis = db.scalar(select(AttemptAnalysisResult).where(AttemptAnalysisResult.attempt_id == attempt.id))
+    return assessment.model_copy(
+        update={
+            "source_audio_url": public_url(attempt.audio_file) if attempt.audio_file else None,
+            "source_asr_text": analysis.asr_text if analysis else None,
+            "source_target_text": task.task_template.target_text if task and task.task_template else None,
+            "source_process_details": analysis.semantic_metrics.get("process_monitoring") if analysis else None,
+        }
+    )
 
 
 def get_patient_profile_by_user_id(db: Session, patient_user_id: UUID) -> PatientProfile:

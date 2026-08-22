@@ -31,6 +31,9 @@ class TherapistTrainingRecordRead(BaseModel):
     fluency_score: int | None = None
     loudness_score: int | None = None
     process_metrics: dict[str, float]
+    process_details: dict | None = None
+    audio_url: str | None = None
+    asr_text: str | None = None
     feedback_summary: str
     recommendation_source: str | None = None
     recommendation_matched: bool = False

@@ -183,6 +183,7 @@ class FamilyObservationRead(BaseModel):
     progress_percent: int = 0
     level_items: list[dict] = []
     trend_items: list[dict] = []
+    recent_records: list[dict] = []
     bound_patients: list[dict] = []
     selected_patient_user_id: UUID | None = None
 

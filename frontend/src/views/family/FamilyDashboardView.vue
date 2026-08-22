@@ -90,6 +90,26 @@
         <p v-else>还需要完成几次训练，系统才能画出稳定趋势。</p>
       </article>
 
+      <article class="family-wide-panel family-recordings-panel">
+        <div class="panel-heading">
+          <div>
+            <span>训练录音</span>
+            <h2>最近几次练习可以回听</h2>
+          </div>
+        </div>
+        <div v-if="observation.recent_records.length" class="family-recording-list">
+          <section v-for="record in observation.recent_records" :key="record.attempt_id" class="family-recording-row">
+            <div>
+              <strong>{{ record.task_title }}</strong>
+              <p>{{ record.summary }}</p>
+              <small>{{ dateTimeLabel(record.created_at) }} · {{ trainingTypeLabel(record.training_type) }}</small>
+            </div>
+            <AudioPlayback :src="record.audio_url" compact />
+          </section>
+        </div>
+        <p v-else>患者完成训练后，这里会保存最近几次录音，方便家属陪伴回顾。</p>
+      </article>
+
       <article class="family-wide-panel family-companion-panel">
         <div>
           <span>{{ observation.recommendation_source === 'therapist' ? '治疗师建议' : '系统建议' }}</span>
@@ -129,6 +149,7 @@ import {
   ShieldCheck,
   Volume2
 } from 'lucide-vue-next'
+import AudioPlayback from '@/components/common/AudioPlayback.vue'
 import { familyApi } from '@/api/family'
 import type { FamilyBoundPatient, FamilyObservation } from '@/types/api'
 
@@ -175,5 +196,13 @@ function iconFor(name: string) {
     'volume-2': Volume2
   }
   return icons[name as keyof typeof icons] || MessageCircle
+}
+
+function dateTimeLabel(value: string) {
+  return new Date(value).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+function trainingTypeLabel(value: string) {
+  return value === 'scenario' ? '场景表达' : '跟读训练'
 }
 </script>

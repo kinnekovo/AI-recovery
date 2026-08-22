@@ -131,6 +131,9 @@ export interface TherapistTrainingRecord {
   fluency_score: number | null
   loudness_score: number | null
   process_metrics: Partial<ProcessMetrics>
+  process_details: ProcessDetails | null
+  audio_url: string | null
+  asr_text: string | null
   feedback_summary: string
   recommendation_source: string | null
   recommendation_matched: boolean
@@ -240,6 +243,7 @@ export interface FamilyObservation {
   progress_percent: number
   level_items: FamilyLevelItem[]
   trend_items: FamilyTrendItem[]
+  recent_records: FamilyTrainingRecord[]
   bound_patients: FamilyBoundPatient[]
   selected_patient_user_id: string | null
 }
@@ -269,6 +273,18 @@ export interface FamilyTrendItem {
   value: number
   summary: string
   created_at: string
+}
+
+export interface FamilyTrainingRecord {
+  attempt_id: string
+  created_at: string
+  training_type: 'repeat' | 'scenario'
+  task_title: string
+  target_text: string
+  audio_url: string | null
+  asr_text: string | null
+  summary: string
+  metrics: Partial<ProcessMetrics>
 }
 
 export interface Phase3DemoStatus {
@@ -313,6 +329,26 @@ export interface TrainingFeedbackResult {
   process_metrics: ProcessMetrics
   feedback: TrainingFeedbackItem[]
   transcript?: string | null
+  audio_url?: string | null
+  process_details?: ProcessDetails | null
+}
+
+export interface ProcessDetails {
+  correct_script_word_rate?: number
+  correct_script_word_count?: number
+  total_script_word_count?: number
+  valid_word_count?: number
+  speaking_duration_seconds?: number
+  error_events?: Record<string, number>
+  script_mismatch_events?: {
+    substitution?: number
+    addition?: number
+    omission?: number
+  }
+  reference_ranges?: Record<string, string>
+  input_sources?: Record<string, string>
+  limitations?: string[]
+  [key: string]: unknown
 }
 
 export interface LatestReport {
@@ -382,6 +418,10 @@ export interface ProcessTrendPoint {
   attempt_id: string
   created_at: string
   metrics: ProcessMetrics
+  audio_url: string | null
+  asr_text: string | null
+  target_text: string | null
+  process_details: ProcessDetails | null
 }
 
 export interface ProcessTrend {
@@ -423,6 +463,10 @@ export interface AssessmentSession {
   metrics: Record<string, number>
   notes: string | null
   therapist_notes: string | null
+  source_audio_url: string | null
+  source_asr_text: string | null
+  source_target_text: string | null
+  source_process_details: ProcessDetails | null
   created_at: string
 }
 

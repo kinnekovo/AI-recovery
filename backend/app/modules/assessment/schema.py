@@ -71,6 +71,10 @@ class AssessmentRead(BaseModel):
     metrics: dict[str, float]
     notes: str | None = None
     therapist_notes: str | None = None
+    source_audio_url: str | None = None
+    source_asr_text: str | None = None
+    source_target_text: str | None = None
+    source_process_details: dict | None = None
     created_at: datetime
 
 

@@ -101,6 +101,15 @@
             <p>{{ autoSummary }}</p>
           </div>
 
+          <div v-if="selectedAssessment.source_audio_url || selectedAssessment.source_asr_text" class="source-evidence-box">
+            <div>
+              <strong>源训练依据</strong>
+              <p v-if="selectedAssessment.source_target_text">目标句：{{ selectedAssessment.source_target_text }}</p>
+              <p v-if="selectedAssessment.source_asr_text">ASR 转写：{{ selectedAssessment.source_asr_text }}</p>
+            </div>
+            <AudioPlayback :src="selectedAssessment.source_audio_url" />
+          </div>
+
           <div class="metric-summary-grid">
             <div v-for="metric in metricCards" :key="metric.key" class="metric-summary-card" :class="metric.tone">
               <span>{{ metric.label }}</span>
@@ -112,6 +121,15 @@
           <div class="system-note-box">
             <strong>系统说明</strong>
             <p>{{ systemNotes || '系统未提供额外说明。' }}</p>
+          </div>
+
+          <div v-if="processEvidence.length || providerLine" class="system-note-box process-evidence-box">
+            <strong>过程性监控依据</strong>
+            <div v-if="processEvidence.length" class="evidence-chip-row">
+              <span v-for="item in processEvidence" :key="item">{{ item }}</span>
+            </div>
+            <p v-if="providerLine">{{ providerLine }}</p>
+            <p v-if="limitationLine">{{ limitationLine }}</p>
           </div>
 
           <details class="adjust-panel">
@@ -197,6 +215,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import AudioPlayback from '@/components/common/AudioPlayback.vue'
 import { therapistApi } from '@/api/therapist'
 import type {
   AssessmentCompare,
@@ -258,6 +277,33 @@ const metricCards = computed(() => {
     tone: metricTone(key, value),
     brief: metricBrief(key, value)
   }))
+})
+
+const processEvidence = computed(() => {
+  const details = selectedAssessment.value?.source_process_details
+  const mismatch = details?.script_mismatch_events || {}
+  const errors = details?.error_events || {}
+  const items = []
+  if (details?.correct_script_word_count != null && details?.total_script_word_count != null) {
+    items.push(`正确生成 ${details.correct_script_word_count}/${details.total_script_word_count} 字`)
+  }
+  if ((mismatch.omission || 0) > 0) items.push(`遗漏 ${mismatch.omission} 处`)
+  if ((mismatch.addition || 0) > 0) items.push(`添加 ${mismatch.addition} 处`)
+  if ((mismatch.substitution || 0) > 0) items.push(`替换 ${mismatch.substitution} 处`)
+  if ((errors.long_pause_over_3s || 0) > 0) items.push(`长停顿 ${errors.long_pause_over_3s} 次`)
+  if ((errors.filler || 0) > 0) items.push(`插入语 ${errors.filler} 次`)
+  return items
+})
+
+const providerLine = computed(() => {
+  const sources = selectedAssessment.value?.source_process_details?.input_sources
+  if (!sources) return ''
+  return `来源：ASR ${sources.asr_provider || 'unknown'}，声学分析 ${sources.acoustic_provider || 'unknown'}。`
+})
+
+const limitationLine = computed(() => {
+  const limitations = selectedAssessment.value?.source_process_details?.limitations
+  return limitations?.length ? limitations.join('；') : ''
 })
 
 const autoSummary = computed(() => {

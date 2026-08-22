@@ -6,7 +6,14 @@
       <p>以下是本次训练的过程性指标和练习建议，不代表临床诊断。</p>
     </div>
     <ProcessFeedbackPanel v-if="feedback" :result="feedback" />
-    <div v-else class="empty-state">
+    <section v-if="feedback?.audio_url" class="recording-playback-panel patient-playback">
+      <div>
+        <strong>本次录音已保存</strong>
+        <p>你可以先听一遍，再对照下面的反馈看下一次怎么练。</p>
+      </div>
+      <AudioPlayback :src="feedback.audio_url" />
+    </section>
+    <div v-if="!feedback" class="empty-state">
       <p>还没有训练反馈。</p>
       <RouterLink to="/training">开始一次训练</RouterLink>
     </div>
@@ -23,6 +30,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import AudioPlayback from '@/components/common/AudioPlayback.vue'
 import ProcessFeedbackPanel from '@/components/report/ProcessFeedbackPanel.vue'
 import { useTrainingStore } from '@/stores/training'
 

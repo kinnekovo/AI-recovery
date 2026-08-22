@@ -67,7 +67,9 @@
                   <span>{{ dateTimeLabel(record.created_at) }}</span>
                 </div>
                 <p>{{ record.target_text }}</p>
+                <small v-if="record.asr_text">ASR 转写：{{ record.asr_text }}</small>
                 <small>{{ record.feedback_summary }}</small>
+                <AudioPlayback :src="record.audio_url" compact />
                 <div class="record-tags">
                   <span>{{ trainingTypeLabel(record.training_type) }}</span>
                   <span>{{ analysisStatusLabel(record.analysis_status) }}</span>
@@ -258,6 +260,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import AudioPlayback from '@/components/common/AudioPlayback.vue'
 import { therapistApi } from '@/api/therapist'
 import type {
   AbilityProfile,

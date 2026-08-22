@@ -2165,6 +2165,155 @@ textarea {
   line-height: 1.7;
 }
 
+.audio-playback {
+  display: grid;
+  min-width: 220px;
+  max-width: 360px;
+  align-items: center;
+}
+
+.audio-playback audio {
+  width: 100%;
+  height: 40px;
+}
+
+.audio-playback.compact {
+  min-width: 180px;
+  max-width: 280px;
+}
+
+.audio-playback span {
+  color: #66756f;
+  font-size: 0.92rem;
+}
+
+.audio-review,
+.recording-playback-panel,
+.source-evidence-box,
+.process-evidence-box {
+  border-radius: 8px;
+  background: #f7faf8;
+}
+
+.audio-review {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 8px;
+  width: 100%;
+}
+
+.audio-review span {
+  color: #66756f;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.audio-review audio {
+  width: 100%;
+}
+
+.recording-playback-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 360px);
+  gap: 18px;
+  align-items: center;
+  padding: 20px;
+}
+
+.recording-playback-panel p {
+  margin: 6px 0 0;
+  color: #66756f;
+  line-height: 1.6;
+}
+
+.patient-explain-panel {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 18px;
+  padding: 18px;
+  border-radius: 8px;
+  background: #f7faf8;
+}
+
+.patient-explain-panel h3 {
+  margin: 8px 0 6px;
+}
+
+.patient-explain-panel p {
+  margin: 0;
+  color: #40524b;
+  line-height: 1.7;
+}
+
+.simple-mismatch-row,
+.evidence-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.simple-mismatch-row span,
+.evidence-chip-row span {
+  border-radius: 999px;
+  background: #e8f1ff;
+  color: #1f4fb8;
+  padding: 6px 10px;
+  font-weight: 800;
+  font-size: 0.88rem;
+}
+
+.recording-list,
+.family-recording-list {
+  display: grid;
+  gap: 12px;
+}
+
+.recording-row,
+.family-recording-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 280px);
+  gap: 16px;
+  align-items: center;
+  border-radius: 8px;
+  background: #f7faf8;
+  padding: 16px;
+}
+
+.recording-row p,
+.family-recording-row p {
+  margin: 6px 0;
+  color: #40524b;
+  line-height: 1.6;
+}
+
+.recording-row small,
+.family-recording-row small {
+  display: block;
+  color: #66756f;
+  line-height: 1.6;
+}
+
+.source-evidence-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 360px);
+  gap: 16px;
+  align-items: center;
+  padding: 16px;
+}
+
+.source-evidence-box p,
+.process-evidence-box p {
+  margin: 6px 0 0;
+  color: #40524b;
+  line-height: 1.7;
+}
+
+.process-evidence-box {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+
 .metric-summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2363,8 +2512,18 @@ textarea {
     .family-level-grid,
   .family-trend-track,
   .template-form-grid,
-  .assessment-history-row {
+  .assessment-history-row,
+  .recording-playback-panel,
+  .recording-row,
+  .family-recording-row,
+  .source-evidence-box {
     grid-template-columns: 1fr;
+  }
+
+  .audio-playback,
+  .audio-playback.compact {
+    min-width: 0;
+    max-width: none;
   }
 
   .family-progress-orb,

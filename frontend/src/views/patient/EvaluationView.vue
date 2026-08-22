@@ -45,6 +45,28 @@
         <p>{{ adviceText }}</p>
       </div>
     </section>
+
+    <section class="chart-panel patient-recordings-panel">
+      <div class="panel-heading">
+        <div>
+          <h2>最近录音</h2>
+          <p>每次训练录音都会保存，你可以回听自己的变化。</p>
+        </div>
+      </div>
+      <div v-if="recentRecordings.length" class="recording-list patient-recording-list">
+        <article v-for="item in recentRecordings" :key="item.attempt_id" class="recording-row">
+          <div>
+            <strong>{{ dateTimeLabel(item.created_at) }}</strong>
+            <p>{{ patientRecordSummary(item) }}</p>
+            <small v-if="item.asr_text">系统听到：{{ item.asr_text }}</small>
+          </div>
+          <AudioPlayback :src="item.audio_url" compact />
+        </article>
+      </div>
+      <div v-else class="empty-state">
+        <p>完成训练并生成反馈后，这里会出现可回听的录音。</p>
+      </div>
+    </section>
   </section>
 </template>
 
@@ -54,6 +76,7 @@ import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/compon
 import { init, use, type ECharts } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import AudioPlayback from '@/components/common/AudioPlayback.vue'
 import { evaluationsApi } from '@/api/evaluations'
 import type { ProcessMetrics, ProcessTrend } from '@/types/api'
 
@@ -66,6 +89,7 @@ let trendChart: ECharts | null = null
 use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
 const latestMetrics = computed(() => trend.value.items[trend.value.items.length - 1]?.metrics)
+const recentRecordings = computed(() => [...trend.value.items].reverse().slice(0, 5))
 
 const latestMetricCards = computed(() => {
   const metrics = latestMetrics.value
@@ -189,5 +213,16 @@ function loudnessLabel(value: number) {
 
 function formatNumber(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1)
+}
+
+function patientRecordSummary(item: ProcessTrend['items'][number]) {
+  const metrics = item.metrics
+  if (metrics.script_accuracy >= 90 && metrics.error_count <= 1) return '这次表达比较完整，状态不错。'
+  if (metrics.script_accuracy >= 70) return '这次说出了主要内容，可以继续巩固。'
+  return '这次有些内容没说完整，下一次慢一点来。'
+}
+
+function dateTimeLabel(value: string) {
+  return new Date(value).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 </script>
