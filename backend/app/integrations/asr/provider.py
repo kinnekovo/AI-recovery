@@ -2,6 +2,8 @@ import base64
 import json
 from dataclasses import dataclass
 from pathlib import Path
+import subprocess
+import tempfile
 from uuid import uuid4
 
 from app.core.config import get_settings
@@ -55,6 +57,7 @@ class TencentASRProvider(ASRProvider):
         self.region = settings.tencent_asr_region
         self.engine_model_type = settings.tencent_asr_engine_model_type
         self.voice_format = settings.tencent_asr_voice_format
+        self.ffmpeg_bin = settings.ffmpeg_bin or self._bundled_ffmpeg_bin()
 
     def _validate_config(self) -> None:
         missing = []
@@ -67,51 +70,99 @@ class TencentASRProvider(ASRProvider):
 
     def transcribe(self, audio_path: str) -> str:
         self._validate_config()
-
-        audio_file = Path(audio_path)
-        audio_bytes = audio_file.read_bytes()
-        if len(audio_bytes) > self.max_sentence_audio_bytes:
-            raise ASRProviderError("payload_too_large", "腾讯云一句话识别仅适合 60 秒以内、3MB 以内音频，请缩短训练录音或改用录音文件识别。")
-
+        prepared_audio: Path | None = None
         try:
-            from tencentcloud.asr.v20190614 import asr_client, models
-            from tencentcloud.common import credential
-            from tencentcloud.common.profile.client_profile import ClientProfile
-            from tencentcloud.common.profile.http_profile import HttpProfile
-        except ImportError as exc:
-            raise ASRProviderError("dependency_missing", "缺少腾讯云 ASR SDK，请先在 backend 环境安装 requirements.txt。") from exc
+            prepared_audio, voice_format = self._prepare_audio(audio_path)
+            audio_bytes = prepared_audio.read_bytes()
+            if len(audio_bytes) > self.max_sentence_audio_bytes:
+                raise ASRProviderError("payload_too_large", "腾讯云一句话识别仅适合 60 秒以内、3MB 以内音频，请缩短训练录音或改用录音文件识别。")
 
-        cred = credential.Credential(self.secret_id, self.secret_key)
-        http_profile = HttpProfile()
-        http_profile.endpoint = "asr.tencentcloudapi.com"
-        http_profile.reqTimeout = get_settings().asr_timeout_seconds
-        client_profile = ClientProfile()
-        client_profile.httpProfile = http_profile
-        client = asr_client.AsrClient(cred, self.region, client_profile)
+            try:
+                from tencentcloud.asr.v20190614 import asr_client, models
+                from tencentcloud.common import credential
+                from tencentcloud.common.profile.client_profile import ClientProfile
+                from tencentcloud.common.profile.http_profile import HttpProfile
+            except ImportError as exc:
+                raise ASRProviderError("dependency_missing", "缺少腾讯云 ASR SDK，请先在 backend 环境安装 requirements.txt。") from exc
 
-        request = models.SentenceRecognitionRequest()
-        request.from_json_string(
-            json.dumps(
-                {
-                    "ProjectId": 0,
-                    "SubServiceType": 2,
-                    "EngSerViceType": self.engine_model_type,
-                    "SourceType": 1,
-                    "VoiceFormat": self.voice_format,
-                    "UsrAudioKey": f"training-{uuid4()}",
-                    "Data": base64.b64encode(audio_bytes).decode("utf-8"),
-                    "DataLen": len(audio_bytes),
-                }
+            cred = credential.Credential(self.secret_id, self.secret_key)
+            http_profile = HttpProfile()
+            http_profile.endpoint = "asr.tencentcloudapi.com"
+            http_profile.reqTimeout = get_settings().asr_timeout_seconds
+            client_profile = ClientProfile()
+            client_profile.httpProfile = http_profile
+            client = asr_client.AsrClient(cred, self.region, client_profile)
+
+            request = models.SentenceRecognitionRequest()
+            request.from_json_string(
+                json.dumps(
+                    {
+                        "ProjectId": 0,
+                        "SubServiceType": 2,
+                        "EngSerViceType": self.engine_model_type,
+                        "SourceType": 1,
+                        "VoiceFormat": voice_format,
+                        "UsrAudioKey": f"training-{uuid4()}",
+                        "Data": base64.b64encode(audio_bytes).decode("utf-8"),
+                        "DataLen": len(audio_bytes),
+                    }
+                )
             )
-        )
+            try:
+                response = client.SentenceRecognition(request)
+            except Exception as exc:
+                raise ASRProviderError("provider_error", provider_error_summary("腾讯云 ASR 调用失败", exc)) from exc
+            result = getattr(response, "Result", "") or ""
+            if not result.strip():
+                raise ASRProviderError("empty_result", "腾讯云 ASR 未返回有效转写文本。")
+            return result.strip()
+        finally:
+            if prepared_audio is not None:
+                prepared_audio.unlink(missing_ok=True)
+
+    def _prepare_audio(self, audio_path: str) -> tuple[Path, str]:
+        if not self.ffmpeg_bin:
+            raise ASRProviderError("transcode_dependency_missing", "未找到 ffmpeg，无法将浏览器录音转换为腾讯 ASR 支持的 WAV 格式。")
+
+        source = Path(audio_path)
+        if not source.is_file():
+            raise ASRProviderError("audio_missing", "待识别的录音文件不存在。")
+
+        with tempfile.NamedTemporaryFile(prefix="tencent-asr-", suffix=".wav", delete=False) as temp_file:
+            destination = Path(temp_file.name)
+        command = [
+            self.ffmpeg_bin,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(source),
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-c:a",
+            "pcm_s16le",
+            str(destination),
+        ]
         try:
-            response = client.SentenceRecognition(request)
-        except Exception as exc:
-            raise ASRProviderError("provider_error", provider_error_summary("腾讯云 ASR 调用失败", exc)) from exc
-        result = getattr(response, "Result", "") or ""
-        if not result.strip():
-            raise ASRProviderError("empty_result", "腾讯云 ASR 未返回有效转写文本。")
-        return result.strip()
+            subprocess.run(command, check=True, capture_output=True)
+            if destination.stat().st_size == 0:
+                raise RuntimeError("转换后的音频为空")
+        except (OSError, subprocess.CalledProcessError, RuntimeError) as exc:
+            destination.unlink(missing_ok=True)
+            raise ASRProviderError("audio_transcode_failed", "录音格式转换失败，请重新录制后再试。") from exc
+        return destination, "wav"
+
+    @staticmethod
+    def _bundled_ffmpeg_bin() -> str | None:
+        try:
+            import imageio_ffmpeg
+        except ImportError:
+            return None
+        return imageio_ffmpeg.get_ffmpeg_exe()
 
 
 def get_asr_provider() -> ASRProvider:
@@ -132,6 +183,16 @@ def transcribe_with_fallback(audio_path: str) -> ASRTranscriptionResult:
             requested_provider=requested_provider,
         )
     except ASRProviderError as exc:
+        if requested_provider == "tencent":
+            log_event(
+                "error",
+                "provider",
+                "asr_failed",
+                requested_provider=requested_provider,
+                error_code=exc.code,
+                error_message=exc.message,
+            )
+            raise
         log_event(
             "warning",
             "provider",

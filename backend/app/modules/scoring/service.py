@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.core.observability import log_event
 from app.core.redaction import provider_error_summary
 from app.integrations.acoustic_analysis.provider import get_acoustic_analysis_provider
-from app.integrations.asr.provider import transcribe_with_fallback
+from app.integrations.asr.provider import ASRProviderError, transcribe_with_fallback
 from app.integrations.llm.provider import get_llm_scoring_provider
 from app.modules.attempts.model import AnalysisStatus, Attempt
 from app.modules.evaluations.model import AttemptEvaluation, EvaluationMetric, EvaluationSource
@@ -53,7 +53,21 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
     ensure_default_metrics(db)
     acoustic_provider = get_acoustic_analysis_provider()
     llm_provider = get_llm_scoring_provider()
-    asr_result = transcribe_with_fallback(audio.storage_path)
+    try:
+        asr_result = transcribe_with_fallback(audio.storage_path)
+    except ASRProviderError as exc:
+        attempt.analysis_status = AnalysisStatus.failed
+        db.commit()
+        log_event(
+            "error",
+            "analysis",
+            "asr_analysis_failed",
+            attempt_id=str(attempt.id),
+            file_id=str(audio.id),
+            error_code=exc.code,
+            error_message=exc.message,
+        )
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"语音识别失败：{exc.message}") from exc
     transcript = asr_result.text
     try:
         acoustic = acoustic_provider.analyze(audio.storage_path)
@@ -195,7 +209,19 @@ def ensure_process_evaluation(db: Session, attempt: Attempt) -> None:
     if not audio or not task or not template:
         return
     acoustic_provider = get_acoustic_analysis_provider()
-    asr_result = None if analysis else transcribe_with_fallback(audio.storage_path)
+    try:
+        asr_result = None if analysis else transcribe_with_fallback(audio.storage_path)
+    except ASRProviderError as exc:
+        log_event(
+            "error",
+            "analysis",
+            "process_evaluation_asr_failed",
+            attempt_id=str(attempt.id),
+            file_id=str(audio.id),
+            error_code=exc.code,
+            error_message=exc.message,
+        )
+        return
     transcript = analysis.asr_text if analysis else asr_result.text
     try:
         acoustic = acoustic_provider.analyze(audio.storage_path)
