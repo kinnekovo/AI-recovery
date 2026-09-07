@@ -1,7 +1,7 @@
 import enum
 import uuid
 
-from sqlalchemy import Enum, ForeignKey, String
+from sqlalchemy import Enum, ForeignKey, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -64,6 +64,20 @@ class FamilyPatientBinding(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
 
     family_user: Mapped[User] = relationship("User", foreign_keys=[family_user_id])
+    patient_profile: Mapped[PatientProfile] = relationship("PatientProfile")
+
+
+class TherapistPatientAssignment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    __tablename__ = "therapist_patient_assignments"
+    __table_args__ = (UniqueConstraint("therapist_user_id", "patient_profile_id", name="uq_therapist_patient_assignment"),)
+
+    therapist_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), index=True, nullable=False)
+    patient_profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("patient_profiles.id"), index=True, nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
+
+    therapist_user: Mapped[User] = relationship("User", foreign_keys=[therapist_user_id])
     patient_profile: Mapped[PatientProfile] = relationship("PatientProfile")
 
 

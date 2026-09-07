@@ -29,5 +29,13 @@ export const agentsApi = {
   },
   generateWelcome(agentId: string) {
     return request<{ agent: Agent; audio_url: string }>(http.post(`/agents/${agentId}/welcome-audio`))
+  },
+  revokeConsent(agentId: string, consentType: 'image' | 'voice') {
+    return request<{ id: string }>(
+      http.post('/consents/revoke', {
+        agent_id: agentId,
+        consent_type: consentType
+      })
+    )
   }
 }

@@ -11,5 +11,11 @@ export const familyApi = {
         params: patientUserId ? { patient_user_id: patientUserId } : {}
       })
     )
+  },
+  confirmBinding(bindingId: string) {
+    return request<FamilyBoundPatient>(http.post(`/family/bindings/${bindingId}/confirm`))
+  },
+  revokeBinding(bindingId: string) {
+    return request<FamilyBoundPatient>(http.post(`/family/bindings/${bindingId}/revoke`))
   }
 }

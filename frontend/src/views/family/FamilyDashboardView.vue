@@ -7,19 +7,24 @@
     </div>
 
     <section v-if="boundPatients.length" class="family-bound-switcher" aria-label="绑定患者">
-      <button
+      <article
         v-for="patient in boundPatients"
         :key="patient.patient_user_id"
-        type="button"
-        :class="{ active: patient.patient_user_id === selectedPatientId }"
-        @click="selectPatient(patient.patient_user_id)"
+        class="family-binding-card"
+        :class="{ active: patient.patient_user_id === selectedPatientId, pending: patient.status === 'pending' }"
       >
         <strong>{{ patient.patient_username }}</strong>
-        <span>{{ patient.relationship_label }}</span>
-      </button>
+        <span>{{ patient.relationship_label }} · {{ bindingStatusLabel(patient.status) }}</span>
+        <div class="family-binding-actions">
+          <button v-if="patient.status === 'active'" type="button" @click="selectPatient(patient.patient_user_id)">查看</button>
+          <button v-if="patient.status === 'pending'" type="button" @click="confirmBinding(patient.binding_id)">确认绑定</button>
+          <button v-if="patient.status === 'active'" type="button" @click="revokeBinding(patient.binding_id)">解绑</button>
+        </div>
+      </article>
     </section>
 
     <p v-if="loading" class="success-text">正在加载陪伴观察。</p>
+    <p v-if="bindingMessage" class="success-text">{{ bindingMessage }}</p>
     <p v-if="error" class="error-text">{{ error }}</p>
 
     <section v-if="observation" class="family-visual-grid">
@@ -41,11 +46,11 @@
         <div>
           <span>训练坚持</span>
           <strong>{{ observation.training_count }} 次</strong>
-          <p>其中 {{ observation.completed_recommended_sessions }} 次完成了建议训练。</p>
+          <p>{{ observation.adherence_summary }}</p>
         </div>
         <div class="family-keep-icon">
           <CalendarCheck aria-hidden="true" :size="34" />
-          <span>{{ observation.progress_label }}</span>
+          <span>{{ lastTrainingLabel }}</span>
         </div>
       </article>
 
@@ -152,14 +157,20 @@ import {
 import AudioPlayback from '@/components/common/AudioPlayback.vue'
 import { familyApi } from '@/api/family'
 import type { FamilyBoundPatient, FamilyObservation } from '@/types/api'
+import { toUserMessage } from '@/utils/errors'
 
 const observation = ref<FamilyObservation | null>(null)
 const boundPatients = ref<FamilyBoundPatient[]>([])
 const selectedPatientId = ref<string | null>(null)
 const loading = ref(true)
 const error = ref('')
+const bindingMessage = ref('')
 
 const progressDegrees = computed(() => `${Math.min(Math.max(observation.value?.progress_percent || 0, 0), 100) * 3.6}deg`)
+const lastTrainingLabel = computed(() => {
+  if (!observation.value?.last_training_at) return '待开始'
+  return `最近 ${dateLabel(observation.value.last_training_at)}`
+})
 
 onMounted(async () => {
   try {
@@ -168,7 +179,7 @@ onMounted(async () => {
     observation.value = initialObservation.selected_patient_user_id ? initialObservation : null
     selectedPatientId.value = initialObservation.selected_patient_user_id
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '陪伴观察加载失败'
+    error.value = toUserMessage(err, '陪伴观察加载失败')
   } finally {
     loading.value = false
   }
@@ -182,9 +193,38 @@ async function selectPatient(patientUserId: string) {
     observation.value = await familyApi.observation(patientUserId)
     boundPatients.value = observation.value.bound_patients
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '陪伴观察加载失败'
+    error.value = toUserMessage(err, '陪伴观察加载失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function confirmBinding(bindingId: string) {
+  bindingMessage.value = ''
+  error.value = ''
+  try {
+    await familyApi.confirmBinding(bindingId)
+    const patients = await familyApi.patients()
+    boundPatients.value = patients
+    const active = patients.find((item) => item.status === 'active')
+    if (active) await selectPatient(active.patient_user_id)
+    bindingMessage.value = '绑定已确认，可以查看陪伴观察。'
+  } catch (err) {
+    error.value = toUserMessage(err, '绑定确认失败')
+  }
+}
+
+async function revokeBinding(bindingId: string) {
+  bindingMessage.value = ''
+  error.value = ''
+  try {
+    await familyApi.revokeBinding(bindingId)
+    boundPatients.value = await familyApi.patients()
+    observation.value = null
+    selectedPatientId.value = null
+    bindingMessage.value = '已解绑，不能继续查看该患者信息。'
+  } catch (err) {
+    error.value = toUserMessage(err, '解绑失败')
   }
 }
 
@@ -202,7 +242,17 @@ function dateTimeLabel(value: string) {
   return new Date(value).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
+function dateLabel(value: string) {
+  return new Date(value).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+}
+
 function trainingTypeLabel(value: string) {
   return value === 'scenario' ? '场景表达' : '跟读训练'
+}
+
+function bindingStatusLabel(status: string) {
+  if (status === 'pending') return '待确认'
+  if (status === 'active') return '已绑定'
+  return '已解绑'
 }
 </script>

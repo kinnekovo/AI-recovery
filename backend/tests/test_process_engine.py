@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 
 from app.integrations.acoustic_analysis.provider import AcousticAnalysisResult
+from app.modules.evaluations.process_metrics import PROCESS_METRIC_DEFINITIONS, PROCESS_REFERENCE_RANGES
 from app.modules.evaluations.process_engine import generate_process_evaluation
 from app.modules.training.model import TrainingType
 
@@ -81,6 +82,18 @@ class ProcessEngineTest(unittest.TestCase):
         self.assertEqual(result.details["evaluation_source"], "mock_ai")
         self.assertEqual(result.details["provider_version"], "mock-process-v1")
         self.assertGreater(result.script_accuracy, 0)
+
+    def test_process_reference_ranges_match_metric_definitions(self) -> None:
+        result = generate_process_evaluation(
+            make_template("我要和家人一起散步"),
+            "我要和家人一起散步",
+            make_acoustic(),
+            asr_provider_name="tencent",
+            acoustic_provider_name="local",
+        )
+
+        self.assertEqual(result.details["reference_ranges"], PROCESS_REFERENCE_RANGES)
+        self.assertEqual(set(result.details["reference_ranges"]), set(PROCESS_METRIC_DEFINITIONS))
 
 
 if __name__ == "__main__":

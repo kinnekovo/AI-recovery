@@ -11,20 +11,21 @@ import type {
   RecommendationNote,
   RecommendationNotePayload,
   RecommendationEffectSummary,
-  StrategyFeedback,
-  StrategyFeedbackPayload,
   TherapistTrainingRecord,
   TherapistTrainingTrends,
+  TherapistTrialQuality,
   TaskTemplate,
   TaskTemplatePayload,
   TrainingRecommendation,
-  TrainingRecommendationReviewPayload,
   TherapistPatient
 } from '@/types/api'
 
 export const therapistApi = {
   patients() {
     return request<TherapistPatient[]>(http.get('/therapist/patients'))
+  },
+  trialQuality() {
+    return request<TherapistTrialQuality>(http.get('/therapist/trial-quality'))
   },
   taskTemplates(includeInactive = false) {
     return request<TaskTemplate[]>(
@@ -66,28 +67,20 @@ export const therapistApi = {
   trainingTrends(patientUserId: string) {
     return request<TherapistTrainingTrends>(http.get(`/therapist/patients/${patientUserId}/training-trends`))
   },
+  stageReportExport(patientUserId: string) {
+    return http.get<Blob>(`/therapist/patients/${patientUserId}/stage-report/export`, {
+      responseType: 'blob'
+    })
+  },
   recommendationNote(patientUserId: string) {
     return request<RecommendationNote>(http.get(`/therapist/patients/${patientUserId}/recommendation-note`))
   },
   saveRecommendationNote(patientUserId: string, payload: RecommendationNotePayload) {
     return request<RecommendationNote>(http.post(`/therapist/patients/${patientUserId}/recommendation-note`, payload))
   },
-  // Deprecated compatibility wrapper. The therapist UI should use recommendationNote
-  // instead of making recommendation review a required approval step.
-  reviewTrainingRecommendation(patientUserId: string, payload: TrainingRecommendationReviewPayload) {
-    return request<TrainingRecommendation>(
-      http.post(`/therapist/patients/${patientUserId}/training-recommendation/review`, payload)
-    )
-  },
   recommendationEffects(patientUserId: string) {
     return request<RecommendationEffectSummary>(
       http.get(`/therapist/patients/${patientUserId}/training-recommendation/effects`)
-    )
-  },
-  // Deprecated compatibility wrapper. Trend attribution now comes from recommendationEffects.
-  createStrategyFeedback(patientUserId: string, payload: StrategyFeedbackPayload) {
-    return request<StrategyFeedback>(
-      http.post(`/therapist/patients/${patientUserId}/training-recommendation/strategy-feedback`, payload)
     )
   },
   phase3DemoStatus() {

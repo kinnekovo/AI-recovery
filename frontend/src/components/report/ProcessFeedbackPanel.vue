@@ -11,21 +11,10 @@
       </div>
     </div>
     <div class="metric-grid">
-      <div class="metric-card">
-        <span>{{ formatNumber(result.process_metrics.script_accuracy) }}%</span>
-        <p>表达完整度</p>
-      </div>
-      <div class="metric-card">
-        <span>{{ formatNumber(result.process_metrics.error_count) }}</span>
-        <p>需要留意</p>
-      </div>
-      <div class="metric-card">
-        <span>{{ formatNumber(result.process_metrics.speech_rate) }}</span>
-        <p>说话节奏 字/min</p>
-      </div>
-      <div class="metric-card">
-        <span>{{ formatNumber(result.process_metrics.loudness) }}</span>
-        <p>声音响度 dBA</p>
+      <div v-for="metric in metricCards" :key="metric.key" class="metric-card">
+        <span>{{ metric.value }}</span>
+        <p>{{ metric.label }}</p>
+        <small>{{ metric.hint }}</small>
       </div>
     </div>
 
@@ -44,6 +33,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { TrainingFeedbackResult } from '@/types/api'
+import { formatPatientMetricValue, isProcessMetricKey, processMetricCatalog, type ProcessMetricKey } from '@/utils/processMetrics'
 
 const props = defineProps<{ result: TrainingFeedbackResult }>()
 
@@ -63,17 +53,17 @@ const simpleMismatch = computed(() => {
   return items
 })
 
-function formatNumber(value: number) {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1)
-}
+const processMetricOrder: ProcessMetricKey[] = ['script_accuracy', 'error_count', 'speech_rate', 'loudness']
+const metricCards = computed(() =>
+  processMetricOrder.map((key) => ({
+    key,
+    value: formatPatientMetricValue(key, props.result.process_metrics[key]),
+    label: processMetricCatalog[key].patientLabel,
+    hint: processMetricCatalog[key].patientHint
+  }))
+)
 
 function metricLabel(metric: string) {
-  const labels: Record<string, string> = {
-    script_accuracy: '表达完整度',
-    error_count: '错误统计',
-    speech_rate: '言语速率',
-    loudness: '响度'
-  }
-  return labels[metric] || metric
+  return isProcessMetricKey(metric) ? processMetricCatalog[metric].label : metric
 }
 </script>

@@ -5,6 +5,7 @@ Revises: 0001_initial_mvp
 Create Date: 2026-08-08
 """
 from datetime import datetime, timezone
+import json
 import uuid
 
 from alembic import op
@@ -19,6 +20,42 @@ depends_on = None
 
 def _metric_id(name: str) -> uuid.UUID:
     return uuid.uuid5(uuid.NAMESPACE_DNS, f"speech-agent.evaluation.metric.{name}")
+
+
+def _sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _insert_metric(
+    *,
+    name: str,
+    category: str,
+    description: str,
+    unit: str,
+    normal_range: dict,
+    now: datetime,
+) -> None:
+    op.execute(
+        sa.text(
+            "\n".join(
+                [
+                    "INSERT INTO evaluation_metrics",
+                    "(id, name, category, description, unit, normal_range, created_at, updated_at)",
+                    "VALUES",
+                    "(",
+                    f"{_sql_literal(str(_metric_id(name)))}::uuid,",
+                    f"{_sql_literal(name)},",
+                    f"{_sql_literal(category)},",
+                    f"{_sql_literal(description)},",
+                    f"{_sql_literal(unit)},",
+                    f"{_sql_literal(json.dumps(normal_range, ensure_ascii=False))}::jsonb,",
+                    f"{_sql_literal(now.isoformat())}::timestamptz,",
+                    f"{_sql_literal(now.isoformat())}::timestamptz",
+                    ");",
+                ]
+            )
+        )
+    )
 
 
 def upgrade() -> None:
@@ -61,142 +98,29 @@ def upgrade() -> None:
     op.create_index(op.f("ix_attempt_evaluations_metric_id"), "attempt_evaluations", ["metric_id"], unique=False)
 
     now = datetime.now(timezone.utc)
-    metrics_table = sa.table(
-        "evaluation_metrics",
-        sa.column("id", postgresql.UUID(as_uuid=True)),
-        sa.column("name", sa.String),
-        sa.column("category", metric_category),
-        sa.column("description", sa.Text),
-        sa.column("unit", sa.String),
-        sa.column("normal_range", postgresql.JSONB),
-        sa.column("created_at", sa.DateTime(timezone=True)),
-        sa.column("updated_at", sa.DateTime(timezone=True)),
-    )
-    op.bulk_insert(
-        metrics_table,
-        [
-            {
-                "id": _metric_id("script_accuracy"),
-                "name": "script_accuracy",
-                "category": "process",
-                "description": "正确发音字数 / 脚本总字数，用于衡量脚本输出完整性。",
-                "unit": "%",
-                "normal_range": {"target": 100, "operator": ">="},
-                "created_at": now,
-                "updated_at": now,
-            },
-            {
-                "id": _metric_id("error_count"),
-                "name": "error_count",
-                "category": "process",
-                "description": "无意义重复、超过3秒停顿、难以理解发音和插入语的总次数。",
-                "unit": "次",
-                "normal_range": {"target": 0, "operator": "=="},
-                "created_at": now,
-                "updated_at": now,
-            },
-            {
-                "id": _metric_id("speech_rate"),
-                "name": "speech_rate",
-                "category": "process",
-                "description": "有效交流字数 / 说话时间。",
-                "unit": "字/min",
-                "normal_range": {"min": 180, "max": 240},
-                "created_at": now,
-                "updated_at": now,
-            },
-            {
-                "id": _metric_id("loudness"),
-                "name": "loudness",
-                "category": "process",
-                "description": "训练录音的平均响度。",
-                "unit": "dBA",
-                "normal_range": {"min": 60, "max": 78},
-                "created_at": now,
-                "updated_at": now,
-            },
-            {
-                "id": _metric_id("wab_information"),
-                "name": "wab_information",
-                "category": "long_term_effect",
-                "description": "WAB 自发言语信息量。",
-                "unit": "分",
-                "normal_range": {},
-                "created_at": now,
-                "updated_at": now,
-            },
-            {
-                "id": _metric_id("wab_fluency"),
-                "name": "wab_fluency",
-                "category": "long_term_effect",
-                "description": "WAB 自发言语流利性。",
-                "unit": "分",
-                "normal_range": {},
-                "created_at": now,
-                "updated_at": now,
-            },
-            {
-                "id": _metric_id("wab_grammar"),
-                "name": "wab_grammar",
-                "category": "long_term_effect",
-                "description": "WAB 自发言语语法能力。",
-                "unit": "分",
-                "normal_range": {},
-                "created_at": now,
-                "updated_at": now,
-            },
-            {
-                "id": _metric_id("wab_word_order"),
-                "name": "wab_word_order",
-                "category": "long_term_effect",
-                "description": "WAB 自发言语语序。",
-                "unit": "分",
-                "normal_range": {},
-                "created_at": now,
-                "updated_at": now,
-            },
-            {
-                "id": _metric_id("wab_comprehensibility"),
-                "name": "wab_comprehensibility",
-                "category": "long_term_effect",
-                "description": "WAB 自发言语可懂度。",
-                "unit": "分",
-                "normal_range": {},
-                "created_at": now,
-                "updated_at": now,
-            },
-            {
-                "id": _metric_id("wab_repetition_comprehensibility"),
-                "name": "wab_repetition_comprehensibility",
-                "category": "long_term_effect",
-                "description": "WAB 复述可懂度。",
-                "unit": "分",
-                "normal_range": {},
-                "created_at": now,
-                "updated_at": now,
-            },
-            {
-                "id": _metric_id("cadl_score"),
-                "name": "cadl_score",
-                "category": "long_term_effect",
-                "description": "CADL 日常交流能力评分。",
-                "unit": "分",
-                "normal_range": {},
-                "created_at": now,
-                "updated_at": now,
-            },
-            {
-                "id": _metric_id("acceptance_score"),
-                "name": "acceptance_score",
-                "category": "long_term_effect",
-                "description": "患者或家属对训练方式、智能体和交互流程的接受度。",
-                "unit": "分",
-                "normal_range": {},
-                "created_at": now,
-                "updated_at": now,
-            },
-        ],
-    )
+    metric_rows = [
+        ("script_accuracy", "process", "正确发音字数 / 脚本总字数，用于衡量脚本输出完整性。", "%", {"target": 100, "operator": ">="}),
+        ("error_count", "process", "无意义重复、超过3秒停顿、难以理解发音和插入语的总次数。", "次", {"target": 0, "operator": "=="}),
+        ("speech_rate", "process", "有效交流字数 / 说话时间。", "字/min", {"min": 180, "max": 240}),
+        ("loudness", "process", "训练录音的平均响度。", "dBA", {"min": 60, "max": 78}),
+        ("wab_information", "long_term_effect", "WAB 自发言语信息量。", "分", {}),
+        ("wab_fluency", "long_term_effect", "WAB 自发言语流利性。", "分", {}),
+        ("wab_grammar", "long_term_effect", "WAB 自发言语语法能力。", "分", {}),
+        ("wab_word_order", "long_term_effect", "WAB 自发言语语序。", "分", {}),
+        ("wab_comprehensibility", "long_term_effect", "WAB 自发言语可懂度。", "分", {}),
+        ("wab_repetition_comprehensibility", "long_term_effect", "WAB 复述可懂度。", "分", {}),
+        ("cadl_score", "long_term_effect", "CADL 日常交流能力评分。", "分", {}),
+        ("acceptance_score", "long_term_effect", "患者或家属对训练方式、智能体和交互流程的接受度。", "分", {}),
+    ]
+    for name, category, description, unit, normal_range in metric_rows:
+        _insert_metric(
+            name=name,
+            category=category,
+            description=description,
+            unit=unit,
+            normal_range=normal_range,
+            now=now,
+        )
 
 
 def downgrade() -> None:

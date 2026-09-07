@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
+from app.core.observability import configure_logging, log_event
 from app.modules.agents.router import router as agents_router
 from app.modules.assessment.router import router as assessment_router
 from app.modules.attempts.router import router as attempts_router
@@ -10,6 +11,7 @@ from app.modules.consent.router import router as consent_router
 from app.modules.evaluations.router import router as evaluations_router
 from app.modules.family.router import router as family_router
 from app.modules.files.router import router as files_router
+from app.modules.health.router import router as health_router
 from app.modules.profiles.router import router as profiles_router
 from app.modules.reports.router import router as reports_router
 from app.modules.scoring.router import router as scoring_router
@@ -20,6 +22,7 @@ from app.modules.users.router import router as users_router
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    configure_logging(settings.log_level)
     app = FastAPI(title=settings.app_name)
     app.add_middleware(
         CORSMiddleware,
@@ -42,6 +45,32 @@ def create_app() -> FastAPI:
     app.include_router(family_router, prefix=settings.api_prefix)
     app.include_router(files_router, prefix=settings.api_prefix)
     app.include_router(consent_router, prefix=settings.api_prefix)
+    app.include_router(health_router, prefix=settings.api_prefix)
+
+    @app.middleware("http")
+    async def log_request_failures(request, call_next):
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            log_event(
+                "error",
+                "request",
+                "unhandled_exception",
+                method=request.method,
+                path=request.url.path,
+                error=exc,
+            )
+            raise
+        if response.status_code >= 500:
+            log_event(
+                "error",
+                "request",
+                "server_error_response",
+                method=request.method,
+                path=request.url.path,
+                status_code=response.status_code,
+            )
+        return response
     return app
 
 

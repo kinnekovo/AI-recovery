@@ -7,15 +7,19 @@ from app.core.config import get_settings
 
 
 class TTSProvider:
+    name = "base"
+
     def synthesize(self, text: str, voice_id: str) -> str:
         raise NotImplementedError
 
 
 class MockTTSProvider(TTSProvider):
+    name = "mock"
+
     def synthesize(self, text: str, voice_id: str) -> str:
         output_dir = get_settings().storage_root / "generated-audio"
         output_dir.mkdir(parents=True, exist_ok=True)
-        path = output_dir / f"welcome_{uuid4().hex}.wav"
+        path = output_dir / f"speech_{uuid4().hex}.wav"
         sample_rate = 16000
         duration_seconds = 1.2
         frames = int(sample_rate * duration_seconds)
@@ -30,4 +34,7 @@ class MockTTSProvider(TTSProvider):
 
 
 def get_tts_provider() -> TTSProvider:
+    settings = get_settings()
+    if settings.tts_provider != "mock":
+        return MockTTSProvider()
     return MockTTSProvider()

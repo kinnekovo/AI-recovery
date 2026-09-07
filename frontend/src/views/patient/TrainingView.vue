@@ -11,7 +11,7 @@
         }}
       </p>
     </div>
-    <AvatarCoachPanel :snapshot="avatar.snapshot" title="今天由数字人陪你练">
+    <AvatarCoachPanel :snapshot="avatar.snapshot" :avatar-url="currentAgent?.avatar_url" title="今天由数字人陪你练">
       <template #actions>
         <button class="app-button secondary avatar-action-button" type="button" :disabled="avatar.isBusy.value" @click="playCoachIntro">
           {{ avatar.isBusy.value ? '正在说明' : '听数字人说明' }}
@@ -78,16 +78,24 @@ import { computed, onMounted, ref } from 'vue'
 import AvatarCoachPanel from '@/components/avatar/AvatarCoachPanel.vue'
 import { trainingApi } from '@/api/training'
 import { useAvatarRuntime } from '@/composables/useAvatarRuntime'
+import { useAgentStore } from '@/stores/agent'
+import { useAuthStore } from '@/stores/auth'
 import type { TodayTraining, TrainingRecommendation } from '@/types/api'
 
+const agentStore = useAgentStore()
+const auth = useAuthStore()
 const today = ref<TodayTraining | null>(null)
 const recommendation = ref<TrainingRecommendation | null>(null)
 const error = ref('')
 const avatar = useAvatarRuntime()
 const recommendedTasks = computed(() => recommendation.value?.task_sequence?.length ? recommendation.value.task_sequence : [])
 const isTodayRecommendationCompleted = computed(() => Boolean(today.value?.recommended_completed))
+const currentAgent = computed(() =>
+  agentStore.agents.find((agent) => agent.id === auth.me?.patient_profile?.current_agent_id) || agentStore.agents[0]
+)
 
 onMounted(async () => {
+  await agentStore.loadAgents()
   const [todayResult, recommendationResult] = await Promise.allSettled([trainingApi.today(), trainingApi.recommendation()])
   if (todayResult.status === 'fulfilled') {
     today.value = todayResult.value
@@ -122,7 +130,7 @@ function trainingTypeLabel(type: string) {
 }
 
 async function playCoachIntro() {
-  await avatar.speak(coachIntroText())
+  await speakWithGeneratedAudio('training_intro', coachIntroText())
 }
 
 function coachIntroText() {
@@ -137,5 +145,14 @@ function coachIntroText() {
     return `今天建议先练${recommendation.value.headline}。不用着急，我们一次只完成一小步。`
   }
   return '暂时没有读取到建议任务，你可以先选择跟读训练或场景表达，我会陪你完成。'
+}
+
+async function speakWithGeneratedAudio(scene: string, text: string) {
+  try {
+    const speech = await trainingApi.createAvatarSpeech({ scene, text })
+    await avatar.speak(speech.text, speech.audio_url)
+  } catch {
+    await avatar.speak(text)
+  }
 }
 </script>

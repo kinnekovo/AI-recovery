@@ -15,6 +15,10 @@ class AcousticAnalysisResult:
     speaking_duration_seconds: float
     loudness_dba: float
     long_pause_over_3s_count: int
+    quality_status: str = "pass"
+    quality_reason: str = "normal"
+    too_short: bool = False
+    too_quiet: bool = False
 
 
 class AcousticAnalysisProvider:
@@ -35,6 +39,8 @@ class MockAcousticAnalysisProvider(AcousticAnalysisProvider):
             speaking_duration_seconds=3.8,
             loudness_dba=65.0,
             long_pause_over_3s_count=1,
+            quality_status="pass",
+            quality_reason="mock_pass",
         )
 
 
@@ -61,6 +67,10 @@ class LocalAcousticAnalysisProvider(AcousticAnalysisProvider):
                 speaking_duration_seconds=0.0,
                 loudness_dba=0.0,
                 long_pause_over_3s_count=0,
+                quality_status="unusable",
+                quality_reason="empty_audio",
+                too_short=True,
+                too_quiet=True,
             )
 
         frame_size = max(int(self.sample_rate * self.frame_duration_seconds), 1)
@@ -82,6 +92,7 @@ class LocalAcousticAnalysisProvider(AcousticAnalysisProvider):
             speaking_duration_seconds=speaking_duration,
             loudness_dba=loudness,
             long_pause_over_3s_count=self._count_long_pauses(voiced),
+            **self._quality_fields(speaking_duration, loudness),
         )
 
     def _decode_audio(self, audio_path: str):
@@ -114,7 +125,40 @@ class LocalAcousticAnalysisProvider(AcousticAnalysisProvider):
             speaking_duration_seconds=duration,
             loudness_dba=self._estimate_loudness(samples),
             long_pause_over_3s_count=0,
+            **self._quality_fields(duration, self._estimate_loudness(samples)),
         )
+
+    def _quality_fields(self, speaking_duration: float, loudness: float) -> dict:
+        settings = get_settings()
+        too_short = speaking_duration < settings.acoustic_min_speaking_seconds
+        too_quiet = loudness < settings.acoustic_min_loudness_dba
+        if too_short and too_quiet:
+            return {
+                "quality_status": "low_quality",
+                "quality_reason": "too_short_and_quiet",
+                "too_short": True,
+                "too_quiet": True,
+            }
+        if too_short:
+            return {
+                "quality_status": "low_quality",
+                "quality_reason": "too_short",
+                "too_short": True,
+                "too_quiet": False,
+            }
+        if too_quiet:
+            return {
+                "quality_status": "low_quality",
+                "quality_reason": "too_quiet",
+                "too_short": False,
+                "too_quiet": True,
+            }
+        return {
+            "quality_status": "pass",
+            "quality_reason": "normal",
+            "too_short": False,
+            "too_quiet": False,
+        }
 
     def _estimate_loudness(self, samples) -> float:
         if samples.size == 0:

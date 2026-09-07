@@ -2,8 +2,10 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.observability import log_event
+from app.core.redaction import provider_error_summary
 from app.integrations.acoustic_analysis.provider import get_acoustic_analysis_provider
-from app.integrations.asr.provider import get_asr_provider
+from app.integrations.asr.provider import transcribe_with_fallback
 from app.integrations.llm.provider import get_llm_scoring_provider
 from app.modules.attempts.model import AnalysisStatus, Attempt
 from app.modules.evaluations.model import AttemptEvaluation, EvaluationMetric, EvaluationSource
@@ -49,24 +51,42 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
     from app.modules.evaluations.service import ensure_default_metrics
 
     ensure_default_metrics(db)
-    asr_provider = get_asr_provider()
     acoustic_provider = get_acoustic_analysis_provider()
     llm_provider = get_llm_scoring_provider()
-    transcript = asr_provider.transcribe(audio.storage_path)
-    acoustic = acoustic_provider.analyze(audio.storage_path)
+    asr_result = transcribe_with_fallback(audio.storage_path)
+    transcript = asr_result.text
+    try:
+        acoustic = acoustic_provider.analyze(audio.storage_path)
+    except Exception as exc:
+        attempt.analysis_status = AnalysisStatus.failed
+        db.commit()
+        log_event(
+            "error",
+            "analysis",
+            "acoustic_analysis_failed",
+            attempt_id=str(attempt.id),
+            file_id=str(audio.id),
+            provider=getattr(acoustic_provider, "provider_name", "unknown"),
+            error_message=provider_error_summary("声学分析失败", exc),
+        )
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="声学分析失败，请稍后重试") from exc
     process_evaluation = generate_process_evaluation(
         template,
         transcript,
         acoustic,
-        asr_provider_name=asr_provider.provider_name,
+        asr_provider_name=asr_result.provider_name,
         acoustic_provider_name=acoustic_provider.provider_name,
     )
-    result = llm_provider.evaluate(template.target_text, transcript, template.task_type.value)
+    score_dimensions = build_rule_score_dimensions(process_evaluation)
+    llm_feedback = safe_llm_feedback(llm_provider, template.target_text, transcript, template.task_type.value, process_evaluation)
     analysis = AttemptAnalysisResult(
         attempt_id=attempt.id,
         asr_text=transcript,
         acoustic_metrics={
-            "quality": "mock_pass",
+            "quality_status": acoustic.quality_status,
+            "quality_reason": acoustic.quality_reason,
+            "too_short": acoustic.too_short,
+            "too_quiet": acoustic.too_quiet,
             "provider": acoustic_provider.provider_name,
             "requested_provider": getattr(acoustic_provider, "requested_provider", acoustic_provider.provider_name),
             "speaking_duration_seconds": acoustic.speaking_duration_seconds,
@@ -76,28 +96,33 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
         semantic_metrics={
             "target_text": template.target_text,
             "process_monitoring": process_evaluation.model_dump(mode="json"),
-            "asr_provider": asr_provider.provider_name,
-            "requested_asr_provider": getattr(asr_provider, "requested_provider", asr_provider.provider_name),
+            "asr_provider": asr_result.provider_name,
+            "requested_asr_provider": asr_result.requested_provider,
+            "asr_fallback_used": asr_result.fallback_used,
+            "asr_error_code": asr_result.error_code,
+            "asr_error_message": asr_result.error_message,
         },
         raw_model_output={
-            "llm_scoring": result,
+            "llm_feedback": llm_feedback,
             "llm_provider": llm_provider.provider_name,
             "requested_llm_provider": getattr(llm_provider, "requested_provider", llm_provider.provider_name),
+            "llm_allowed_fields": ["main_strength", "main_issue", "suggestion"],
         },
     )
     score = AttemptScore(
         attempt_id=attempt.id,
-        overall_score=result["overall_score"],
-        content_score=result["content_score"],
-        clarity_score=result["clarity_score"],
-        fluency_score=result["fluency_score"],
-        loudness_score=result["loudness_score"],
-        prompt_dependence_score=result["prompt_dependence_score"],
-        main_strength=result["main_strength"],
-        main_issue=result["main_issue"],
-        suggestion=result["suggestion"],
+        overall_score=score_dimensions["overall_score"],
+        content_score=score_dimensions["content_score"],
+        clarity_score=score_dimensions["clarity_score"],
+        fluency_score=score_dimensions["fluency_score"],
+        loudness_score=score_dimensions["loudness_score"],
+        prompt_dependence_score=score_dimensions["prompt_dependence_score"],
+        main_strength=llm_feedback["main_strength"],
+        main_issue=llm_feedback["main_issue"],
+        suggestion=llm_feedback["suggestion"],
     )
     attempt.analysis_status = AnalysisStatus.completed
+    attempt.audio_quality = acoustic.quality_status
     db.add(analysis)
     db.add(score)
     db.flush()
@@ -169,15 +194,27 @@ def ensure_process_evaluation(db: Session, attempt: Attempt) -> None:
     analysis = db.scalar(select(AttemptAnalysisResult).where(AttemptAnalysisResult.attempt_id == attempt.id))
     if not audio or not task or not template:
         return
-    asr_provider = get_asr_provider()
     acoustic_provider = get_acoustic_analysis_provider()
-    transcript = analysis.asr_text if analysis else asr_provider.transcribe(audio.storage_path)
-    acoustic = acoustic_provider.analyze(audio.storage_path)
+    asr_result = None if analysis else transcribe_with_fallback(audio.storage_path)
+    transcript = analysis.asr_text if analysis else asr_result.text
+    try:
+        acoustic = acoustic_provider.analyze(audio.storage_path)
+    except Exception as exc:
+        log_event(
+            "error",
+            "analysis",
+            "process_evaluation_backfill_failed",
+            attempt_id=str(attempt.id),
+            file_id=str(audio.id),
+            provider=getattr(acoustic_provider, "provider_name", "unknown"),
+            error_message=provider_error_summary("过程指标补生成失败", exc),
+        )
+        return
     process_evaluation = generate_process_evaluation(
         template,
         transcript,
         acoustic,
-        asr_provider_name="stored" if analysis else asr_provider.provider_name,
+        asr_provider_name="stored" if analysis else asr_result.provider_name,
         acoustic_provider_name=acoustic_provider.provider_name,
     )
     save_process_evaluation(db, attempt.id, process_evaluation)
@@ -198,6 +235,65 @@ def to_score_read(score: AttemptScore, transcript: str | None) -> ScoreRead:
         feedback=ScoreFeedback(strength=score.main_strength, improve=score.suggestion),
         transcript=transcript,
     )
+
+
+def build_rule_score_dimensions(process_evaluation) -> dict[str, int]:
+    content_score = round(_clamp(process_evaluation.script_accuracy))
+    clarity_score = round(_clamp(100 - process_evaluation.error_count * 12))
+    fluency_score = round(_clamp(100 - _distance_from_range(process_evaluation.speech_rate, 180, 240) * 0.7))
+    loudness_score = round(_clamp(100 - _distance_from_range(process_evaluation.loudness, 60, 78) * 3))
+    prompt_dependence_score = 86
+    overall_score = round((content_score * 0.35) + (clarity_score * 0.25) + (fluency_score * 0.2) + (loudness_score * 0.15) + (prompt_dependence_score * 0.05))
+    return {
+        "overall_score": overall_score,
+        "content_score": content_score,
+        "clarity_score": clarity_score,
+        "fluency_score": fluency_score,
+        "loudness_score": loudness_score,
+        "prompt_dependence_score": prompt_dependence_score,
+    }
+
+
+def safe_llm_feedback(provider, target_text: str, transcript: str, task_type: str, process_evaluation) -> dict[str, str]:
+    fallback = rule_feedback_summary(process_evaluation)
+    try:
+        raw = provider.evaluate(target_text, transcript, task_type)
+    except Exception:
+        return fallback
+    if not isinstance(raw, dict):
+        return fallback
+    result: dict[str, str] = {}
+    for field in ("main_strength", "main_issue", "suggestion"):
+        value = raw.get(field)
+        if not isinstance(value, str) or not value.strip():
+            return fallback
+        result[field] = value.strip()[:255] if field != "suggestion" else value.strip()[:1000]
+    return result
+
+
+def rule_feedback_summary(process_evaluation) -> dict[str, str]:
+    metrics = ProcessMetricsRead(
+        script_accuracy=process_evaluation.script_accuracy,
+        error_count=process_evaluation.error_count,
+        speech_rate=process_evaluation.speech_rate,
+        loudness=process_evaluation.loudness,
+    )
+    feedback = build_feedback(metrics)
+    return {
+        "main_strength": feedback[0].current_performance,
+        "main_issue": feedback[1].current_performance if len(feedback) > 1 else "本次过程性指标已生成。",
+        "suggestion": feedback[0].suggestion,
+    }
+
+
+def _clamp(value: float, minimum: float = 0, maximum: float = 100) -> float:
+    return max(minimum, min(maximum, value))
+
+
+def _distance_from_range(value: float, minimum: float, maximum: float) -> float:
+    if minimum <= value <= maximum:
+        return 0
+    return minimum - value if value < minimum else value - maximum
 
 
 def _metric_values(db: Session, attempt_id) -> dict[str, float]:

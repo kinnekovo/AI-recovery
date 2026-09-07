@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -23,37 +23,69 @@ from app.modules.files.service import public_url
 from app.modules.scoring.model import AttemptAnalysisResult, AttemptScore
 from app.modules.therapist.schema import (
     RecommendationNoteRead,
+    TherapistPatientAssignmentRead,
+    TherapistStageAssessmentRead,
+    TherapistStageReportRead,
     TherapistPatientRead,
     TherapistTrainingRecordRead,
     TherapistTrainingTrendsRead,
     TherapistTrendBucketRead,
+    TherapistTrialQualityRead,
 )
 from app.modules.training.model import (
     RecommendationStrategyFeedback,
     SessionTask,
     StrategyFeedbackJudgment,
     TrainingSession,
+    TrainingStatus,
 )
-from app.modules.users.model import PatientProfile, User, UserRole
+from app.modules.users.model import PatientProfile, TherapistPatientAssignment, User, UserRole
 
 
-def list_patients(db: Session) -> list[TherapistPatientRead]:
-    backfill_auto_assessments(db)
-    rows = db.execute(
-        select(
-            User,
-            PatientProfile,
-            func.count(AssessmentSession.id).filter(
-                AssessmentSession.review_status == AssessmentReviewStatus.pending_review.value
-            ),
-            func.max(AssessmentSession.assessed_at),
+def list_patients(
+    db: Session,
+    therapist: User,
+    backfill: bool = True,
+    include_assessment_summary: bool = True,
+) -> list[TherapistPatientRead]:
+    if backfill:
+        backfill_auto_assessments(db)
+    if include_assessment_summary:
+        stmt = (
+            select(
+                User,
+                PatientProfile,
+                func.count(AssessmentSession.id).filter(
+                    AssessmentSession.review_status == AssessmentReviewStatus.pending_review.value
+                ),
+                func.max(AssessmentSession.assessed_at),
+            )
+            .join(PatientProfile, PatientProfile.user_id == User.id)
+            .outerjoin(AssessmentSession, AssessmentSession.patient_profile_id == PatientProfile.id)
+            .where(User.role == UserRole.patient)
+            .group_by(User.id, PatientProfile.id)
+            .order_by(User.created_at.desc())
         )
-        .join(PatientProfile, PatientProfile.user_id == User.id)
-        .outerjoin(AssessmentSession, AssessmentSession.patient_profile_id == PatientProfile.id)
-        .where(User.role == UserRole.patient)
-        .group_by(User.id, PatientProfile.id)
-        .order_by(User.created_at.desc())
-    ).all()
+    else:
+        stmt = (
+            select(User, PatientProfile)
+            .join(PatientProfile, PatientProfile.user_id == User.id)
+            .where(User.role == UserRole.patient)
+            .order_by(User.created_at.desc())
+        )
+    if therapist.role != UserRole.admin:
+        stmt = stmt.join(
+            TherapistPatientAssignment,
+            TherapistPatientAssignment.patient_profile_id == PatientProfile.id,
+        ).where(
+            TherapistPatientAssignment.therapist_user_id == therapist.id,
+            TherapistPatientAssignment.status == "active",
+        )
+    rows = db.execute(stmt).all()
+    normalized_rows = [
+        row if include_assessment_summary else (row[0], row[1], 0, None)
+        for row in rows
+    ]
     return [
         TherapistPatientRead(
             user_id=user.id,
@@ -65,8 +97,140 @@ def list_patients(db: Session) -> list[TherapistPatientRead]:
             latest_assessment_at=latest_assessment_at,
             created_at=user.created_at,
         )
-        for user, profile, pending_review_count, latest_assessment_at in rows
+        for user, profile, pending_review_count, latest_assessment_at in normalized_rows
     ]
+
+
+def therapist_has_patient_access(db: Session, therapist: User, patient_user_id: UUID) -> bool:
+    if therapist.role == UserRole.admin:
+        return True
+    profile = get_patient_profile_by_user_id(db, patient_user_id)
+    return bool(
+        db.scalar(
+            select(TherapistPatientAssignment.id).where(
+                TherapistPatientAssignment.therapist_user_id == therapist.id,
+                TherapistPatientAssignment.patient_profile_id == profile.id,
+                TherapistPatientAssignment.status == "active",
+            )
+        )
+    )
+
+
+def require_therapist_patient_access(db: Session, therapist: User, patient_user_id: UUID) -> PatientProfile:
+    profile = get_patient_profile_by_user_id(db, patient_user_id)
+    if therapist.role == UserRole.admin:
+        return profile
+    assignment = db.scalar(
+        select(TherapistPatientAssignment).where(
+            TherapistPatientAssignment.therapist_user_id == therapist.id,
+            TherapistPatientAssignment.patient_profile_id == profile.id,
+            TherapistPatientAssignment.status == "active",
+        )
+    )
+    if not assignment:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="未分配该患者，无法访问")
+    return profile
+
+
+def create_patient_assignment(
+    db: Session,
+    admin: User,
+    therapist_user_id: UUID,
+    patient_user_id: UUID,
+) -> TherapistPatientAssignmentRead:
+    if admin.role != UserRole.admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅管理员可分配患者")
+    therapist = db.get(User, therapist_user_id)
+    if not therapist or therapist.role != UserRole.therapist:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="治疗师不存在")
+    profile = get_patient_profile_by_user_id(db, patient_user_id)
+    assignment = db.scalar(
+        select(TherapistPatientAssignment).where(
+            TherapistPatientAssignment.therapist_user_id == therapist.id,
+            TherapistPatientAssignment.patient_profile_id == profile.id,
+        )
+    )
+    if assignment:
+        assignment.status = "active"
+    else:
+        assignment = TherapistPatientAssignment(
+            therapist_user_id=therapist.id,
+            patient_profile_id=profile.id,
+            status="active",
+        )
+        db.add(assignment)
+    db.commit()
+    db.refresh(assignment)
+    return to_assignment_read(assignment, patient_user_id)
+
+
+def revoke_patient_assignment(db: Session, admin: User, assignment_id: UUID) -> TherapistPatientAssignmentRead:
+    if admin.role != UserRole.admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅管理员可撤销患者分配")
+    assignment = db.get(TherapistPatientAssignment, assignment_id)
+    if not assignment or assignment.status == "revoked":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="患者分配不存在")
+    profile = db.get(PatientProfile, assignment.patient_profile_id)
+    patient_user_id = profile.user_id if profile else None
+    if not patient_user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="患者档案不存在")
+    assignment.status = "revoked"
+    db.commit()
+    db.refresh(assignment)
+    return to_assignment_read(assignment, patient_user_id)
+
+
+def to_assignment_read(assignment: TherapistPatientAssignment, patient_user_id: UUID) -> TherapistPatientAssignmentRead:
+    return TherapistPatientAssignmentRead(
+        assignment_id=assignment.id,
+        therapist_user_id=assignment.therapist_user_id,
+        patient_user_id=patient_user_id,
+        patient_profile_id=assignment.patient_profile_id,
+        status=assignment.status,
+        created_at=assignment.created_at,
+    )
+
+
+def get_trial_quality(db: Session) -> TherapistTrialQualityRead:
+    patient_count = int(db.scalar(select(func.count(PatientProfile.id))) or 0)
+    training_session_count = int(db.scalar(select(func.count(TrainingSession.id))) or 0)
+    completed_session_count = int(
+        db.scalar(select(func.count(TrainingSession.id)).where(TrainingSession.status == TrainingStatus.completed))
+        or 0
+    )
+    attempt_rows = db.execute(select(Attempt, AttemptAnalysisResult).outerjoin(AttemptAnalysisResult, AttemptAnalysisResult.attempt_id == Attempt.id)).all()
+    return TherapistTrialQualityRead(
+        patient_count=patient_count,
+        training_session_count=training_session_count,
+        completed_session_count=completed_session_count,
+        **summarize_trial_quality_attempts(training_session_count, completed_session_count, attempt_rows),
+    )
+
+
+def summarize_trial_quality_attempts(training_session_count: int, completed_session_count: int, attempt_rows) -> dict[str, int | float]:
+    attempt_count = len(attempt_rows)
+    missing_audio_count = sum(1 for attempt, _analysis in attempt_rows if not attempt.audio_file_id)
+    failed_analysis_count = sum(1 for attempt, _analysis in attempt_rows if attempt.analysis_status == AnalysisStatus.failed)
+    low_quality_count = sum(
+        1
+        for attempt, _analysis in attempt_rows
+        if attempt.audio_quality and attempt.audio_quality != "pass"
+    )
+    provider_failure_count = sum(
+        1
+        for _attempt, analysis in attempt_rows
+        if analysis and analysis.semantic_metrics.get("asr_error_code")
+    )
+    return {
+        "completion_rate": round(completed_session_count / training_session_count, 3) if training_session_count else 0.0,
+        "attempt_count": attempt_count,
+        "missing_audio_count": missing_audio_count,
+        "missing_audio_rate": round(missing_audio_count / attempt_count, 3) if attempt_count else 0.0,
+        "failed_analysis_count": failed_analysis_count,
+        "low_quality_attempt_count": low_quality_count,
+        "low_quality_rate": round(low_quality_count / attempt_count, 3) if attempt_count else 0.0,
+        "provider_failure_count": provider_failure_count,
+    }
 
 
 def backfill_auto_assessments(db: Session) -> None:
@@ -201,6 +365,112 @@ def get_patient_training_trends(db: Session, patient_user_id: UUID) -> Therapist
     else:
         summary = "已汇总近期过程指标，评分样本仍在积累。"
     return TherapistTrainingTrendsRead(buckets=buckets, overall_summary=summary)
+
+
+def get_patient_stage_report(
+    db: Session,
+    patient_user_id: UUID,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> TherapistStageReportRead:
+    profile = get_patient_profile_by_user_id(db, patient_user_id)
+    patient = db.get(User, patient_user_id)
+    attempt_rows = patient_attempt_rows(db, profile.id, date_from, date_to)
+    counts = summarize_stage_attempt_rows(attempt_rows)
+    analyzed_rows = [(attempt, score) for attempt, _session, _task, score, _analysis in attempt_rows if score]
+    assessments = stage_assessments(db, profile.id, date_from, date_to)
+    notes = [item.therapist_notes for item in assessments if item.therapist_notes]
+    return TherapistStageReportRead(
+        patient_user_id=patient_user_id,
+        patient_profile_id=profile.id,
+        username=patient.username if patient else "",
+        date_from=date_from,
+        date_to=date_to,
+        training_count=counts["training_count"],
+        analyzed_attempt_count=counts["analyzed_attempt_count"],
+        failed_analysis_count=counts["failed_analysis_count"],
+        low_quality_attempt_count=counts["low_quality_attempt_count"],
+        low_quality_rate=counts["low_quality_rate"],
+        provider_failure_count=counts["provider_failure_count"],
+        process_summary=build_trend_bucket(db, "selected_range", "所选阶段", analyzed_rows),
+        assessments=[
+            TherapistStageAssessmentRead(
+                assessment_id=item.id,
+                assessment_type=item.assessment_type.value,
+                review_status=item.review_status,
+                assessed_at=item.assessed_at,
+                reviewed_at=item.reviewed_at,
+                therapist_notes=item.therapist_notes,
+                metrics=item.metrics,
+            )
+            for item in assessments
+        ],
+        therapist_notes=notes,
+    )
+
+
+def summarize_stage_attempt_rows(attempt_rows) -> dict[str, int | float]:
+    training_count = len(attempt_rows)
+    analyzed_count = sum(1 for _attempt, _session, _task, score, _analysis in attempt_rows if score)
+    failed_count = sum(1 for attempt, _session, _task, _score, _analysis in attempt_rows if attempt.analysis_status == AnalysisStatus.failed)
+    low_quality_count = sum(
+        1
+        for attempt, _session, _task, _score, _analysis in attempt_rows
+        if attempt.audio_quality and attempt.audio_quality != "pass"
+    )
+    provider_failure_count = sum(
+        1
+        for _attempt, _session, _task, _score, analysis in attempt_rows
+        if analysis and analysis.semantic_metrics.get("asr_error_code")
+    )
+    return {
+        "training_count": training_count,
+        "analyzed_attempt_count": analyzed_count,
+        "failed_analysis_count": failed_count,
+        "low_quality_attempt_count": low_quality_count,
+        "low_quality_rate": round(low_quality_count / training_count, 3) if training_count else 0.0,
+        "provider_failure_count": provider_failure_count,
+    }
+
+
+def patient_attempt_rows(
+    db: Session,
+    patient_profile_id: UUID,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+):
+    stmt = (
+        select(Attempt, TrainingSession, SessionTask, AttemptScore, AttemptAnalysisResult)
+        .join(SessionTask, SessionTask.id == Attempt.session_task_id)
+        .join(TrainingSession, TrainingSession.id == SessionTask.training_session_id)
+        .outerjoin(AttemptScore, AttemptScore.attempt_id == Attempt.id)
+        .outerjoin(AttemptAnalysisResult, AttemptAnalysisResult.attempt_id == Attempt.id)
+        .where(TrainingSession.patient_profile_id == patient_profile_id)
+        .order_by(Attempt.created_at.desc())
+    )
+    if date_from:
+        stmt = stmt.where(Attempt.created_at >= date_from)
+    if date_to:
+        stmt = stmt.where(Attempt.created_at <= date_to)
+    return db.execute(stmt).all()
+
+
+def stage_assessments(
+    db: Session,
+    patient_profile_id: UUID,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> list[AssessmentSession]:
+    stmt = (
+        select(AssessmentSession)
+        .where(AssessmentSession.patient_profile_id == patient_profile_id)
+        .order_by(AssessmentSession.assessed_at.asc(), AssessmentSession.created_at.asc())
+    )
+    if date_from:
+        stmt = stmt.where(AssessmentSession.assessed_at >= date_from)
+    if date_to:
+        stmt = stmt.where(AssessmentSession.assessed_at <= date_to)
+    return list(db.scalars(stmt))
 
 
 def save_recommendation_note(

@@ -1,6 +1,8 @@
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.core.response import api_success
@@ -9,6 +11,7 @@ from app.modules.assessment.model import AssessmentReviewStatus, AssessmentType
 from app.modules.assessment.schema import AssessmentCreate, AssessmentReviewUpdate
 from app.modules.profiles.service import get_patient_ability_profile
 from app.modules.therapist import service
+from app.modules.therapist.report_export import render_stage_report_html
 from app.modules.training.schema import TrainingRecommendationReviewUpdate
 from app.modules.training.service import (
     create_task_template,
@@ -20,7 +23,7 @@ from app.modules.training.service import (
     save_patient_recommendation_review,
     update_task_template,
 )
-from app.modules.therapist.schema import RecommendationNoteCreate
+from app.modules.therapist.schema import RecommendationNoteCreate, TherapistPatientAssignmentCreate
 from app.modules.training.model import TrainingType
 from app.modules.training.schema import StrategyFeedbackCreate, TaskTemplateCreate, TaskTemplateUpdate
 from app.modules.users.model import User
@@ -34,8 +37,37 @@ def patients(
     current_user: User = Depends(require_therapist),
     db: Session = Depends(get_db),
 ):
-    result = service.list_patients(db)
+    result = service.list_patients(db, current_user)
     return api_success([item.model_dump(mode="json") for item in result])
+
+
+@router.post("/patient-assignments")
+def create_patient_assignment(
+    payload: TherapistPatientAssignmentCreate,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    result = service.create_patient_assignment(db, current_user, payload.therapist_user_id, payload.patient_user_id)
+    return api_success(result.model_dump(mode="json"))
+
+
+@router.delete("/patient-assignments/{assignment_id}")
+def revoke_patient_assignment(
+    assignment_id: UUID,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    result = service.revoke_patient_assignment(db, current_user, assignment_id)
+    return api_success(result.model_dump(mode="json"))
+
+
+@router.get("/trial-quality")
+def trial_quality(
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    result = service.get_trial_quality(db)
+    return api_success(result.model_dump(mode="json"))
 
 
 @router.get("/task-templates")
@@ -77,6 +109,7 @@ def create_assessment(
     current_user: User = Depends(require_therapist),
     db: Session = Depends(get_db),
 ):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
     result = service.create_patient_assessment(db, current_user, patient_user_id, payload)
     return api_success(result.model_dump(mode="json"))
 
@@ -89,6 +122,7 @@ def history(
     current_user: User = Depends(require_therapist),
     db: Session = Depends(get_db),
 ):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
     result = service.list_patient_assessments(db, patient_user_id, assessment_type, review_status)
     return api_success([item.model_dump(mode="json") for item in result])
 
@@ -101,6 +135,7 @@ def review_assessment(
     current_user: User = Depends(require_therapist),
     db: Session = Depends(get_db),
 ):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
     result = service.review_patient_assessment(db, current_user, patient_user_id, assessment_id, payload)
     return api_success(result.model_dump(mode="json"))
 
@@ -111,6 +146,7 @@ def ability_profile(
     current_user: User = Depends(require_therapist),
     db: Session = Depends(get_db),
 ):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
     result = get_patient_ability_profile(db, patient_user_id)
     return api_success(result.model_dump(mode="json"))
 
@@ -121,6 +157,7 @@ def training_recommendation(
     current_user: User = Depends(require_therapist),
     db: Session = Depends(get_db),
 ):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
     result = get_patient_recommendation_for_therapist(db, patient_user_id)
     return api_success(result.model_dump(mode="json"))
 
@@ -131,6 +168,7 @@ def training_records(
     current_user: User = Depends(require_therapist),
     db: Session = Depends(get_db),
 ):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
     result = service.list_patient_training_records(db, patient_user_id)
     return api_success([item.model_dump(mode="json") for item in result])
 
@@ -141,8 +179,35 @@ def training_trends(
     current_user: User = Depends(require_therapist),
     db: Session = Depends(get_db),
 ):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
     result = service.get_patient_training_trends(db, patient_user_id)
     return api_success(result.model_dump(mode="json"))
+
+
+@router.get("/patients/{patient_user_id}/stage-report")
+def stage_report(
+    patient_user_id: UUID,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
+    result = service.get_patient_stage_report(db, patient_user_id, date_from, date_to)
+    return api_success(result.model_dump(mode="json"))
+
+
+@router.get("/patients/{patient_user_id}/stage-report/export", response_class=HTMLResponse)
+def stage_report_export(
+    patient_user_id: UUID,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
+    result = service.get_patient_stage_report(db, patient_user_id, date_from, date_to)
+    return HTMLResponse(render_stage_report_html(result))
 
 
 @router.get("/patients/{patient_user_id}/recommendation-note")
@@ -151,6 +216,7 @@ def recommendation_note(
     current_user: User = Depends(require_therapist),
     db: Session = Depends(get_db),
 ):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
     result = service.get_latest_recommendation_note(db, patient_user_id)
     return api_success(result.model_dump(mode="json"))
 
@@ -162,6 +228,7 @@ def save_recommendation_note(
     current_user: User = Depends(require_therapist),
     db: Session = Depends(get_db),
 ):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
     result = service.save_recommendation_note(db, current_user, patient_user_id, payload.note)
     return api_success(result.model_dump(mode="json"))
 
@@ -178,6 +245,7 @@ def review_training_recommendation(
     current_user: User = Depends(require_therapist),
     db: Session = Depends(get_db),
 ):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
     result = save_patient_recommendation_review(db, current_user, patient_user_id, payload)
     return api_success(result.model_dump(mode="json"))
 
@@ -188,6 +256,7 @@ def training_recommendation_effects(
     current_user: User = Depends(require_therapist),
     db: Session = Depends(get_db),
 ):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
     result = get_patient_recommendation_effects(db, patient_user_id)
     return api_success(result.model_dump(mode="json"))
 
@@ -204,6 +273,7 @@ def strategy_feedback(
     current_user: User = Depends(require_therapist),
     db: Session = Depends(get_db),
 ):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
     result = create_strategy_feedback(db, current_user, patient_user_id, payload)
     return api_success(result.model_dump(mode="json"))
 
@@ -225,5 +295,6 @@ def compare(
     current_user: User = Depends(require_therapist),
     db: Session = Depends(get_db),
 ):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
     result = service.compare_patient_assessments(db, patient_user_id, baseline_id, current_id)
     return api_success(result.model_dump(mode="json"))

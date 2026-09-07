@@ -17,7 +17,9 @@ def load_env_file(env_path: Path) -> None:
 class Settings:
     app_name: str = "言语康复智能体 API"
     api_prefix: str = "/api"
+    log_level: str
     database_url: str
+    database_connect_timeout_seconds: int
     secret_key: str
     algorithm: str = "HS256"
     access_token_expire_minutes: int
@@ -39,6 +41,10 @@ class Settings:
     ffmpeg_bin: str | None
     acoustic_dba_calibration_offset: float
     acoustic_voice_threshold_dbfs: float
+    tts_provider: str
+    tts_api_key: str | None
+    tts_base_url: str | None
+    tts_model: str | None
     llm_feedback_provider: str
     llm_feedback_api_key: str | None
     llm_feedback_base_url: str | None
@@ -52,6 +58,8 @@ class Settings:
             "DATABASE_URL",
             "postgresql+psycopg://postgres:postgres@localhost:5432/speech_rehab_agent",
         )
+        self.log_level = os.getenv("LOG_LEVEL", "INFO")
+        self.database_connect_timeout_seconds = int(os.getenv("DATABASE_CONNECT_TIMEOUT_SECONDS", "5"))
         self.secret_key = os.getenv("SECRET_KEY", "dev-only-secret")
         self.access_token_expire_minutes = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
         cors = os.getenv("BACKEND_CORS_ORIGINS", "http://localhost:5173")
@@ -66,6 +74,7 @@ class Settings:
         self.asr_provider = os.getenv("ASR_PROVIDER", "mock").strip().lower() or "mock"
         self.asr_api_key = os.getenv("ASR_API_KEY")
         self.asr_base_url = os.getenv("ASR_BASE_URL")
+        self.asr_timeout_seconds = int(os.getenv("ASR_TIMEOUT_SECONDS", "10"))
         self.tencentcloud_secret_id = os.getenv("TENCENTCLOUD_SECRET_ID")
         self.tencentcloud_secret_key = os.getenv("TENCENTCLOUD_SECRET_KEY")
         self.tencent_asr_app_id = os.getenv("TENCENT_ASR_APP_ID")
@@ -78,10 +87,23 @@ class Settings:
         self.ffmpeg_bin = os.getenv("FFMPEG_BIN")
         self.acoustic_dba_calibration_offset = float(os.getenv("ACOUSTIC_DBA_CALIBRATION_OFFSET", "90"))
         self.acoustic_voice_threshold_dbfs = float(os.getenv("ACOUSTIC_VOICE_THRESHOLD_DBFS", "-45"))
+        self.acoustic_min_speaking_seconds = float(os.getenv("ACOUSTIC_MIN_SPEAKING_SECONDS", "1.0"))
+        self.acoustic_min_loudness_dba = float(os.getenv("ACOUSTIC_MIN_LOUDNESS_DBA", "45"))
+        self.tts_provider = os.getenv("TTS_PROVIDER", "mock").strip().lower() or "mock"
+        self.tts_api_key = os.getenv("TTS_API_KEY")
+        self.tts_base_url = os.getenv("TTS_BASE_URL")
+        self.tts_model = os.getenv("TTS_MODEL")
         self.llm_feedback_provider = os.getenv("LLM_FEEDBACK_PROVIDER", "mock").strip().lower() or "mock"
         self.llm_feedback_api_key = os.getenv("LLM_FEEDBACK_API_KEY")
         self.llm_feedback_base_url = os.getenv("LLM_FEEDBACK_BASE_URL")
         self.llm_feedback_model = os.getenv("LLM_FEEDBACK_MODEL")
+
+    @property
+    def effective_database_url(self) -> str:
+        if not self.database_url.startswith("postgresql") or "connect_timeout=" in self.database_url:
+            return self.database_url
+        separator = "&" if "?" in self.database_url else "?"
+        return f"{self.database_url}{separator}connect_timeout={self.database_connect_timeout_seconds}"
 
 
 @lru_cache

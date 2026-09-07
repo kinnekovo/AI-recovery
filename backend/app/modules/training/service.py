@@ -1,9 +1,12 @@
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.integrations.tts.provider import get_tts_provider
+from app.modules.agents.model import Agent
 from app.modules.training.model import (
     RecommendationReviewStatus,
     RecommendationStrategyFeedback,
@@ -27,8 +30,12 @@ from app.modules.attempts.model import Attempt
 from app.modules.evaluations.model import AttemptEvaluation, EvaluationMetric, EvaluationSource
 from app.modules.evaluations.service import PROCESS_METRIC_NAMES
 from app.modules.files.service import public_url
+from app.modules.files.model import FileAsset, FileType
 from app.modules.scoring.model import AttemptAnalysisResult
+from app.modules.consent.service import require_active_consent
 from app.modules.training.schema import (
+    AvatarSpeechCreate,
+    AvatarSpeechRead,
     FamilyObservationRead,
     Phase3DemoStatusRead,
     RecommendationEffectRead,
@@ -470,11 +477,14 @@ def build_family_observation_for_patient(
     effects = get_patient_recommendation_effects(db, patient.id)
     feedback = latest_strategy_feedback(db, profile.id)
     training_count = db.scalar(select(func.count(TrainingSession.id)).where(TrainingSession.patient_profile_id == profile.id))
+    last_training_at = latest_training_at(db, profile.id)
     family_visuals = build_family_visuals(effects)
     return FamilyObservationRead(
         patient_username=patient.username,
         training_count=training_count or 0,
         completed_recommended_sessions=effects.completed_recommended_sessions,
+        last_training_at=last_training_at,
+        adherence_summary=family_adherence_summary(training_count or 0, effects.completed_recommended_sessions, last_training_at),
         recommendation_headline=recommendation.headline,
         recommendation_source=recommendation.source,
         trend_summary=effects.trend_summary,
@@ -491,6 +501,25 @@ def build_family_observation_for_patient(
         bound_patients=bound_patients or [],
         selected_patient_user_id=patient.id,
     )
+
+
+def latest_training_at(db: Session, patient_profile_id: UUID):
+    return db.scalar(
+        select(func.max(Attempt.created_at))
+        .join(SessionTask, SessionTask.id == Attempt.session_task_id)
+        .join(TrainingSession, TrainingSession.id == SessionTask.training_session_id)
+        .where(TrainingSession.patient_profile_id == patient_profile_id)
+    )
+
+
+def family_adherence_summary(training_count: int, completed_recommended_sessions: int, last_training_at) -> str:
+    if training_count <= 0:
+        return "还没有训练记录，可以先陪他完成一次短句练习。"
+    if completed_recommended_sessions <= 0:
+        return f"已经练了 {training_count} 次，但还没有完成建议训练，可以先陪他按今日建议完成一组。"
+    if last_training_at:
+        return f"已经练了 {training_count} 次，其中 {completed_recommended_sessions} 次完成建议训练，最近一次在 {last_training_at.strftime('%m月%d日')}。"
+    return f"已经练了 {training_count} 次，其中 {completed_recommended_sessions} 次完成建议训练。"
 
 
 def build_family_visuals(effects: RecommendationEffectSummaryRead) -> dict:
@@ -1257,6 +1286,65 @@ def get_session(db: Session, user: User, session_id: UUID) -> TrainingSession:
     if not session:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="训练会话不存在")
     return session
+
+
+def create_avatar_speech(db: Session, user: User, payload: AvatarSpeechCreate) -> AvatarSpeechRead:
+    text = payload.text.strip()
+    scene = payload.scene.strip()
+    if not text:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="数字人口播文本不能为空")
+    if len(text) > 160:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="数字人口播文本过长")
+    if not scene:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="数字人口播场景不能为空")
+
+    profile = get_patient_profile(db, user)
+    if profile.current_agent_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先创建并选择智能体")
+    agent = db.get(Agent, profile.current_agent_id)
+    if not agent or agent.patient_profile_id != profile.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先创建并选择智能体")
+
+    session = None
+    if payload.session_id:
+        session = get_session(db, user, payload.session_id)
+    if payload.session_task_id:
+        task = db.scalar(
+            select(SessionTask)
+            .join(TrainingSession, TrainingSession.id == SessionTask.training_session_id)
+            .where(SessionTask.id == payload.session_task_id, TrainingSession.patient_profile_id == profile.id)
+        )
+        if not task:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="训练任务不存在")
+        if session and task.training_session_id != session.id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="训练任务不属于当前会话")
+
+    provider = get_tts_provider()
+    fallback = agent.voice_external_id is None
+    if agent.voice_external_id:
+        require_active_consent(db, user, agent.id, "voice")
+    audio_path = provider.synthesize(text, agent.voice_external_id or "default")
+    path = Path(audio_path)
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="数字人口播音频生成失败")
+    asset = FileAsset(
+        owner_user_id=user.id,
+        file_type=FileType.generated_audio,
+        original_name=path.name,
+        storage_path=str(path),
+        mime_type="audio/wav",
+        size_bytes=path.stat().st_size,
+    )
+    db.add(asset)
+    db.commit()
+    db.refresh(asset)
+    return AvatarSpeechRead(
+        text=text,
+        audio_file_id=asset.id,
+        audio_url=public_url(asset),
+        provider=provider.name,
+        fallback=fallback,
+    )
 
 
 def complete_session_if_needed(db: Session, session: TrainingSession) -> None:

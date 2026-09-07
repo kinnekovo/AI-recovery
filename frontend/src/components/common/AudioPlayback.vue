@@ -8,6 +8,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { http } from '@/api/http'
+import { toUserMessage } from '@/utils/errors'
 
 const props = defineProps<{ src: string | null | undefined; compact?: boolean }>()
 const objectUrl = ref('')
@@ -26,7 +27,7 @@ watch(
       const response = await http.get<Blob>(url, { responseType: 'blob' })
       objectUrl.value = URL.createObjectURL(response.data)
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '录音加载失败'
+      error.value = toUserMessage(err, '录音加载失败')
     } finally {
       loading.value = false
     }

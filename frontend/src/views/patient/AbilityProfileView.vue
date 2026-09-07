@@ -74,6 +74,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { profilesApi } from '@/api/profiles'
 import type { AbilityProfile } from '@/types/api'
+import { toUserMessage } from '@/utils/errors'
 
 const profile = ref<AbilityProfile | null>(null)
 const loading = ref(true)
@@ -132,7 +133,7 @@ async function loadProfile() {
   try {
     profile.value = await profilesApi.ability()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '能力画像加载失败'
+    error.value = toUserMessage(err, '能力画像加载失败')
   } finally {
     loading.value = false
   }

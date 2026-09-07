@@ -27,5 +27,25 @@ def patients(
     current_user: User = Depends(require_family),
     db: Session = Depends(get_db),
 ):
-    result = service.list_bound_patients(db, current_user)
+    result = service.list_family_bindings(db, current_user)
     return api_success([item.model_dump(mode="json") for item in result])
+
+
+@router.post("/bindings/{binding_id}/confirm")
+def confirm_binding(
+    binding_id: UUID,
+    current_user: User = Depends(require_family),
+    db: Session = Depends(get_db),
+):
+    result = service.update_binding_status(db, current_user, binding_id, "active")
+    return api_success(result.model_dump(mode="json"))
+
+
+@router.post("/bindings/{binding_id}/revoke")
+def revoke_binding(
+    binding_id: UUID,
+    current_user: User = Depends(require_family),
+    db: Session = Depends(get_db),
+):
+    result = service.update_binding_status(db, current_user, binding_id, "revoked")
+    return api_success(result.model_dump(mode="json"))

@@ -20,6 +20,7 @@ class AgentRead(BaseModel):
     relationship: str
     personality_style: str
     avatar_file_id: UUID | None = None
+    avatar_url: str | None = None
     voice_sample_file_id: UUID | None = None
     welcome_audio_file_id: UUID | None = None
     voice_external_id: str | None = None

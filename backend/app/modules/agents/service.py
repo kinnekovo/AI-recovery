@@ -9,7 +9,7 @@ from app.integrations.tts.provider import get_tts_provider
 from app.integrations.voice_clone.provider import get_voice_clone_provider
 from app.modules.agents.model import Agent, AgentGenerationStatus
 from app.modules.agents.schema import AgentCreate
-from app.modules.consent.service import record_consent
+from app.modules.consent.service import record_consent, require_active_consent
 from app.modules.files.model import FileAsset, FileType
 from app.modules.files.service import public_url, save_upload
 from app.modules.users.model import OnboardingStatus, User
@@ -55,6 +55,7 @@ def get_owned_agent(db: Session, user: User, agent_id: UUID) -> Agent:
 
 def upload_avatar(db: Session, user: User, agent_id: UUID, upload: UploadFile) -> Agent:
     agent = get_owned_agent(db, user, agent_id)
+    record_consent(db, user, agent.id, "image")
     asset = save_upload(db, user, upload, FileType.agent_image)
     agent.avatar_file_id = asset.id
     agent.image_consent_confirmed = True
@@ -65,6 +66,7 @@ def upload_avatar(db: Session, user: User, agent_id: UUID, upload: UploadFile) -
 
 def upload_voice_sample(db: Session, user: User, agent_id: UUID, upload: UploadFile) -> Agent:
     agent = get_owned_agent(db, user, agent_id)
+    record_consent(db, user, agent.id, "voice")
     asset = save_upload(db, user, upload, FileType.voice_sample)
     voice_id = get_voice_clone_provider().clone_voice(asset.storage_path)
     agent.voice_sample_file_id = asset.id
@@ -80,6 +82,7 @@ def generate_welcome_audio(db: Session, user: User, agent_id: UUID) -> tuple[Age
     agent = get_owned_agent(db, user, agent_id)
     if not agent.voice_external_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先上传声音样本")
+    require_active_consent(db, user, agent.id, "voice")
     text = f"{agent.name}已经准备好了，我们一起开始今天的练习。"
     audio_path = get_tts_provider().synthesize(text, agent.voice_external_id)
     asset = FileAsset(

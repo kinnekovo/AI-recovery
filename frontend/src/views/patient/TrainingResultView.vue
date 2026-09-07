@@ -3,7 +3,7 @@
     <div class="page-heading">
       <span class="kicker">单题反馈</span>
       <h1>这次训练已经保存</h1>
-      <p>以下是本次训练的过程性指标和练习建议，不代表临床诊断。</p>
+      <p>以下是本次练习表现和下一步建议，只用于训练参考，不代表临床诊断。</p>
     </div>
     <ProcessFeedbackPanel v-if="feedback" :result="feedback" />
     <section v-if="feedback?.audio_url" class="recording-playback-panel patient-playback">

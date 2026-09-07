@@ -225,6 +225,14 @@ import type {
   EvaluationSource,
   TherapistPatient
 } from '@/types/api'
+import { toUserMessage } from '@/utils/errors'
+import {
+  formatMetricValue,
+  isProcessMetricKey,
+  processMetricBrief,
+  processMetricCatalog,
+  processMetricTone
+} from '@/utils/processMetrics'
 
 const patients = ref<TherapistPatient[]>([])
 const selectedPatientId = ref('')
@@ -248,11 +256,7 @@ const assessmentTypeOptions: Array<{ value: AssessmentType; label: string }> = [
   { value: 'post_training', label: '训练结束后' }
 ]
 
-const metricLabels: Record<string, { label: string; unit: string; polarity: 'positive' | 'negative' | 'neutral' }> = {
-  script_accuracy: { label: '脚本完成度', unit: '%', polarity: 'positive' },
-  error_count: { label: '错误次数', unit: '次', polarity: 'negative' },
-  speech_rate: { label: '说话速度', unit: '字/min', polarity: 'neutral' },
-  loudness: { label: '声音响度', unit: 'dBA', polarity: 'neutral' },
+const longTermMetricLabels: Record<string, { label: string; unit: string; polarity: 'positive' | 'negative' | 'neutral' }> = {
   wab_information: { label: 'WAB 信息量', unit: '分', polarity: 'positive' },
   wab_fluency: { label: 'WAB 流利性', unit: '分', polarity: 'positive' },
   wab_grammar: { label: 'WAB 语法', unit: '分', polarity: 'positive' },
@@ -263,6 +267,11 @@ const metricLabels: Record<string, { label: string; unit: string; polarity: 'pos
   acceptance_score: { label: '接受度', unit: '分', polarity: 'positive' }
 }
 
+function metricDefinition(key: string) {
+  if (isProcessMetricKey(key)) return processMetricCatalog[key]
+  return longTermMetricLabels[key]
+}
+
 const selectedPatient = computed(() => patients.value.find((item) => item.user_id === selectedPatientId.value))
 const selectedAssessment = computed(() => history.value.find((item) => item.id === selectedAssessmentId.value))
 const displayHistory = computed(() => [...history.value].reverse())
@@ -271,8 +280,8 @@ const metricCards = computed(() => {
   const metrics = selectedAssessment.value?.metrics || {}
   return Object.entries(metrics).map(([key, value]) => ({
     key,
-    label: metricLabels[key]?.label || key,
-    unit: metricLabels[key]?.unit || '',
+    label: metricDefinition(key)?.label || key,
+    unit: metricDefinition(key)?.unit || '',
     value: valueOrDash(value),
     tone: metricTone(key, value),
     brief: metricBrief(key, value)
@@ -327,10 +336,10 @@ const hasCompare = computed(
 const comparisonRows = computed(() => {
   if (!compare.value) return []
   return Object.entries(compare.value.metrics)
-    .filter(([key]) => metricLabels[key])
+    .filter(([key]) => metricDefinition(key))
     .map(([key, item]) => ({
       key,
-      label: metricLabels[key].label,
+      label: metricDefinition(key).label,
       baseline: valueOrDash(item.baseline),
       current: valueOrDash(item.current),
       change: valueOrDash(item.change)
@@ -343,7 +352,7 @@ onMounted(async () => {
     patients.value.sort((left, right) => right.pending_review_count - left.pending_review_count)
     if (patients.value[0]) await selectPatient(patients.value[0].user_id)
   } catch (err) {
-    pageError.value = err instanceof Error ? err.message : '患者列表加载失败'
+    pageError.value = toUserMessage(err, '患者列表加载失败')
   } finally {
     loading.value = false
   }
@@ -370,7 +379,7 @@ async function loadPatientAssessments() {
     selectedAssessmentId.value = pending?.id || history.value[history.value.length - 1]?.id || ''
     syncReviewForm()
   } catch (err) {
-    pageError.value = err instanceof Error ? err.message : '评估记录加载失败'
+    pageError.value = toUserMessage(err, '评估记录加载失败')
   } finally {
     historyLoading.value = false
   }
@@ -418,7 +427,7 @@ async function submitReview(reviewStatus: Extract<AssessmentReviewStatus, 'confi
     formSuccess.value = reviewStatus === 'confirmed' ? '自动评估已确认。' : '评估修正已保存。'
     await refreshAfterReview(reviewed.id)
   } catch (err) {
-    formError.value = err instanceof Error ? err.message : '复核提交失败'
+    formError.value = toUserMessage(err, '复核提交失败')
   } finally {
     reviewSubmitting.value = false
   }
@@ -442,7 +451,7 @@ function buildMetricPayload(): Record<string, number> | null {
   for (const [key, rawValue] of Object.entries(metricEdits.value)) {
     const value = Number(rawValue)
     if (!Number.isFinite(value)) {
-      formError.value = `${metricLabels[key]?.label || key} 需要填写数字。`
+      formError.value = `${metricDefinition(key)?.label || key} 需要填写数字。`
       return null
     }
     metrics[key] = value
@@ -487,26 +496,12 @@ function sourceLabel(value: EvaluationSource) {
 }
 
 function metricTone(key: string, value: number) {
-  if (key === 'script_accuracy') return value >= 90 ? 'good' : 'watch'
-  if (key === 'error_count') return value <= 1 ? 'good' : 'watch'
-  if (key === 'speech_rate') return value >= 180 && value <= 240 ? 'good' : 'watch'
-  if (key === 'loudness') return value >= 60 && value <= 78 ? 'good' : 'watch'
+  if (isProcessMetricKey(key)) return processMetricTone(key, value)
   return 'neutral'
 }
 
 function metricBrief(key: string, value: number) {
-  if (key === 'script_accuracy') return value >= 90 ? '表达完整度较好' : '表达完整度需关注'
-  if (key === 'error_count') return value <= 1 ? '错误较少' : '错误偏多'
-  if (key === 'speech_rate') {
-    if (value < 180) return '节奏偏慢'
-    if (value > 240) return '节奏偏快'
-    return '节奏稳定'
-  }
-  if (key === 'loudness') {
-    if (value < 60) return '声音偏轻'
-    if (value > 78) return '声音偏响'
-    return '音量稳定'
-  }
+  if (isProcessMetricKey(key)) return processMetricBrief(key, value)
   return '可作为阶段参考'
 }
 
@@ -548,6 +543,6 @@ function shortId(value: string) {
 
 function valueOrDash(value: number | null | undefined) {
   if (value == null) return '--'
-  return Number.isInteger(value) ? String(value) : value.toFixed(1)
+  return formatMetricValue(value)
 }
 </script>

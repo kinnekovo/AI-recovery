@@ -10,6 +10,7 @@ from app.modules.evaluations.model import AttemptEvaluation, EvaluationMetric, E
 from app.modules.evaluations.service import PROCESS_METRIC_NAMES
 from app.modules.profiles.model import AbilityProfile
 from app.modules.profiles.schema import AbilityProfileRead
+from app.modules.scoring.model import AttemptAnalysisResult
 from app.modules.training.model import SessionTask, TrainingSession
 from app.modules.users.model import PatientProfile, User, UserRole
 from app.modules.users.service import get_patient_profile
@@ -73,9 +74,17 @@ def refresh_ability_profile(db: Session, patient_profile_id: UUID) -> AbilityPro
 
 def recent_process_metrics(db: Session, patient_profile_id: UUID) -> list[dict[str, float]]:
     rows = db.execute(
-        select(Attempt.id, Attempt.created_at, EvaluationMetric.name, AttemptEvaluation.value)
+        select(
+            Attempt.id,
+            Attempt.created_at,
+            Attempt.audio_quality,
+            AttemptAnalysisResult.semantic_metrics,
+            EvaluationMetric.name,
+            AttemptEvaluation.value,
+        )
         .join(AttemptEvaluation, AttemptEvaluation.attempt_id == Attempt.id)
         .join(EvaluationMetric, EvaluationMetric.id == AttemptEvaluation.metric_id)
+        .join(AttemptAnalysisResult, AttemptAnalysisResult.attempt_id == Attempt.id)
         .join(SessionTask, SessionTask.id == Attempt.session_task_id)
         .join(TrainingSession, TrainingSession.id == SessionTask.training_session_id)
         .where(
@@ -86,16 +95,40 @@ def recent_process_metrics(db: Session, patient_profile_id: UUID) -> list[dict[s
         .order_by(Attempt.created_at.desc())
     ).all()
     grouped: dict[UUID, dict] = {}
-    for attempt_id, created_at, metric_name, value in rows:
+    for attempt_id, created_at, audio_quality, semantic_metrics, metric_name, value in rows:
         if attempt_id not in grouped:
-            grouped[attempt_id] = {"created_at": created_at, "metrics": {}}
+            grouped[attempt_id] = {
+                "created_at": created_at,
+                "audio_quality": audio_quality,
+                "semantic_metrics": semantic_metrics or {},
+                "metrics": {},
+            }
         grouped[attempt_id]["metrics"][metric_name] = float(value)
     complete_points = [
         data["metrics"]
         for data in sorted(grouped.values(), key=lambda item: item["created_at"], reverse=True)
         if PROCESS_METRIC_NAMES.issubset(data["metrics"].keys())
+        and is_profile_eligible_analysis(data["audio_quality"], data["semantic_metrics"])
     ]
     return complete_points[:RECENT_ATTEMPT_LIMIT]
+
+
+def is_profile_eligible_analysis(audio_quality: str | None, semantic_metrics: dict | None) -> bool:
+    if audio_quality != "pass":
+        return False
+    if not semantic_metrics:
+        return False
+    if semantic_metrics.get("asr_fallback_used"):
+        return False
+    if semantic_metrics.get("asr_provider") == "mock":
+        return False
+    process = semantic_metrics.get("process_monitoring") or {}
+    if process.get("evaluation_source") == EvaluationSource.mock_ai.value:
+        return False
+    sources = process.get("input_sources") or {}
+    if sources.get("asr_provider") == "mock" or sources.get("acoustic_provider") == "mock":
+        return False
+    return True
 
 
 def reviewed_assessment_summary(db: Session, patient_profile_id: UUID) -> dict:

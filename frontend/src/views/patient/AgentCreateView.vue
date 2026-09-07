@@ -27,6 +27,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppButton from '@/components/common/AppButton.vue'
 import { agentsApi } from '@/api/agents'
+import { toUserMessage } from '@/utils/errors'
 
 const router = useRouter()
 const form = ref({ name: '', relationship: '', personality_style: '温柔鼓励' })
@@ -62,7 +63,7 @@ async function submit() {
     await agentsApi.setCurrent(agent.id)
     router.push('/agent/list')
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '创建失败'
+    error.value = toUserMessage(err, '创建失败')
   } finally {
     loading.value = false
   }

@@ -27,7 +27,7 @@
       <div class="panel-heading">
         <div>
           <h2>最近表现</h2>
-          <p>系统把专业指标转成练习时更容易理解的说法。</p>
+        <p>这里用简短的话说明最近练习状态，方便你决定下一次怎么练。</p>
         </div>
       </div>
       <div v-if="hasProcessData" class="metric-grid report-metrics">
@@ -61,6 +61,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { reportsApi } from '@/api/reports'
 import type { LatestReport, ProcessMonitoringSummary } from '@/types/api'
+import { toUserMessage } from '@/utils/errors'
+import { formatPatientMetricValue, type ProcessMetricKey } from '@/utils/processMetrics'
 
 const report = ref<LatestReport | null>(null)
 const loading = ref(true)
@@ -90,30 +92,24 @@ const processMetricCards = computed(() => {
   const summary = report.value?.process_monitoring_summary
   return [
     {
-      key: 'expression',
+      key: 'script_accuracy',
       label: '平均表达完整度',
-      value: toPercent(summary?.avg_script_accuracy)
+      value: patientValue('script_accuracy', summary?.avg_script_accuracy)
     },
     {
-      key: 'attention',
-      label: '平均需要留意',
-      value: summary?.avg_error_count === null || summary?.avg_error_count === undefined
-        ? '--'
-        : `${formatNumber(summary.avg_error_count)}处`
+      key: 'error_count',
+      label: '需要留意的地方',
+      value: patientValue('error_count', summary?.avg_error_count)
     },
     {
-      key: 'pace',
+      key: 'speech_rate',
       label: '说话节奏',
-      value: summary?.avg_speech_rate === null || summary?.avg_speech_rate === undefined
-        ? '--'
-        : paceLabel(summary.avg_speech_rate)
+      value: patientValue('speech_rate', summary?.avg_speech_rate)
     },
     {
-      key: 'voice',
+      key: 'loudness',
       label: '声音状态',
-      value: summary?.avg_loudness === null || summary?.avg_loudness === undefined
-        ? '--'
-        : loudnessLabel(summary.avg_loudness)
+      value: patientValue('loudness', summary?.avg_loudness)
     }
   ]
 })
@@ -134,29 +130,13 @@ onMounted(async () => {
   try {
     report.value = await reportsApi.latest()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '康复记录加载失败，请稍后重试。'
+    error.value = toUserMessage(err, '康复记录加载失败，请稍后重试。')
   } finally {
     loading.value = false
   }
 })
 
-function toPercent(value: ProcessMonitoringSummary[keyof ProcessMonitoringSummary] | undefined) {
-  return value === null || value === undefined ? '--' : `${formatNumber(value)}%`
-}
-
-function paceLabel(value: number) {
-  if (value < 180) return '偏慢'
-  if (value > 240) return '偏快'
-  return '合适'
-}
-
-function loudnessLabel(value: number) {
-  if (value < 60) return '偏轻'
-  if (value > 78) return '偏响'
-  return '稳定'
-}
-
-function formatNumber(value: number) {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1)
+function patientValue(key: ProcessMetricKey, value: ProcessMonitoringSummary[keyof ProcessMonitoringSummary] | undefined) {
+  return value === null || value === undefined ? '--' : formatPatientMetricValue(key, value)
 }
 </script>

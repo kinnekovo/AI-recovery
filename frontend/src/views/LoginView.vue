@@ -29,6 +29,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppButton from '@/components/common/AppButton.vue'
 import { useAuthStore } from '@/stores/auth'
+import { toUserMessage } from '@/utils/errors'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -51,7 +52,7 @@ async function submit() {
     else await auth.register(username.value, password.value)
     router.push('/home')
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '操作失败，请稍后再试'
+    error.value = toUserMessage(err, '操作失败，请稍后再试')
   } finally {
     loading.value = false
   }

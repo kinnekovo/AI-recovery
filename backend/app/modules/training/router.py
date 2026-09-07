@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.response import api_success
 from app.database.session import get_db
 from app.modules.training import service
-from app.modules.training.schema import TrainingSessionCreate, TrainingSessionRead
+from app.modules.training.schema import AvatarSpeechCreate, TrainingSessionCreate, TrainingSessionRead
 from app.modules.users.model import User
 from app.modules.users.service import require_patient
 
@@ -56,3 +56,13 @@ def get_session(
 ):
     session = service.get_session(db, current_user, session_id)
     return api_success(TrainingSessionRead.model_validate(session).model_dump(mode="json"))
+
+
+@router.post("/avatar-speech")
+def create_avatar_speech(
+    payload: AvatarSpeechCreate,
+    current_user: User = Depends(require_patient),
+    db: Session = Depends(get_db),
+):
+    result = service.create_avatar_speech(db, current_user, payload)
+    return api_success(result.model_dump(mode="json"))

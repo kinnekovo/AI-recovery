@@ -3,20 +3,13 @@ from typing import Any
 
 from app.integrations.acoustic_analysis.provider import AcousticAnalysisResult
 from app.modules.evaluations.model import EvaluationSource
+from app.modules.evaluations.process_metrics import PROCESS_REFERENCE_RANGES
 from app.modules.evaluations.schema import ProcessEvaluation
 from app.modules.training.model import TaskTemplate, TrainingType
 
 
 PUNCTUATION = set("，。！？,.!?、；;：:“”\"'（）()《》<>【】[] \n\r\t")
 FILLER_CHARS = {"呃", "啊", "嗯", "额"}
-REFERENCE_RANGES = {
-    "correct_script_word_rate": "100%",
-    "error_count": "0",
-    "speech_rate_wpm": "180-240字/min",
-    "loudness_dba": "60-78 dBA",
-}
-
-
 def normalize_chars(text: str, *, drop_fillers: bool = False) -> list[str]:
     chars: list[str] = []
     for char in text:
@@ -101,7 +94,7 @@ def _mock_process_evaluation(template: TaskTemplate, acoustic: AcousticAnalysisR
                 "addition": 0,
                 "omission": total_script_chars - correct_chars,
             },
-            "reference_ranges": REFERENCE_RANGES,
+            "reference_ranges": PROCESS_REFERENCE_RANGES,
             "evaluation_source": EvaluationSource.mock_ai.value,
             "provider_version": "mock-process-v1",
             "limitations": ["当前 ASR 为 mock，过程性监控结果仅用于流程联调。"],
@@ -156,7 +149,7 @@ def generate_process_evaluation(
             "addition": alignment["addition"],
             "omission": alignment["omission"],
         },
-        "reference_ranges": REFERENCE_RANGES,
+        "reference_ranges": PROCESS_REFERENCE_RANGES,
         "evaluation_source": "system_rule",
         "provider_version": "process-rule-v1",
         "input_sources": {

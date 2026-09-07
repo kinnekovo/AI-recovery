@@ -11,6 +11,7 @@ from app.modules.evaluations.model import (
     EvaluationMetricCategory,
     EvaluationSource,
 )
+from app.modules.evaluations.process_metrics import PROCESS_METRIC_DEFINITIONS, PROCESS_METRIC_NAMES
 from app.modules.evaluations.process_engine import generate_process_evaluation
 from app.modules.evaluations.schema import (
     AttemptEvaluationBatchCreate,
@@ -30,30 +31,30 @@ DEFAULT_METRICS = [
     {
         "name": "script_accuracy",
         "category": EvaluationMetricCategory.process,
-        "description": "正确发音字数 / 脚本总字数，用于衡量脚本输出完整性。",
-        "unit": "%",
-        "normal_range": {"target": 100, "operator": ">="},
+        "description": PROCESS_METRIC_DEFINITIONS["script_accuracy"]["description"],
+        "unit": PROCESS_METRIC_DEFINITIONS["script_accuracy"]["unit"],
+        "normal_range": PROCESS_METRIC_DEFINITIONS["script_accuracy"]["normal_range"],
     },
     {
         "name": "error_count",
         "category": EvaluationMetricCategory.process,
-        "description": "无意义重复、超过3秒停顿、难以理解发音和插入语的总次数。",
-        "unit": "次",
-        "normal_range": {"target": 0, "operator": "=="},
+        "description": PROCESS_METRIC_DEFINITIONS["error_count"]["description"],
+        "unit": PROCESS_METRIC_DEFINITIONS["error_count"]["unit"],
+        "normal_range": PROCESS_METRIC_DEFINITIONS["error_count"]["normal_range"],
     },
     {
         "name": "speech_rate",
         "category": EvaluationMetricCategory.process,
-        "description": "有效交流字数 / 说话时间。",
-        "unit": "字/min",
-        "normal_range": {"min": 180, "max": 240},
+        "description": PROCESS_METRIC_DEFINITIONS["speech_rate"]["description"],
+        "unit": PROCESS_METRIC_DEFINITIONS["speech_rate"]["unit"],
+        "normal_range": PROCESS_METRIC_DEFINITIONS["speech_rate"]["normal_range"],
     },
     {
         "name": "loudness",
         "category": EvaluationMetricCategory.process,
-        "description": "训练录音的平均响度。",
-        "unit": "dBA",
-        "normal_range": {"min": 60, "max": 78},
+        "description": PROCESS_METRIC_DEFINITIONS["loudness"]["description"],
+        "unit": PROCESS_METRIC_DEFINITIONS["loudness"]["unit"],
+        "normal_range": PROCESS_METRIC_DEFINITIONS["loudness"]["normal_range"],
     },
     {
         "name": "wab_information",
@@ -112,9 +113,6 @@ DEFAULT_METRICS = [
         "normal_range": {},
     },
 ]
-
-
-PROCESS_METRIC_NAMES = {"script_accuracy", "error_count", "speech_rate", "loudness"}
 
 
 def ensure_default_metrics(db: Session) -> None:

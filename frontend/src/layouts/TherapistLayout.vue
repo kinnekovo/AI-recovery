@@ -12,6 +12,7 @@
         <RouterLink to="/therapist">工作台</RouterLink>
         <RouterLink to="/therapist/assessments">阶段评估</RouterLink>
         <RouterLink to="/therapist/profiles">能力画像</RouterLink>
+        <RouterLink to="/therapist/status">系统状态</RouterLink>
       </nav>
       <button class="logout-button" @click="logout">退出登录</button>
     </aside>

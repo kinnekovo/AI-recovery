@@ -34,6 +34,9 @@ if config.config_file_name is not None:
 
 database_url = os.getenv("DATABASE_URL")
 if database_url:
+    if database_url.startswith("postgresql") and "connect_timeout=" not in database_url:
+        separator = "&" if "?" in database_url else "?"
+        database_url = f"{database_url}{separator}connect_timeout=5"
     config.set_main_option("sqlalchemy.url", database_url)
 else:
     raise RuntimeError("DATABASE_URL is not configured. Check backend/.env.")

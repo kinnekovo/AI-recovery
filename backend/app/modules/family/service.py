@@ -11,13 +11,18 @@ from app.modules.users.model import FamilyPatientBinding, PatientProfile, User, 
 
 
 def list_bound_patients(db: Session, family_user: User) -> list[FamilyBoundPatientRead]:
+    return list_family_bindings(db, family_user, active_only=True)
+
+
+def list_family_bindings(db: Session, family_user: User, active_only: bool = False) -> list[FamilyBoundPatientRead]:
+    statuses = family_binding_statuses(active_only)
     rows = db.execute(
         select(FamilyPatientBinding, PatientProfile, User)
         .join(PatientProfile, PatientProfile.id == FamilyPatientBinding.patient_profile_id)
         .join(User, User.id == PatientProfile.user_id)
         .where(
             FamilyPatientBinding.family_user_id == family_user.id,
-            FamilyPatientBinding.status == "active",
+            FamilyPatientBinding.status.in_(statuses),
             User.role == UserRole.patient,
         )
         .order_by(FamilyPatientBinding.created_at.asc())
@@ -36,6 +41,34 @@ def list_bound_patients(db: Session, family_user: User) -> list[FamilyBoundPatie
     ]
 
 
+def family_binding_statuses(active_only: bool = False) -> list[str]:
+    return ["active"] if active_only else ["pending", "active"]
+
+
+def update_binding_status(db: Session, family_user: User, binding_id: UUID, target_status: str) -> FamilyBoundPatientRead:
+    if target_status not in {"active", "revoked"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="绑定状态不支持")
+    binding = db.get(FamilyPatientBinding, binding_id)
+    if not binding or binding.family_user_id != family_user.id or binding.status == "revoked":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="绑定记录不存在")
+    binding.status = target_status
+    db.commit()
+    db.refresh(binding)
+    profile = db.get(PatientProfile, binding.patient_profile_id)
+    patient = db.get(User, profile.user_id) if profile else None
+    if not profile or not patient:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="绑定患者不存在")
+    return FamilyBoundPatientRead(
+        binding_id=binding.id,
+        patient_user_id=patient.id,
+        patient_profile_id=profile.id,
+        patient_username=patient.username,
+        relationship_label=binding.relationship_label,
+        status=binding.status,
+        created_at=binding.created_at,
+    )
+
+
 def get_observation_for_family(
     db: Session,
     family_user: User,
@@ -47,6 +80,8 @@ def get_observation_for_family(
             patient_username="暂无绑定患者",
             training_count=0,
             completed_recommended_sessions=0,
+            last_training_at=None,
+            adherence_summary="还没有绑定患者，暂时无法查看训练坚持情况。",
             recommendation_headline="暂无训练建议",
             recommendation_source="system",
             trend_summary="请先由管理员或治疗师绑定患者后再查看训练情况。",

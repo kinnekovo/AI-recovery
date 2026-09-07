@@ -6,9 +6,14 @@
         <h1>看训练，看趋势，必要时调整建议</h1>
         <p>算法继续负责生成训练推荐；治疗师主要观察患者表现，并用自然语言补充下一次训练重点。</p>
       </div>
-      <button class="app-button secondary" type="button" :disabled="loadingPatientData" @click="reloadSelected">
-        刷新数据
-      </button>
+      <div class="form-actions">
+        <button class="app-button secondary" type="button" :disabled="loadingPatientData" @click="reloadSelected">
+          刷新数据
+        </button>
+        <button class="app-button primary" type="button" :disabled="exportingReport || !selectedPatientId" @click="exportStageReport">
+          {{ exportingReport ? '生成中' : '导出阶段报告' }}
+        </button>
+      </div>
     </div>
 
     <p v-if="loading" class="success-text">正在加载患者列表。</p>
@@ -264,14 +269,15 @@ import AudioPlayback from '@/components/common/AudioPlayback.vue'
 import { therapistApi } from '@/api/therapist'
 import type {
   AbilityProfile,
+  RecommendationEffectSummary,
   TaskTemplate,
   TaskTemplatePayload,
   TherapistPatient,
   TherapistTrainingRecord,
   TherapistTrainingTrends,
-  TrainingRecommendation,
-  RecommendationEffectSummary
+  TrainingRecommendation
 } from '@/types/api'
+import { toUserMessage } from '@/utils/errors'
 
 const patients = ref<TherapistPatient[]>([])
 const selectedPatientId = ref('')
@@ -298,6 +304,7 @@ const loading = ref(true)
 const loadingPatientData = ref(false)
 const savingNote = ref(false)
 const savingTemplate = ref(false)
+const exportingReport = ref(false)
 const pageError = ref('')
 const noteSaved = ref('')
 const templateSaved = ref('')
@@ -313,7 +320,7 @@ onMounted(async () => {
     patients.value.sort((left, right) => right.pending_review_count - left.pending_review_count)
     if (patients.value[0]) await selectPatient(patients.value[0].user_id)
   } catch (err) {
-    pageError.value = err instanceof Error ? err.message : '患者列表加载失败'
+    pageError.value = toUserMessage(err, '患者列表加载失败')
   } finally {
     loading.value = false
   }
@@ -345,7 +352,7 @@ async function reloadSelected() {
     effects.value = effectsResult
     noteText.value = noteResult.note || recommendationResult.therapist_notes || ''
   } catch (err) {
-    pageError.value = err instanceof Error ? err.message : '患者训练数据加载失败'
+    pageError.value = toUserMessage(err, '患者训练数据加载失败')
   } finally {
     loadingPatientData.value = false
   }
@@ -364,9 +371,29 @@ async function saveNote() {
     recommendation.value = await therapistApi.trainingRecommendation(selectedPatientId.value)
     noteSaved.value = note.note ? '调整说明已保存，后续推荐会带上这条治疗师提示。' : '调整说明已清空。'
   } catch (err) {
-    pageError.value = err instanceof Error ? err.message : '调整说明保存失败'
+    pageError.value = toUserMessage(err, '调整说明保存失败')
   } finally {
     savingNote.value = false
+  }
+}
+
+async function exportStageReport() {
+  if (!selectedPatientId.value) return
+  exportingReport.value = true
+  pageError.value = ''
+  try {
+    const response = await therapistApi.stageReportExport(selectedPatientId.value)
+    const url = URL.createObjectURL(response.data)
+    const reportWindow = window.open(url, '_blank', 'noopener,noreferrer')
+    if (!reportWindow) {
+      URL.revokeObjectURL(url)
+      throw new Error('浏览器阻止了报告窗口，请允许弹出窗口后重试。')
+    }
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  } catch (err) {
+    pageError.value = toUserMessage(err, '阶段报告导出失败')
+  } finally {
+    exportingReport.value = false
   }
 }
 
@@ -392,7 +419,7 @@ async function saveTemplate() {
     templateForm.value.target_text = ''
     templateSaved.value = '训练材料已加入内容库。'
   } catch (err) {
-    pageError.value = err instanceof Error ? err.message : '训练材料保存失败'
+    pageError.value = toUserMessage(err, '训练材料保存失败')
   } finally {
     savingTemplate.value = false
   }

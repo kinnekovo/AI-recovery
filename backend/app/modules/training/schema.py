@@ -14,6 +14,21 @@ class TrainingSessionCreate(BaseModel):
     recommendation_task_ids: list[UUID] | None = None
 
 
+class AvatarSpeechCreate(BaseModel):
+    scene: str
+    session_id: UUID | None = None
+    session_task_id: UUID | None = None
+    text: str
+
+
+class AvatarSpeechRead(BaseModel):
+    text: str
+    audio_file_id: UUID | None = None
+    audio_url: str | None = None
+    provider: str
+    fallback: bool = False
+
+
 class TaskTemplateRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -171,6 +186,8 @@ class FamilyObservationRead(BaseModel):
     patient_username: str
     training_count: int
     completed_recommended_sessions: int
+    last_training_at: datetime | None = None
+    adherence_summary: str = "还没有训练记录。"
     recommendation_headline: str
     recommendation_source: str
     trend_summary: str

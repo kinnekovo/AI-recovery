@@ -79,6 +79,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import AudioPlayback from '@/components/common/AudioPlayback.vue'
 import { evaluationsApi } from '@/api/evaluations'
 import type { ProcessMetrics, ProcessTrend } from '@/types/api'
+import { toUserMessage } from '@/utils/errors'
 
 const trend = ref<ProcessTrend>({ items: [] })
 const loading = ref(true)
@@ -159,7 +160,7 @@ async function loadEvaluationData() {
     await nextTick()
     renderTrendChart()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '训练变化加载失败'
+    error.value = toUserMessage(err, '训练变化加载失败')
   } finally {
     loading.value = false
   }

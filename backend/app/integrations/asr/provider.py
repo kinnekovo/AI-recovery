@@ -1,9 +1,29 @@
 import base64
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
 from app.core.config import get_settings
+from app.core.observability import log_event
+from app.core.redaction import provider_error_summary
+
+
+@dataclass(frozen=True)
+class ASRTranscriptionResult:
+    text: str
+    provider_name: str
+    requested_provider: str
+    fallback_used: bool = False
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+class ASRProviderError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
 
 
 class ASRProvider:
@@ -43,7 +63,7 @@ class TencentASRProvider(ASRProvider):
         if not self.secret_key:
             missing.append("TENCENTCLOUD_SECRET_KEY")
         if missing:
-            raise RuntimeError(f"腾讯云 ASR 配置缺失：{', '.join(missing)}")
+            raise ASRProviderError("config_missing", f"腾讯云 ASR 配置缺失：{', '.join(missing)}")
 
     def transcribe(self, audio_path: str) -> str:
         self._validate_config()
@@ -51,7 +71,7 @@ class TencentASRProvider(ASRProvider):
         audio_file = Path(audio_path)
         audio_bytes = audio_file.read_bytes()
         if len(audio_bytes) > self.max_sentence_audio_bytes:
-            raise RuntimeError("腾讯云一句话识别仅适合 60 秒以内、3MB 以内音频，请缩短训练录音或改用录音文件识别。")
+            raise ASRProviderError("payload_too_large", "腾讯云一句话识别仅适合 60 秒以内、3MB 以内音频，请缩短训练录音或改用录音文件识别。")
 
         try:
             from tencentcloud.asr.v20190614 import asr_client, models
@@ -59,11 +79,12 @@ class TencentASRProvider(ASRProvider):
             from tencentcloud.common.profile.client_profile import ClientProfile
             from tencentcloud.common.profile.http_profile import HttpProfile
         except ImportError as exc:
-            raise RuntimeError("缺少腾讯云 ASR SDK，请先在 backend 环境安装 requirements.txt。") from exc
+            raise ASRProviderError("dependency_missing", "缺少腾讯云 ASR SDK，请先在 backend 环境安装 requirements.txt。") from exc
 
         cred = credential.Credential(self.secret_id, self.secret_key)
         http_profile = HttpProfile()
         http_profile.endpoint = "asr.tencentcloudapi.com"
+        http_profile.reqTimeout = get_settings().asr_timeout_seconds
         client_profile = ClientProfile()
         client_profile.httpProfile = http_profile
         client = asr_client.AsrClient(cred, self.region, client_profile)
@@ -83,10 +104,13 @@ class TencentASRProvider(ASRProvider):
                 }
             )
         )
-        response = client.SentenceRecognition(request)
+        try:
+            response = client.SentenceRecognition(request)
+        except Exception as exc:
+            raise ASRProviderError("provider_error", provider_error_summary("腾讯云 ASR 调用失败", exc)) from exc
         result = getattr(response, "Result", "") or ""
         if not result.strip():
-            raise RuntimeError("腾讯云 ASR 未返回有效转写文本。")
+            raise ASRProviderError("empty_result", "腾讯云 ASR 未返回有效转写文本。")
         return result.strip()
 
 
@@ -95,3 +119,54 @@ def get_asr_provider() -> ASRProvider:
     if settings.asr_provider == "tencent":
         return TencentASRProvider()
     return MockASRProvider(requested_provider=settings.asr_provider)
+
+
+def transcribe_with_fallback(audio_path: str) -> ASRTranscriptionResult:
+    provider = get_asr_provider()
+    requested_provider = getattr(provider, "requested_provider", provider.provider_name)
+    try:
+        text = provider.transcribe(audio_path)
+        return ASRTranscriptionResult(
+            text=text,
+            provider_name=provider.provider_name,
+            requested_provider=requested_provider,
+        )
+    except ASRProviderError as exc:
+        log_event(
+            "warning",
+            "provider",
+            "asr_fallback",
+            requested_provider=requested_provider,
+            fallback_provider="mock",
+            error_code=exc.code,
+            error_message=exc.message,
+        )
+        fallback = MockASRProvider(requested_provider=requested_provider)
+        return ASRTranscriptionResult(
+            text=fallback.transcribe(audio_path),
+            provider_name=fallback.provider_name,
+            requested_provider=requested_provider,
+            fallback_used=True,
+            error_code=exc.code,
+            error_message=exc.message,
+        )
+    except Exception as exc:
+        error_message = provider_error_summary("ASR 调用失败", exc)
+        log_event(
+            "error",
+            "provider",
+            "asr_unexpected_error",
+            requested_provider=requested_provider,
+            fallback_provider="mock",
+            error_code="unknown_error",
+            error_message=error_message,
+        )
+        fallback = MockASRProvider(requested_provider=requested_provider)
+        return ASRTranscriptionResult(
+            text=fallback.transcribe(audio_path),
+            provider_name=fallback.provider_name,
+            requested_provider=requested_provider,
+            fallback_used=True,
+            error_code="unknown_error",
+            error_message=error_message,
+        )

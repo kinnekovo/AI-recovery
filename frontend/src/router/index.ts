@@ -69,6 +69,11 @@ const router = createRouter({
           path: 'profiles',
           component: () => import('@/views/therapist/TherapistProfilesView.vue'),
           meta: { role: 'therapist' }
+        },
+        {
+          path: 'status',
+          component: () => import('@/views/therapist/SystemStatusView.vue'),
+          meta: { role: 'therapist' }
         }
       ]
     }

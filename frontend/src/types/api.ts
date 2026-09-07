@@ -14,6 +14,30 @@ export interface User {
 
 export type UserRole = 'patient' | 'family' | 'therapist' | 'admin'
 
+export interface HealthStatus {
+  status: string
+  database: {
+    status: string
+  }
+  storage: {
+    status: string
+    root: string
+    exists: boolean
+    is_dir: boolean
+  }
+  providers: Record<string, ProviderHealthStatus>
+}
+
+export interface ProviderHealthStatus {
+  name: string
+  provider: string
+  mode: string
+  status: string
+  ready: boolean
+  missing_env: string[]
+  message: string
+}
+
 export interface PatientProfile {
   id: string
   user_id: string
@@ -29,6 +53,7 @@ export interface Agent {
   relationship: string
   personality_style: string
   avatar_file_id: string | null
+  avatar_url: string | null
   voice_sample_file_id: string | null
   welcome_audio_file_id: string | null
   voice_external_id: string | null
@@ -156,6 +181,20 @@ export interface TherapistTrainingTrends {
   overall_summary: string
 }
 
+export interface TherapistTrialQuality {
+  patient_count: number
+  training_session_count: number
+  completed_session_count: number
+  completion_rate: number
+  attempt_count: number
+  missing_audio_count: number
+  missing_audio_rate: number
+  failed_analysis_count: number
+  low_quality_attempt_count: number
+  low_quality_rate: number
+  provider_failure_count: number
+}
+
 export interface RecommendationNotePayload {
   note: string | null
 }
@@ -171,6 +210,21 @@ export interface TrainingSessionCreatePayload {
   recommendation_source?: string | null
   recommendation_headline?: string | null
   recommendation_task_ids?: string[] | null
+}
+
+export interface AvatarSpeechPayload {
+  scene: 'training_intro' | 'session_intro' | 'task_demo' | 'next_task' | 'result_encouragement' | 'error_recovery' | string
+  session_id?: string | null
+  session_task_id?: string | null
+  text: string
+}
+
+export interface AvatarSpeech {
+  text: string
+  audio_file_id: string | null
+  audio_url: string | null
+  provider: string
+  fallback: boolean
 }
 
 export interface TodayTraining {
@@ -231,6 +285,8 @@ export interface FamilyObservation {
   patient_username: string
   training_count: number
   completed_recommended_sessions: number
+  last_training_at: string | null
+  adherence_summary: string
   recommendation_headline: string
   recommendation_source: string
   trend_summary: string

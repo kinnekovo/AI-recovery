@@ -317,6 +317,12 @@ textarea {
   align-items: start;
 }
 
+.agent-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .chip-row {
   display: flex;
   flex-wrap: wrap;
@@ -418,6 +424,41 @@ textarea {
   position: relative;
   display: grid;
   justify-items: center;
+}
+
+.avatar-photo-frame {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  width: 96px;
+  height: 112px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #f7fbf9;
+  box-shadow: 0 12px 28px rgba(31, 50, 42, 0.16);
+}
+
+.avatar-photo-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-photo-mouth {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  width: 22px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(101, 39, 34, 0.74);
+  transform: translateX(-50%) scaleY(1);
+  transition: transform 0.12s ease;
+}
+
+.avatar-photo-mouth.open {
+  transform: translateX(-50%) scaleY(2.7);
 }
 
 .avatar-hair {
@@ -535,6 +576,16 @@ textarea {
   line-height: 1.7;
 }
 
+.avatar-copy .avatar-action-hint {
+  max-width: 56ch;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: #f4faf7;
+  color: #31463d;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
 .avatar-status-row {
   display: flex;
   flex-wrap: wrap;
@@ -548,6 +599,31 @@ textarea {
   color: #1d6f51;
   font-size: 0.88rem;
   font-weight: 800;
+}
+
+.avatar-status-row .status-speaking {
+  background: #e6efff;
+  color: #1f4fb8;
+}
+
+.avatar-status-row .status-listening {
+  background: #e8f7ef;
+  color: #146c49;
+}
+
+.avatar-status-row .status-thinking {
+  background: #fff6e6;
+  color: #8a5a10;
+}
+
+.avatar-status-row .status-encouraging {
+  background: #f0eefe;
+  color: #5542b8;
+}
+
+.avatar-status-row .status-error {
+  background: #fde8e3;
+  color: #a73822;
 }
 
 .avatar-action-button {
@@ -746,6 +822,21 @@ textarea {
   font-weight: 700;
 }
 
+.patient-trial-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.patient-trial-hints span {
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: #fff7e8;
+  color: #7a4300;
+  font-weight: 800;
+  font-size: 0.92rem;
+}
+
 .recorder-panel {
   display: flex;
   align-items: center;
@@ -755,6 +846,17 @@ textarea {
   border-radius: 8px;
   background: #fbfdfc;
   border: 1px solid #dce7e1;
+}
+
+.recorder-panel small {
+  display: block;
+  margin-top: 6px;
+  color: #66756f;
+}
+
+.recorder-actions {
+  display: flex;
+  flex-shrink: 0;
 }
 
 .score-panel {
@@ -804,6 +906,11 @@ textarea {
   margin: 0;
   color: #66756f;
   line-height: 1.6;
+}
+
+.metric-card small {
+  color: #7d8a85;
+  font-weight: 700;
 }
 
 .feedback-list {
@@ -1571,9 +1678,8 @@ textarea {
   gap: 10px;
 }
 
-.family-bound-switcher button {
+.family-binding-card {
   min-height: 54px;
-  border: 0;
   border-radius: 8px;
   display: grid;
   gap: 3px;
@@ -1581,19 +1687,38 @@ textarea {
   background: #ffffff;
   color: #20302a;
   text-align: left;
-  cursor: pointer;
   box-shadow: 0 12px 32px rgba(31, 50, 42, 0.06);
 }
 
-.family-bound-switcher button.active,
-.family-bound-switcher button:hover {
+.family-binding-card.active {
   background: #eaf1ff;
   color: #1f4fb8;
 }
 
-.family-bound-switcher span {
+.family-binding-card.pending {
+  background: #fffaf0;
+}
+
+.family-binding-card span {
   color: #66756f;
   font-size: 0.9rem;
+}
+
+.family-binding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.family-binding-actions button {
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 9px;
+  background: #eef6f2;
+  color: #1d6f51;
+  font-weight: 800;
+  cursor: pointer;
 }
 
 .family-status-panel {
@@ -2025,12 +2150,154 @@ textarea {
   gap: 10px;
 }
 
-.boundary-list span {
+.boundary-list span,
+.boundary-list a {
   padding: 8px 12px;
   border-radius: 8px;
   background: #f1f5f3;
   color: #40524b;
   font-weight: 700;
+  text-decoration: none;
+}
+
+.trial-quality-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.trial-quality-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.trial-quality-card {
+  min-height: 132px;
+  display: grid;
+  gap: 8px;
+  align-content: center;
+  padding: 18px;
+  border: 1px solid #dce7e1;
+  border-radius: 8px;
+  background: #fbfdfc;
+}
+
+.trial-quality-card span {
+  color: #66756f;
+  font-weight: 800;
+}
+
+.trial-quality-card strong {
+  color: #1f4fb8;
+  font-size: 2rem;
+}
+
+.trial-quality-card p {
+  margin: 0;
+  color: #40524b;
+  line-height: 1.5;
+}
+
+.trial-quality-card.watch {
+  border-color: #f0c26b;
+  background: #fffaf0;
+}
+
+.system-status-page {
+  max-width: 1120px;
+}
+
+.system-status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.system-status-card {
+  min-height: 156px;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.system-status-card.ok .system-status-icon,
+.provider-status-row.ok .provider-status-mark,
+.provider-status-row.configured .provider-status-mark {
+  background: #e9f7ef;
+  color: #1d6f51;
+}
+
+.system-status-card.warn .system-status-icon,
+.provider-status-row.config_missing .provider-status-mark {
+  background: #fff1df;
+  color: #9a4b00;
+}
+
+.system-status-card span,
+.provider-status-panel span,
+.provider-status-row small {
+  color: #66756f;
+}
+
+.system-status-card strong {
+  display: block;
+  margin-top: 4px;
+  color: #20302a;
+  font-size: 1.35rem;
+}
+
+.system-status-card p {
+  margin-bottom: 0;
+  overflow-wrap: anywhere;
+}
+
+.system-status-wide {
+  background: #f4fbf8;
+}
+
+.system-status-icon,
+.provider-status-mark {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.provider-status-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.provider-status-list {
+  display: grid;
+  gap: 10px;
+}
+
+.provider-status-row {
+  min-height: 76px;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f8fbfa;
+}
+
+.provider-status-row strong {
+  color: #20302a;
+}
+
+.provider-status-row p {
+  margin: 4px 0 0;
+}
+
+.provider-status-row > span {
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .therapist-assessment-page {
@@ -2651,6 +2918,8 @@ textarea {
     .metric-grid,
     .report-panel,
     .report-overview,
+    .trial-quality-grid,
+    .system-status-grid,
     .therapist-grid,
     .therapist-review-grid,
     .therapist-review-heading,
@@ -2695,8 +2964,13 @@ textarea {
   .recording-playback-panel,
   .recording-row,
   .family-recording-row,
+  .provider-status-row,
   .source-evidence-box {
     grid-template-columns: 1fr;
+  }
+
+  .provider-status-row > span {
+    white-space: normal;
   }
 
   .audio-playback,
