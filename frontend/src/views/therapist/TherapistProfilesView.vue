@@ -1,17 +1,17 @@
 <template>
   <section class="page-stack therapist-assessment-page therapist-workbench-page">
-    <div class="page-heading therapist-review-heading">
+    <div class="page-heading therapist-review-heading workbench-header">
       <div>
         <span class="kicker">治疗师工作台</span>
-        <h1>看训练，看趋势，必要时调整建议</h1>
-        <p>算法继续负责生成训练推荐；治疗师主要观察患者表现，并用自然语言补充下一次训练重点。</p>
+        <h1>{{ selectedPatient ? selectedPatient.username : '患者训练工作台' }}</h1>
+        <p>{{ selectedPatient ? `${records.length} 条训练记录 · ${selectedPatient.pending_review_count || 0} 条待复核` : '选择患者后查看训练、趋势与下一步建议。' }}</p>
       </div>
       <div class="form-actions">
-        <button class="app-button secondary" type="button" :disabled="loadingPatientData" @click="reloadSelected">
-          刷新数据
+        <button class="icon-button" type="button" title="刷新患者数据" :disabled="loadingPatientData" @click="reloadSelected">
+          <RefreshCw :size="18" />
         </button>
         <button class="app-button primary" type="button" :disabled="exportingReport || !selectedPatientId" @click="exportStageReport">
-          {{ exportingReport ? '生成中' : '导出阶段报告' }}
+          <FileDown :size="17" />{{ exportingReport ? '生成中' : '导出报告' }}
         </button>
       </div>
     </div>
@@ -24,13 +24,18 @@
         <div class="panel-heading">
           <div>
             <h2>患者</h2>
-            <p>选择后查看训练记录与趋势。</p>
+            <p>{{ patients.length }} 位患者</p>
           </div>
         </div>
 
-        <div v-if="patients.length" class="patient-picker">
+        <label class="patient-search">
+          <Search :size="16" />
+          <input v-model="patientQuery" type="search" placeholder="搜索患者" />
+        </label>
+
+        <div v-if="filteredPatients.length" class="patient-picker">
           <button
-            v-for="patient in patients"
+            v-for="patient in filteredPatients"
             :key="patient.user_id"
             type="button"
             class="patient-row"
@@ -52,7 +57,7 @@
 
       <div class="therapist-main-flow">
         <article class="therapist-panel training-records-panel">
-          <div class="panel-heading">
+          <div class="panel-heading records-heading">
             <div>
               <h2>每次训练记录与评分</h2>
               <p>{{ selectedPatient ? `${selectedPatient.username} 最近 ${records.length} 次训练反馈` : '选择患者后显示' }}</p>
@@ -61,7 +66,7 @@
 
           <div v-if="loadingPatientData" class="success-text">正在汇总训练记录。</div>
           <div v-else-if="records.length" class="therapist-record-list">
-            <article v-for="record in records" :key="record.attempt_id" class="training-record-row">
+            <article v-for="record in displayedRecords" :key="record.attempt_id" class="training-record-row">
               <div class="record-score-block" :class="{ empty: record.overall_score == null }">
                 <strong>{{ record.overall_score ?? '--' }}</strong>
                 <span>总分</span>
@@ -72,9 +77,6 @@
                   <span>{{ dateTimeLabel(record.created_at) }}</span>
                 </div>
                 <p>{{ record.target_text }}</p>
-                <small v-if="record.asr_text">ASR 转写：{{ record.asr_text }}</small>
-                <small>{{ record.feedback_summary }}</small>
-                <AudioPlayback :src="record.audio_url" compact />
                 <div class="record-tags">
                   <span>{{ trainingTypeLabel(record.training_type) }}</span>
                   <span>{{ analysisStatusLabel(record.analysis_status) }}</span>
@@ -82,11 +84,11 @@
                 </div>
                 <button
                   v-if="record.pronunciation_analysis_id"
-                  class="app-button secondary compact-action"
+                  class="record-review-action"
                   type="button"
                   @click="openPronunciationReview(record)"
                 >
-                  精细发音复核
+                  复核发音 <ChevronRight :size="16" />
                 </button>
               </div>
               <div class="record-metric-strip">
@@ -96,24 +98,30 @@
                 <span>相对响度 {{ metricValue(record.process_metrics.loudness, 'dBFS') }}</span>
               </div>
             </article>
+            <button v-if="records.length > 3" class="records-expand-button" type="button" @click="showAllRecords = !showAllRecords">
+              {{ showAllRecords ? '收起历史记录' : `展开其余 ${records.length - 3} 条记录` }}
+              <ChevronRight :size="17" :class="{ rotated: showAllRecords }" />
+            </button>
           </div>
           <div v-else class="empty-state">
             <p>暂无训练记录。患者完成一次训练并生成评分后，这里会自动出现。</p>
           </div>
         </article>
 
-        <article v-if="selectedPronunciationRecord" class="therapist-panel pronunciation-review-panel">
+        <Teleport to="body">
+        <div v-if="selectedPronunciationRecord" class="pronunciation-drawer-backdrop" @click.self="closePronunciationReview">
+        <aside class="pronunciation-review-panel" aria-label="精细发音复核">
           <div class="panel-heading">
             <div>
               <h2>精细发音复核</h2>
               <p>{{ selectedPronunciationRecord.task_title }} · {{ pronunciationSummary }}</p>
             </div>
-            <button class="app-button secondary" type="button" :disabled="pronunciationLoading" @click="closePronunciationReview">关闭</button>
+            <button class="icon-button" type="button" title="关闭精细发音复核" :disabled="pronunciationLoading" @click="closePronunciationReview"><X :size="20" /></button>
           </div>
           <p v-if="pronunciationLoading" class="success-text">正在读取字词级评测结果。</p>
           <p v-else-if="pronunciationError" class="error-text">{{ pronunciationError }}</p>
           <template v-else-if="pronunciation">
-            <div class="record-metric-strip">
+            <div class="pronunciation-overview">
               <span>准确度 {{ metricValue(pronunciation.overall_accuracy, '%') }}</span>
               <span>流畅度 {{ metricValue(pronunciation.fluency == null ? null : pronunciation.fluency * 100, '%') }}</span>
               <span>完成度 {{ metricValue(pronunciation.completion == null ? null : pronunciation.completion * 100, '%') }}</span>
@@ -122,7 +130,7 @@
               <span>可懂度代理 {{ metricValue(pronunciation.intelligibility_proxy, '%') }}</span>
             </div>
             <p v-if="pronunciation.error_message" class="error-text">{{ pronunciation.error_message }}</p>
-            <AudioPlayback ref="reviewAudio" :src="selectedPronunciationRecord.audio_url" />
+            <div class="pronunciation-audio-bar"><AudioPlayback ref="reviewAudio" :src="selectedPronunciationRecord.audio_url" /></div>
             <label v-if="pronunciation.segments.some((item) => item.level === 'phoneme')" class="pronunciation-level-picker">
               复核层级
               <select v-model="segmentLevel">
@@ -212,7 +220,9 @@
             </div>
             <p v-if="pronunciation.revisions.length" class="success-text">已保留 {{ pronunciation.revisions.length }} 条人工审阅记录。</p>
           </template>
-        </article>
+        </aside>
+        </div>
+        </Teleport>
 
         <article class="therapist-panel">
           <div class="panel-heading">
@@ -334,13 +344,16 @@
           <p v-if="ability" class="compact-profile-summary">{{ ability.assessment_summary }}</p>
         </article>
 
-        <article class="therapist-panel task-library-panel">
+        <details class="therapist-panel task-library-panel">
+          <summary class="task-library-summary">
           <div class="panel-heading">
             <div>
               <h2>训练内容库</h2>
-              <p>{{ taskTemplates.length }} 条可用材料，推荐会按难度和权重自动匹配。</p>
+              <p>{{ taskTemplates.length }} 条可用材料</p>
             </div>
           </div>
+          <ChevronRight :size="18" />
+          </summary>
 
           <div class="task-template-list">
             <article v-for="template in taskTemplates.slice(0, 5)" :key="template.id" class="task-template-row">
@@ -393,7 +406,7 @@
             </div>
             <p v-if="templateSaved" class="success-text">{{ templateSaved }}</p>
           </form>
-        </article>
+        </details>
       </aside>
     </section>
   </section>
@@ -401,6 +414,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { ChevronRight, FileDown, RefreshCw, Search, X } from 'lucide-vue-next'
 import AudioPlayback from '@/components/common/AudioPlayback.vue'
 import { therapistApi } from '@/api/therapist'
 import type {
@@ -419,6 +433,8 @@ import type {
 import { toUserMessage } from '@/utils/errors'
 
 const patients = ref<TherapistPatient[]>([])
+const patientQuery = ref('')
+const showAllRecords = ref(false)
 const selectedPatientId = ref('')
 const ability = ref<AbilityProfile | null>(null)
 const recommendation = ref<TrainingRecommendation | null>(null)
@@ -470,6 +486,11 @@ const contentLevels = ['L1', 'L2', 'L3', 'L4', 'L5']
 const autonomyLevels = ['S1', 'S2', 'S3', 'S4']
 
 const selectedPatient = computed(() => patients.value.find((item) => item.user_id === selectedPatientId.value))
+const filteredPatients = computed(() => {
+  const query = patientQuery.value.trim().toLowerCase()
+  return query ? patients.value.filter((patient) => patient.username.toLowerCase().includes(query)) : patients.value
+})
+const displayedRecords = computed(() => showAllRecords.value ? records.value : records.value.slice(0, 3))
 const pronunciationSummary = computed(() => {
   if (!pronunciation.value) return '等待加载'
   if (pronunciation.value.status !== 'completed') return pronunciation.value.status === 'unavailable' ? '服务未启用' : '评测未完成'
@@ -492,6 +513,7 @@ onMounted(async () => {
 
 async function selectPatient(patientUserId: string) {
   selectedPatientId.value = patientUserId
+  showAllRecords.value = false
   await reloadSelected()
 }
 

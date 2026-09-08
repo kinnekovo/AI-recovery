@@ -317,6 +317,49 @@ textarea {
   align-items: start;
 }
 
+/* Therapist workbench: prioritize scan, then review. */
+.therapist-workbench-page { max-width: 1540px; }
+.workbench-header { align-items: center; padding-bottom: 4px; }
+.workbench-header h1 { font-size: clamp(1.65rem, 2vw, 2.25rem); line-height: 1.18; }
+.workbench-header p { margin-top: 6px; }
+.therapist-workbench-grid { grid-template-columns: minmax(220px, .26fr) minmax(560px, 1fr) minmax(280px, .42fr); gap: 16px; }
+.therapist-record-list { gap: 2px; max-height: none; overflow: visible; padding-right: 0; }
+.training-record-row { grid-template-columns: 56px minmax(0, 1fr) minmax(190px, .42fr); gap: 16px; align-items: center; padding: 14px 10px; border-radius: 0; border-bottom: 1px solid #e4ebe7; background: transparent; }
+.training-record-row:first-child { border-top: 1px solid #e4ebe7; }
+.training-record-row:hover { background: #f6faf8; }
+.record-score-block { min-height: 56px; background: #edf3ff; }
+.record-score-block strong { font-size: 1.45rem; }
+.record-main p { font-size: .95rem; margin-top: 4px; }
+.record-review-action { display: inline-flex; align-items: center; gap: 3px; margin-top: 9px; padding: 0; border: 0; background: transparent; color: #2158bd; font: inherit; font-size: .88rem; font-weight: 800; cursor: pointer; }
+.record-review-action:hover { color: #173e87; }
+.patient-search { display: flex; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid #dbe6e0; border-radius: 7px; color: #66756f; }
+.patient-search input { min-width: 0; border: 0; padding: 9px 0; background: transparent; }
+.patient-search input:focus { outline: 0; }
+.icon-button { display: inline-grid; width: 40px; height: 40px; place-items: center; border: 1px solid #d9e4df; border-radius: 7px; background: #fff; color: #2158bd; cursor: pointer; }
+.icon-button:hover { background: #edf3ff; }
+.icon-button:disabled { cursor: not-allowed; opacity: .55; }
+.pronunciation-drawer-backdrop { position: fixed; z-index: 40; inset: 0; display: flex; justify-content: flex-end; background: rgba(19, 36, 29, .26); }
+.pronunciation-review-panel { width: min(760px, 100vw); height: 100%; overflow-y: auto; display: grid; align-content: start; gap: 20px; padding: 28px clamp(20px, 3vw, 40px) 42px; background: #fff; box-shadow: -18px 0 48px rgba(18, 42, 32, .18); }
+.pronunciation-overview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid #e4ebe7; border-bottom: 1px solid #e4ebe7; }
+.pronunciation-overview span { display: grid; gap: 4px; min-height: 62px; align-content: center; padding: 8px 12px; color: #40524b; font-size: .9rem; font-weight: 750; }
+.pronunciation-overview span:nth-child(-n+3) { border-bottom: 1px solid #e4ebe7; }
+.pronunciation-overview span:not(:nth-child(3n)) { border-right: 1px solid #e4ebe7; }
+.pronunciation-audio-bar { padding: 14px; background: #f5f8f6; border-radius: 8px; }
+.patient-queue-panel, .patient-picker, .patient-row, .patient-row-title { min-width: 0; }
+.patient-picker { overflow: hidden; }
+.patient-row { overflow: hidden; }
+.patient-row-title strong, .patient-row > span, .patient-row small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.patient-row-title em { flex: 0 0 auto; }
+.records-expand-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 100%; margin-top: 14px; padding: 11px; border: 1px solid #d9e4df; border-radius: 7px; background: #fff; color: #2158bd; font: inherit; font-size: .9rem; font-weight: 800; cursor: pointer; }
+.records-expand-button:hover { background: #f3f7f5; }
+.records-expand-button svg { transition: transform .18s ease; }
+.records-expand-button svg.rotated { transform: rotate(90deg); }
+.task-library-summary { display: flex; align-items: center; justify-content: space-between; cursor: pointer; list-style: none; }
+.task-library-summary::-webkit-details-marker { display: none; }
+.task-library-summary .panel-heading { margin: 0; }
+.task-library-panel[open] .task-library-summary > svg { transform: rotate(90deg); }
+.task-library-summary > svg { transition: transform .18s ease; }
+
 .agent-action-row {
   display: flex;
   flex-wrap: wrap;
@@ -1373,8 +1416,7 @@ textarea {
 }
 
 .recommendation-note-panel {
-  position: sticky;
-  top: 24px;
+  position: static;
 }
 
 .algorithm-recommendation-box {
@@ -3094,4 +3136,44 @@ textarea {
   .score-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+/* Therapist workbench overrides. */
+.therapist-workbench-page { max-width: 1540px; }
+.workbench-header { align-items: center; padding-bottom: 4px; }
+.workbench-header h1 { font-size: clamp(1.65rem, 2vw, 2.25rem); line-height: 1.18; }
+.workbench-header p { margin-top: 6px; }
+.therapist-workbench-grid { grid-template-columns: minmax(220px, .26fr) minmax(560px, 1fr) minmax(280px, .42fr); gap: 16px; }
+.therapist-record-list { gap: 2px; max-height: none; overflow: visible; padding-right: 0; }
+.training-record-row { grid-template-columns: 56px minmax(0, 1fr) minmax(190px, .42fr); gap: 16px; align-items: center; padding: 14px 10px; border-radius: 0; border-bottom: 1px solid #e4ebe7; background: transparent; }
+.training-record-row:first-child { border-top: 1px solid #e4ebe7; }
+.training-record-row:hover { background: #f6faf8; }
+.record-score-block { min-height: 56px; background: #edf3ff; }
+.record-score-block strong { font-size: 1.45rem; }
+.record-main p { font-size: .95rem; margin-top: 4px; }
+.record-review-action { display: inline-flex; align-items: center; gap: 3px; margin-top: 9px; padding: 0; border: 0; background: transparent; color: #2158bd; font: inherit; font-size: .88rem; font-weight: 800; cursor: pointer; }
+.record-review-action:hover { color: #173e87; }
+.patient-search { display: flex; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid #dbe6e0; border-radius: 7px; color: #66756f; }
+.patient-search input { min-width: 0; border: 0; padding: 9px 0; background: transparent; }
+.patient-search input:focus { outline: 0; }
+.icon-button { display: inline-grid; width: 40px; height: 40px; place-items: center; border: 1px solid #d9e4df; border-radius: 7px; background: #fff; color: #2158bd; cursor: pointer; }
+.icon-button:hover { background: #edf3ff; }
+.icon-button:disabled { cursor: not-allowed; opacity: .55; }
+.pronunciation-drawer-backdrop { position: fixed; z-index: 40; inset: 0; display: flex; justify-content: flex-end; background: rgba(19, 36, 29, .26); }
+.pronunciation-review-panel { width: min(760px, 100vw); height: 100%; overflow-y: auto; display: grid; align-content: start; gap: 20px; padding: 28px clamp(20px, 3vw, 40px) 42px; background: #fff; box-shadow: -18px 0 48px rgba(18, 42, 32, .18); }
+.pronunciation-overview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid #e4ebe7; border-bottom: 1px solid #e4ebe7; }
+.pronunciation-overview span { display: grid; gap: 4px; min-height: 62px; align-content: center; padding: 8px 12px; color: #40524b; font-size: .9rem; font-weight: 750; }
+.pronunciation-overview span:nth-child(-n+3) { border-bottom: 1px solid #e4ebe7; }
+.pronunciation-overview span:not(:nth-child(3n)) { border-right: 1px solid #e4ebe7; }
+.pronunciation-audio-bar { padding: 14px; background: #f5f8f6; border-radius: 8px; }
+@media (max-width: 1050px) {
+  .therapist-workbench-grid { grid-template-columns: minmax(210px, .32fr) 1fr; }
+  .therapist-side-flow { grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .task-library-panel { grid-column: 1 / -1; }
+}
+@media (max-width: 720px) {
+  .therapist-workbench-grid, .therapist-side-flow, .training-record-row, .pronunciation-overview { grid-template-columns: 1fr; }
+  .training-record-row { gap: 10px; }
+  .record-metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pronunciation-overview span, .pronunciation-overview span:nth-child(-n+3) { border-right: 0; border-bottom: 1px solid #e4ebe7; }
 }
