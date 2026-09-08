@@ -118,11 +118,15 @@ def tencent_asr_missing_env(settings) -> list[str]:
 
 
 def acoustic_missing_env(settings) -> list[str]:
-    missing = []
     ffmpeg = settings.ffmpeg_bin or which("ffmpeg")
-    if not ffmpeg:
-        missing.append("FFMPEG_BIN")
-    return missing
+    if ffmpeg:
+        return []
+    try:
+        import imageio_ffmpeg
+
+        return [] if imageio_ffmpeg.get_ffmpeg_exe() else ["FFMPEG_BIN"]
+    except ImportError:
+        return ["FFMPEG_BIN"]
 
 
 def required_missing(settings, values: dict[str, str | None]) -> list[str]:

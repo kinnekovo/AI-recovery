@@ -56,6 +56,57 @@ class LLMFeedbackBoundaryTest(unittest.TestCase):
         self.assertTrue(feedback["suggestion"])
         self.assertNotEqual(feedback["suggestion"], "provider failed")
 
+    def test_scores_change_with_measured_performance(self) -> None:
+        strong = ProcessEvaluation(
+            script_accuracy=100.0,
+            error_count=0,
+            speech_rate=200.0,
+            loudness=-24.0,
+            details={
+                "task_type": "repeat",
+                "expression_rate": 200.0,
+                "articulation_rate": 220.0,
+                "loudness_unit": "dBFS",
+                "independence_score": 100,
+                "error_events": {},
+            },
+        )
+        weak = ProcessEvaluation(
+            script_accuracy=45.0,
+            error_count=5,
+            speech_rate=90.0,
+            loudness=-48.0,
+            details={
+                "task_type": "repeat",
+                "expression_rate": 90.0,
+                "articulation_rate": 120.0,
+                "loudness_unit": "dBFS",
+                "independence_score": 30,
+                "pause_metrics": {"pause_ratio": 0.5},
+                "error_events": {"meaningless_repetition": 2, "long_pause_over_3s": 2},
+            },
+        )
+
+        strong_scores = build_rule_score_dimensions(strong)
+        weak_scores = build_rule_score_dimensions(weak)
+
+        self.assertGreater(strong_scores["overall_score"], weak_scores["overall_score"] + 30)
+        self.assertEqual(strong_scores["scoring_config"]["version"], "rehab-score-v2")
+
+    def test_scenario_uses_task_specific_weights(self) -> None:
+        process = ProcessEvaluation(
+            script_accuracy=80.0,
+            error_count=0,
+            speech_rate=190.0,
+            loudness=-24.0,
+            details={"task_type": "scenario", "loudness_unit": "dBFS", "independence_score": 80},
+        )
+
+        scores = build_rule_score_dimensions(process)
+
+        self.assertEqual(scores["scoring_config"]["task_type"], "scenario")
+        self.assertEqual(scores["scoring_config"]["weights"]["independence"], 0.15)
+
 
 if __name__ == "__main__":
     unittest.main()

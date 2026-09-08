@@ -89,6 +89,8 @@ class Settings:
         self.acoustic_voice_threshold_dbfs = float(os.getenv("ACOUSTIC_VOICE_THRESHOLD_DBFS", "-45"))
         self.acoustic_min_speaking_seconds = float(os.getenv("ACOUSTIC_MIN_SPEAKING_SECONDS", "1.0"))
         self.acoustic_min_loudness_dba = float(os.getenv("ACOUSTIC_MIN_LOUDNESS_DBA", "45"))
+        self.acoustic_min_snr_db = float(os.getenv("ACOUSTIC_MIN_SNR_DB", "10"))
+        self.acoustic_max_clipping_ratio = float(os.getenv("ACOUSTIC_MAX_CLIPPING_RATIO", "0.01"))
         self.tts_provider = os.getenv("TTS_PROVIDER", "mock").strip().lower() or "mock"
         self.tts_api_key = os.getenv("TTS_API_KEY")
         self.tts_base_url = os.getenv("TTS_BASE_URL")

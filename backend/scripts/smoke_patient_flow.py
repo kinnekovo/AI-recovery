@@ -7,6 +7,7 @@ import math
 import os
 import sys
 import tempfile
+from unittest.mock import patch
 import uuid
 import wave
 
@@ -24,6 +25,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import get_settings
+from app.integrations.acoustic_analysis.provider import AcousticAnalysisResult
+from app.integrations.asr.provider import ASRTranscriptionResult
 from app.main import create_app
 
 
@@ -164,7 +167,33 @@ def main() -> int:
         content=wav_bytes(),
         content_type="audio/wav",
     )
-    feedback = post(client, f"/api/attempts/{attempt['id']}/analyze", headers=headers)
+    expect_error(client, "post", f"/api/attempts/{attempt['id']}/analyze", 422, headers=headers)
+    failed_attempt = get(client, f"/api/attempts/{attempt['id']}", headers=headers)
+    assert failed_attempt["analysis_status"] == "failed"
+    assert failed_attempt["analysis_error_code"] == "acoustic:mock_provider"
+    reset_attempt = upload(
+        client,
+        f"/api/attempts/{attempt['id']}/audio",
+        headers=headers,
+        field="audio_file",
+        filename="attempt-retry.wav",
+        content=wav_bytes(),
+        content_type="audio/wav",
+    )
+    assert reset_attempt["analysis_status"] == "pending"
+    assert reset_attempt["analysis_error_code"] is None
+    with patch(
+        "app.modules.scoring.service.transcribe_with_fallback",
+        return_value=ASRTranscriptionResult(
+            text="今天天气很好",
+            provider_name="tencent",
+            requested_provider="tencent",
+        ),
+    ), patch(
+        "app.modules.scoring.service.get_acoustic_analysis_provider",
+        return_value=SmokeAcousticProvider(),
+    ):
+        feedback = post(client, f"/api/attempts/{attempt['id']}/analyze", headers=headers)
     assert feedback["process_metrics"]["script_accuracy"] >= 0
     assert feedback["feedback"], "analysis should return patient feedback"
 
@@ -233,6 +262,22 @@ def wav_bytes() -> bytes:
             value = int(12000 * math.sin(2 * math.pi * 440 * index / sample_rate))
             wav.writeframesraw(value.to_bytes(2, byteorder="little", signed=True))
     return output.getvalue()
+
+
+class SmokeAcousticProvider:
+    provider_name = "local"
+
+    def analyze(self, audio_path: str) -> AcousticAnalysisResult:
+        return AcousticAnalysisResult(
+            speaking_duration_seconds=1.2,
+            loudness_dba=66.0,
+            long_pause_over_3s_count=0,
+            total_duration_seconds=1.2,
+            loudness_dbfs=-24.0,
+            snr_db=24.0,
+            quality_status="pass",
+            quality_reason="normal",
+        )
 
 
 if __name__ == "__main__":

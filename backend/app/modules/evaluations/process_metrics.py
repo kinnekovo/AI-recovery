@@ -18,10 +18,10 @@ PROCESS_METRIC_DEFINITIONS = {
         "reference": "参考 180-240 字/min",
     },
     "loudness": {
-        "description": "训练录音的平均响度。",
-        "unit": "dBA",
-        "normal_range": {"min": 60, "max": 78},
-        "reference": "参考 60-78 dBA",
+        "description": "有效发声片段的相对数字响度；未经设备校准，不等同于临床 dBA。",
+        "unit": "dBFS",
+        "normal_range": {"min": -35, "max": -12},
+        "reference": "工程参考 -35 至 -12 dBFS",
     },
 }
 

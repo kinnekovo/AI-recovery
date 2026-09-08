@@ -123,7 +123,7 @@ const adviceTitle = computed(() => {
   if (!metrics) return '先完成一次训练'
   if (metrics.script_accuracy < 70 || metrics.error_count >= 4) return '先把短句说稳'
   if (metrics.speech_rate < 180) return '可以练连续表达'
-  if (metrics.loudness < 60) return '试着把声音放出来'
+  if (metrics.loudness < -35) return '试着把声音放出来'
   return '保持现在的节奏'
 })
 
@@ -136,7 +136,7 @@ const adviceText = computed(() => {
   if (metrics.speech_rate < 180) {
     return '下一次可以试着少停顿，把熟悉的短句连起来说。'
   }
-  if (metrics.loudness < 60) {
+  if (metrics.loudness < -35) {
     return '下一次可以坐直一点，慢慢吸气后再开口，让声音更清楚。'
   }
   return '最近练习比较稳定，可以继续完成今天的训练。'
@@ -207,8 +207,8 @@ function paceLabel(value: number) {
 }
 
 function loudnessLabel(value: number) {
-  if (value < 60) return '偏轻'
-  if (value > 78) return '偏响'
+  if (value < -35) return '偏轻'
+  if (value > -12) return '偏响'
   return '稳定'
 }
 

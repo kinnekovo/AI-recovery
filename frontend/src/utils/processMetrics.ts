@@ -39,9 +39,9 @@ export const processMetricCatalog: Record<
   loudness: {
     label: '声音响度',
     patientLabel: '声音响度',
-    unit: 'dBA',
+    unit: 'dBFS',
     polarity: 'neutral',
-    reference: '参考 60-78 dBA',
+    reference: '工程参考 -35 至 -12 dBFS',
     patientHint: '声音清楚舒适'
   }
 }
@@ -67,8 +67,8 @@ export function processMetricBrief(key: string, value: number) {
     return '节奏稳定'
   }
   if (key === 'loudness') {
-    if (value < 60) return '声音偏轻'
-    if (value > 78) return '声音偏响'
+    if (value < -35) return '声音偏轻'
+    if (value > -12) return '声音偏响'
     return '音量稳定'
   }
   return '可作为阶段参考'
@@ -92,8 +92,8 @@ export function formatPatientMetricValue(key: ProcessMetricKey, value: number) {
     return '合适'
   }
   if (key === 'loudness') {
-    if (value < 60) return '偏轻'
-    if (value > 78) return '偏响'
+    if (value < -35) return '偏轻'
+    if (value > -12) return '偏响'
     return '稳定'
   }
   return formatMetricValue(value)

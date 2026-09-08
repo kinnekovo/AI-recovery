@@ -150,6 +150,11 @@ def save_process_evaluation(
     attempt_id: UUID,
     process_evaluation: ProcessEvaluation,
 ) -> list[AttemptEvaluation]:
+    source = (
+        EvaluationSource.mock_ai
+        if process_evaluation.details.get("evaluation_source") == EvaluationSource.mock_ai.value
+        else EvaluationSource.system_rule
+    )
     metrics = {
         metric.name: metric
         for metric in db.scalars(select(EvaluationMetric).where(EvaluationMetric.name.in_(PROCESS_METRIC_NAMES)))
@@ -174,7 +179,7 @@ def save_process_evaluation(
             select(AttemptEvaluation).where(
                 AttemptEvaluation.attempt_id == attempt_id,
                 AttemptEvaluation.metric_id == metric.id,
-                AttemptEvaluation.evaluation_source == EvaluationSource.mock_ai,
+                AttemptEvaluation.evaluation_source == source,
             )
         )
         if evaluation:
@@ -184,7 +189,7 @@ def save_process_evaluation(
                 attempt_id=attempt_id,
                 metric_id=metric.id,
                 value=float(value),
-                evaluation_source=EvaluationSource.mock_ai,
+                evaluation_source=source,
             )
             db.add(evaluation)
         saved.append(evaluation)
@@ -227,7 +232,7 @@ def list_process_trend(db: Session, user: User, limit: int = 20) -> ProcessTrend
         .outerjoin(AttemptAnalysisResult, AttemptAnalysisResult.attempt_id == Attempt.id)
         .where(
             TrainingSession.patient_profile_id == profile.id,
-            AttemptEvaluation.evaluation_source == EvaluationSource.mock_ai,
+            AttemptEvaluation.evaluation_source == EvaluationSource.system_rule,
             EvaluationMetric.name.in_(PROCESS_METRIC_NAMES),
         )
         .order_by(Attempt.created_at.desc())

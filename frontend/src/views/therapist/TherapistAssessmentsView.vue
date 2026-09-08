@@ -489,6 +489,8 @@ function reviewStatusLabel(value: AssessmentReviewStatus) {
 function sourceLabel(value: EvaluationSource) {
   const labels: Record<EvaluationSource, string> = {
     mock_ai: '系统自动评估',
+    system_rule: '系统规则评估',
+    provider_ai: '外部模型评估',
     human: '人工记录',
     clinician: '治疗师记录'
   }
@@ -524,8 +526,8 @@ function summaryForSpeechRate(value?: number) {
 
 function summaryForLoudness(value?: number) {
   if (value == null) return ''
-  if (value < 60) return '声音偏轻'
-  if (value > 78) return '声音偏响'
+  if (value < -35) return '声音偏轻'
+  if (value > -12) return '声音偏响'
   return '声音状态稳定'
 }
 

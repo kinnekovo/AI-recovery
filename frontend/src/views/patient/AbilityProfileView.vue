@@ -146,8 +146,8 @@ function paceLabel(value: number) {
 }
 
 function loudnessLabel(value: number) {
-  if (value < 60) return '偏轻'
-  if (value > 78) return '偏响'
+  if (value < -35) return '偏轻'
+  if (value > -12) return '偏响'
   return '稳定'
 }
 

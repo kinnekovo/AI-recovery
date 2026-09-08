@@ -75,7 +75,7 @@ def render_stage_report_html(report: TherapistStageReportRead) -> str:
       <div class="card"><strong>{_metric(summary.avg_script_accuracy, "%")}</strong><span>表达完整度</span></div>
       <div class="card"><strong>{_metric(summary.avg_error_count, "次")}</strong><span>错误次数</span></div>
       <div class="card"><strong>{_metric(summary.avg_speech_rate, "字/min")}</strong><span>言语速率</span></div>
-      <div class="card"><strong>{_metric(summary.avg_loudness, "dBA")}</strong><span>声音响度</span></div>
+      <div class="card"><strong>{_metric(summary.avg_loudness, "dBFS")}</strong><span>相对响度</span></div>
     </div>
     <p>{escape(summary.summary)}</p>
   </section>

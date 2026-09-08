@@ -30,9 +30,6 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先上传录音")
     if attempt.score:
         ensure_process_evaluation(db, attempt)
-        from app.modules.assessment.service import create_auto_assessment_from_attempt
-
-        create_auto_assessment_from_attempt(db, attempt, _metric_values(db, attempt.id))
         task = db.get(SessionTask, attempt.session_task_id)
         if task and task.session:
             from app.modules.profiles.service import refresh_ability_profile
@@ -57,6 +54,8 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
         asr_result = transcribe_with_fallback(audio.storage_path)
     except ASRProviderError as exc:
         attempt.analysis_status = AnalysisStatus.failed
+        attempt.analysis_error_code = f"asr:{exc.code}"
+        attempt.analysis_error_message = exc.message[:255]
         db.commit()
         log_event(
             "error",
@@ -73,6 +72,8 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
         acoustic = acoustic_provider.analyze(audio.storage_path)
     except Exception as exc:
         attempt.analysis_status = AnalysisStatus.failed
+        attempt.analysis_error_code = "acoustic:analysis_failed"
+        attempt.analysis_error_message = "声学分析失败，请稍后重试"
         db.commit()
         log_event(
             "error",
@@ -84,12 +85,31 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
             error_message=provider_error_summary("声学分析失败", exc),
         )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="声学分析失败，请稍后重试") from exc
+    if acoustic_provider.provider_name == "mock":
+        attempt.analysis_status = AnalysisStatus.failed
+        attempt.audio_quality = "unusable"
+        attempt.analysis_error_code = "acoustic:mock_provider"
+        attempt.analysis_error_message = "正式评分需要启用本地声学分析"
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="正式评分需要启用本地声学分析。")
+    if acoustic.quality_status != "pass":
+        attempt.analysis_status = AnalysisStatus.failed
+        attempt.audio_quality = acoustic.quality_status
+        reason = _quality_reason_message(acoustic.quality_reason)
+        attempt.analysis_error_code = f"audio_quality:{acoustic.quality_reason}"[:80]
+        attempt.analysis_error_message = reason[:255]
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"录音质量不合格，未生成分数：{reason}")
     process_evaluation = generate_process_evaluation(
         template,
         transcript,
         acoustic,
         asr_provider_name=asr_result.provider_name,
         acoustic_provider_name=acoustic_provider.provider_name,
+        prompt_level=attempt.prompt_level,
+        requested_help=attempt.requested_help,
+        start_latency_ms=attempt.start_latency_ms,
+        attempt_duration_ms=attempt.duration_ms,
     )
     score_dimensions = build_rule_score_dimensions(process_evaluation)
     llm_feedback = safe_llm_feedback(llm_provider, template.target_text, transcript, template.task_type.value, process_evaluation)
@@ -101,11 +121,21 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
             "quality_reason": acoustic.quality_reason,
             "too_short": acoustic.too_short,
             "too_quiet": acoustic.too_quiet,
+            "too_noisy": acoustic.too_noisy,
+            "clipped": acoustic.clipped,
             "provider": acoustic_provider.provider_name,
             "requested_provider": getattr(acoustic_provider, "requested_provider", acoustic_provider.provider_name),
             "speaking_duration_seconds": acoustic.speaking_duration_seconds,
+            "total_duration_seconds": acoustic.total_duration_seconds,
             "loudness_dba": acoustic.loudness_dba,
+            "loudness_dbfs": acoustic.loudness_dbfs,
+            "pause_over_1s_count": acoustic.pause_over_1s_count,
             "long_pause_over_3s_count": acoustic.long_pause_over_3s_count,
+            "internal_pause_duration_seconds": acoustic.internal_pause_duration_seconds,
+            "pause_ratio": acoustic.pause_ratio,
+            "longest_pause_seconds": acoustic.longest_pause_seconds,
+            "clipping_ratio": acoustic.clipping_ratio,
+            "snr_db": acoustic.snr_db,
         },
         semantic_metrics={
             "target_text": template.target_text,
@@ -122,6 +152,7 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
             "requested_llm_provider": getattr(llm_provider, "requested_provider", llm_provider.provider_name),
             "llm_allowed_fields": ["main_strength", "main_issue", "suggestion"],
         },
+        provider_version=process_evaluation.details.get("provider_version", "rehab-process-v2"),
     )
     score = AttemptScore(
         attempt_id=attempt.id,
@@ -131,28 +162,23 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
         fluency_score=score_dimensions["fluency_score"],
         loudness_score=score_dimensions["loudness_score"],
         prompt_dependence_score=score_dimensions["prompt_dependence_score"],
+        task_type=template.task_type.value,
+        scoring_version="rehab-score-v2",
+        scoring_config=score_dimensions["scoring_config"],
+        confidence=score_dimensions["confidence"],
+        is_scorable=True,
         main_strength=llm_feedback["main_strength"],
         main_issue=llm_feedback["main_issue"],
         suggestion=llm_feedback["suggestion"],
     )
     attempt.analysis_status = AnalysisStatus.completed
     attempt.audio_quality = acoustic.quality_status
+    attempt.analysis_error_code = None
+    attempt.analysis_error_message = None
     db.add(analysis)
     db.add(score)
     db.flush()
     save_process_evaluation(db, attempt.id, process_evaluation)
-    from app.modules.assessment.service import create_auto_assessment_from_attempt
-
-    create_auto_assessment_from_attempt(
-        db,
-        attempt,
-        {
-            "script_accuracy": process_evaluation.script_accuracy,
-            "error_count": process_evaluation.error_count,
-            "speech_rate": process_evaluation.speech_rate,
-            "loudness": process_evaluation.loudness,
-        },
-    )
     from app.modules.profiles.service import refresh_ability_profile
 
     refresh_ability_profile(db, task.session.patient_profile_id)
@@ -177,7 +203,7 @@ def ensure_process_evaluation(db: Session, attempt: Attempt) -> None:
                 select(AttemptEvaluation.id).where(
                     AttemptEvaluation.attempt_id == attempt.id,
                     AttemptEvaluation.metric_id.in_(metric_ids),
-                    AttemptEvaluation.evaluation_source == EvaluationSource.mock_ai,
+                    AttemptEvaluation.evaluation_source == EvaluationSource.system_rule,
                 )
             ).all()
         )
@@ -187,7 +213,7 @@ def ensure_process_evaluation(db: Session, attempt: Attempt) -> None:
         db.query(AttemptEvaluation).filter(
             AttemptEvaluation.attempt_id == attempt.id,
             AttemptEvaluation.metric_id.in_(metric_ids),
-            AttemptEvaluation.evaluation_source == EvaluationSource.mock_ai,
+            AttemptEvaluation.evaluation_source == EvaluationSource.system_rule,
         ).delete(synchronize_session=False)
         db.flush()
         existing_count = db.scalar(
@@ -195,7 +221,7 @@ def ensure_process_evaluation(db: Session, attempt: Attempt) -> None:
             .where(
                 AttemptEvaluation.attempt_id == attempt.id,
                 AttemptEvaluation.metric_id.in_(metric_ids),
-                AttemptEvaluation.evaluation_source == EvaluationSource.mock_ai,
+                AttemptEvaluation.evaluation_source == EvaluationSource.system_rule,
             )
             .limit(1)
         )
@@ -236,12 +262,18 @@ def ensure_process_evaluation(db: Session, attempt: Attempt) -> None:
             error_message=provider_error_summary("过程指标补生成失败", exc),
         )
         return
+    if acoustic.quality_status != "pass" or acoustic_provider.provider_name == "mock":
+        return
     process_evaluation = generate_process_evaluation(
         template,
         transcript,
         acoustic,
         asr_provider_name="stored" if analysis else asr_result.provider_name,
         acoustic_provider_name=acoustic_provider.provider_name,
+        prompt_level=attempt.prompt_level,
+        requested_help=attempt.requested_help,
+        start_latency_ms=attempt.start_latency_ms,
+        attempt_duration_ms=attempt.duration_ms,
     )
     save_process_evaluation(db, attempt.id, process_evaluation)
     db.commit()
@@ -264,12 +296,50 @@ def to_score_read(score: AttemptScore, transcript: str | None) -> ScoreRead:
 
 
 def build_rule_score_dimensions(process_evaluation) -> dict[str, int]:
+    details = getattr(process_evaluation, "details", None) or {}
     content_score = round(_clamp(process_evaluation.script_accuracy))
-    clarity_score = round(_clamp(100 - process_evaluation.error_count * 12))
-    fluency_score = round(_clamp(100 - _distance_from_range(process_evaluation.speech_rate, 180, 240) * 0.7))
-    loudness_score = round(_clamp(100 - _distance_from_range(process_evaluation.loudness, 60, 78) * 3))
-    prompt_dependence_score = 86
-    overall_score = round((content_score * 0.35) + (clarity_score * 0.25) + (fluency_score * 0.2) + (loudness_score * 0.15) + (prompt_dependence_score * 0.05))
+    events = details.get("error_events") or {}
+    error_penalty = (
+        events.get("meaningless_repetition", 0) * 8
+        + events.get("self_correction", 0) * 4
+        + events.get("long_pause_over_3s", 0) * 10
+        + events.get("filler", 0) * 3
+    )
+    clarity_score = round(_clamp(100 - error_penalty))
+    expression_rate = float(details.get("expression_rate", process_evaluation.speech_rate))
+    articulation_rate = float(details.get("articulation_rate", expression_rate))
+    expression_score = _clamp(100 - _distance_from_range(expression_rate, 180, 240) * 0.7)
+    articulation_score = _clamp(100 - _distance_from_range(articulation_rate, 180, 260) * 0.55)
+    pause_ratio = float((details.get("pause_metrics") or {}).get("pause_ratio", 0))
+    fluency_score = round(_clamp(expression_score * 0.6 + articulation_score * 0.4 - pause_ratio * 35))
+    loudness_unit = details.get("loudness_unit", "dBA")
+    loudness_range = (-35, -12) if loudness_unit == "dBFS" else (60, 78)
+    loudness_score = round(_clamp(100 - _distance_from_range(process_evaluation.loudness, *loudness_range) * 3))
+    prompt_dependence_score = round(_clamp(float(details.get("independence_score", 100))))
+    task_type = details.get("task_type", "repeat")
+    weights = (
+        {"content": 0.30, "error_control": 0.15, "fluency": 0.30, "loudness": 0.10, "independence": 0.15}
+        if task_type == "scenario"
+        else {"content": 0.45, "error_control": 0.15, "fluency": 0.25, "loudness": 0.10, "independence": 0.05}
+    )
+    overall_score = round(
+        content_score * weights["content"]
+        + clarity_score * weights["error_control"]
+        + fluency_score * weights["fluency"]
+        + loudness_score * weights["loudness"]
+        + prompt_dependence_score * weights["independence"]
+    )
+    quality = details.get("acoustic_quality") or {}
+    confidence = round(
+        _clamp(
+            1.0
+            - (0.15 if quality.get("snr_db", 60) < 15 else 0)
+            - (0.15 if details.get("input_sources", {}).get("asr_provider") in {"mock", "unknown"} else 0),
+            0,
+            1,
+        ),
+        2,
+    )
     return {
         "overall_score": overall_score,
         "content_score": content_score,
@@ -277,11 +347,21 @@ def build_rule_score_dimensions(process_evaluation) -> dict[str, int]:
         "fluency_score": fluency_score,
         "loudness_score": loudness_score,
         "prompt_dependence_score": prompt_dependence_score,
+        "confidence": confidence,
+        "scoring_config": {
+            "version": "rehab-score-v2",
+            "weights": weights,
+            "task_type": task_type,
+            "loudness_unit": loudness_unit,
+            "speech_rate_reference": [180, 240],
+        },
     }
 
 
 def safe_llm_feedback(provider, target_text: str, transcript: str, task_type: str, process_evaluation) -> dict[str, str]:
     fallback = rule_feedback_summary(process_evaluation)
+    if getattr(provider, "provider_name", "mock") == "mock":
+        return fallback
     try:
         raw = provider.evaluate(target_text, transcript, task_type)
     except Exception:
@@ -322,13 +402,25 @@ def _distance_from_range(value: float, minimum: float, maximum: float) -> float:
     return minimum - value if value < minimum else value - maximum
 
 
+def _quality_reason_message(reason: str) -> str:
+    labels = {
+        "empty_audio": "未检测到有效录音",
+        "too_short": "有效发声时间过短",
+        "too_quiet": "录音音量过低",
+        "too_noisy": "背景噪声过大",
+        "clipped": "录音出现明显削波失真",
+    }
+    matched = [label for key, label in labels.items() if key in reason]
+    return "、".join(matched) if matched else "录音未通过质量检查"
+
+
 def _metric_values(db: Session, attempt_id) -> dict[str, float]:
     rows = db.execute(
         select(EvaluationMetric.name, AttemptEvaluation.value)
         .join(AttemptEvaluation, AttemptEvaluation.metric_id == EvaluationMetric.id)
         .where(
             AttemptEvaluation.attempt_id == attempt_id,
-            AttemptEvaluation.evaluation_source == EvaluationSource.mock_ai,
+            AttemptEvaluation.evaluation_source == EvaluationSource.system_rule,
             EvaluationMetric.name.in_(["script_accuracy", "error_count", "speech_rate", "loudness"]),
         )
     ).all()
@@ -417,19 +509,21 @@ def build_feedback(metrics: ProcessMetricsRead) -> list[TrainingFeedbackItem]:
             )
         )
 
-    if 60 <= metrics.loudness <= 78:
+    loudness_unit = "dBFS" if metrics.loudness < 0 else "dBA"
+    loudness_min, loudness_max = (-35, -12) if loudness_unit == "dBFS" else (60, 78)
+    if loudness_min <= metrics.loudness <= loudness_max:
         feedback.append(
             TrainingFeedbackItem(
                 metric="loudness",
-                current_performance=f"响度约为 {metrics.loudness:g} dBA，处于参考范围。",
+                current_performance=f"响度约为 {metrics.loudness:g} {loudness_unit}，处于工程参考范围。",
                 suggestion="保持现在的音量和呼吸支持。",
             )
         )
-    elif metrics.loudness < 60:
+    elif metrics.loudness < loudness_min:
         feedback.append(
             TrainingFeedbackItem(
                 metric="loudness",
-                current_performance=f"响度约为 {metrics.loudness:g} dBA，偏低。",
+                current_performance=f"响度约为 {metrics.loudness:g} {loudness_unit}，偏低。",
                 suggestion="建议坐直后再发声，尝试用更稳定的气息把句子说完整。",
             )
         )
@@ -437,7 +531,7 @@ def build_feedback(metrics: ProcessMetricsRead) -> list[TrainingFeedbackItem]:
         feedback.append(
             TrainingFeedbackItem(
                 metric="loudness",
-                current_performance=f"响度约为 {metrics.loudness:g} dBA，偏高。",
+                current_performance=f"响度约为 {metrics.loudness:g} {loudness_unit}，偏高。",
                 suggestion="建议降低用力程度，保持舒适自然的说话音量。",
             )
         )

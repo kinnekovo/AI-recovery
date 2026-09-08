@@ -663,9 +663,9 @@ def family_rhythm_label(speech_rate: float | None) -> str:
 def family_voice_label(loudness: float | None) -> str:
     if loudness is None:
         return "观察中"
-    if loudness < 60:
+    if loudness < -35:
         return "偏轻"
-    if loudness > 78:
+    if loudness > -12:
         return "偏响"
     return "清楚"
 
@@ -724,7 +724,7 @@ def attempt_process_metrics(db: Session, attempt_id: UUID) -> dict[str, float]:
         .join(AttemptEvaluation, AttemptEvaluation.metric_id == EvaluationMetric.id)
         .where(
             AttemptEvaluation.attempt_id == attempt_id,
-            AttemptEvaluation.evaluation_source == EvaluationSource.mock_ai,
+            AttemptEvaluation.evaluation_source == EvaluationSource.system_rule,
             EvaluationMetric.name.in_(PROCESS_METRIC_NAMES),
         )
     ).all()
@@ -817,7 +817,7 @@ def recommendation_session_metrics(db: Session, session_id: UUID) -> dict[str, f
         .join(SessionTask, SessionTask.id == Attempt.session_task_id)
         .where(
             SessionTask.training_session_id == session_id,
-            AttemptEvaluation.evaluation_source == EvaluationSource.mock_ai,
+            AttemptEvaluation.evaluation_source == EvaluationSource.system_rule,
             EvaluationMetric.name.in_(PROCESS_METRIC_NAMES),
         )
     ).all()
@@ -844,7 +844,7 @@ def effect_summary(metrics: dict[str, float], completed: bool) -> str:
     if speech_rate is not None:
         parts.append("节奏稳定" if 180 <= speech_rate <= 240 else "节奏需要继续观察")
     if loudness is not None:
-        parts.append("音量稳定" if 60 <= loudness <= 78 else "音量需要继续观察")
+        parts.append("音量稳定" if -35 <= loudness <= -12 else "音量需要继续观察")
     return "；".join(parts) + "。"
 
 
@@ -877,7 +877,7 @@ def build_trend_evidence(deltas: dict[str, float]) -> list[str]:
         "script_accuracy": ("完整度", "%"),
         "error_count": ("错误", "次"),
         "speech_rate": ("语速", "字/min"),
-        "loudness": ("音量", "dBA"),
+        "loudness": ("相对响度", "dBFS"),
     }
     points = []
     for key, value in deltas.items():
@@ -1004,7 +1004,7 @@ def decide_recommendation(ability) -> tuple[TrainingType, str, str, list[str], i
             ["慢一点说完整", "重点减少漏字和错字", "每次只关注一个小目标"],
             10,
         )
-    if loudness is not None and loudness < 60:
+    if loudness is not None and loudness < -35:
         return (
             TrainingType.repeat,
             "先练声音稳定",

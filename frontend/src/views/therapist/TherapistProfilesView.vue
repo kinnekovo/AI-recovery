@@ -85,7 +85,7 @@
                 <span>完整度 {{ metricValue(record.process_metrics.script_accuracy, '%') }}</span>
                 <span>错误 {{ metricValue(record.process_metrics.error_count, '次') }}</span>
                 <span>语速 {{ metricValue(record.process_metrics.speech_rate, '字/min') }}</span>
-                <span>音量 {{ metricValue(record.process_metrics.loudness, 'dBA') }}</span>
+                <span>相对响度 {{ metricValue(record.process_metrics.loudness, 'dBFS') }}</span>
               </div>
             </article>
           </div>

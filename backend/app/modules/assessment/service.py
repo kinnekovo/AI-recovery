@@ -13,9 +13,6 @@ from app.modules.assessment.schema import (
     PROCESS_METRIC_NAMES,
     MetricComparison,
 )
-from app.modules.attempts.model import Attempt
-from app.modules.evaluations.model import EvaluationSource
-from app.modules.training.model import SessionTask, TrainingSession
 from app.modules.users.model import User
 from app.modules.users.service import get_patient_profile
 from app.database.base import utc_now
@@ -34,35 +31,6 @@ def create_assessment(db: Session, user: User, payload: AssessmentCreate) -> Ass
     db.add(assessment)
     db.commit()
     db.refresh(assessment)
-    return to_read(assessment)
-
-
-def create_auto_assessment_from_attempt(
-    db: Session,
-    attempt: Attempt,
-    metrics: dict[str, float],
-) -> AssessmentRead | None:
-    task = db.get(SessionTask, attempt.session_task_id)
-    session = db.get(TrainingSession, task.training_session_id) if task else None
-    if not session:
-        return None
-
-    existing = db.scalar(select(AssessmentSession).where(AssessmentSession.source_attempt_id == attempt.id))
-    if existing:
-        return to_read(existing)
-
-    assessment = AssessmentSession(
-        patient_profile_id=session.patient_profile_id,
-        source_attempt_id=attempt.id,
-        assessment_type=AssessmentType.during,
-        evaluation_source=EvaluationSource.mock_ai,
-        review_status="pending_review",
-        assessed_at=utc_now(),
-        metrics={key: float(value) for key, value in metrics.items() if key in PROCESS_METRIC_NAMES},
-        notes="系统根据本次训练自动生成，等待治疗师复核。",
-    )
-    db.add(assessment)
-    db.flush()
     return to_read(assessment)
 
 

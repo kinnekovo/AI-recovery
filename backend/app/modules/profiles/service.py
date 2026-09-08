@@ -89,7 +89,7 @@ def recent_process_metrics(db: Session, patient_profile_id: UUID) -> list[dict[s
         .join(TrainingSession, TrainingSession.id == SessionTask.training_session_id)
         .where(
             TrainingSession.patient_profile_id == patient_profile_id,
-            AttemptEvaluation.evaluation_source == EvaluationSource.mock_ai,
+            AttemptEvaluation.evaluation_source == EvaluationSource.system_rule,
             EvaluationMetric.name.in_(PROCESS_METRIC_NAMES),
         )
         .order_by(Attempt.created_at.desc())
@@ -197,7 +197,7 @@ def build_summary(averages: dict[str, float], reviewed: dict) -> str:
     if speech_rate is not None:
         parts.append("说话节奏偏慢" if speech_rate < 180 else "说话节奏较稳定")
     if loudness is not None:
-        parts.append("声音偏轻" if loudness < 60 else "声音状态较稳定")
+        parts.append("声音偏轻" if loudness < -35 else "声音状态较稳定")
     if reviewed["latest_notes"]:
         parts.append(f"治疗师备注：{reviewed['latest_notes']}")
     return "；".join(parts) + "。"
@@ -212,7 +212,7 @@ def build_recommendation(averages: dict[str, float], confidence: float) -> str:
         return "建议先使用短句和高提示训练，把一句话说完整后再提高难度。"
     if averages.get("speech_rate", 200) < 180:
         return "建议增加熟悉短句的连续表达练习，重点减少停顿。"
-    if averages.get("loudness", 65) < 60:
+    if averages.get("loudness", -24) < -35:
         return "建议增加声音稳定练习，先坐直、慢吸气，再把句子清楚说完。"
     return "可以继续当前训练节奏，下一步逐步增加句子长度和自主表达比例。"
 

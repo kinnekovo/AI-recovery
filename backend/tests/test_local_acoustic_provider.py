@@ -47,6 +47,8 @@ class LocalAcousticAnalysisProviderTest(unittest.TestCase):
         os.environ["ACOUSTIC_VOICE_THRESHOLD_DBFS"] = "-45"
         os.environ["ACOUSTIC_MIN_SPEAKING_SECONDS"] = "1.0"
         os.environ["ACOUSTIC_MIN_LOUDNESS_DBA"] = "45"
+        os.environ["ACOUSTIC_MIN_SNR_DB"] = "10"
+        os.environ["ACOUSTIC_MAX_CLIPPING_RATIO"] = "0.01"
 
     def tearDown(self) -> None:
         for key in (
@@ -54,6 +56,8 @@ class LocalAcousticAnalysisProviderTest(unittest.TestCase):
             "ACOUSTIC_VOICE_THRESHOLD_DBFS",
             "ACOUSTIC_MIN_SPEAKING_SECONDS",
             "ACOUSTIC_MIN_LOUDNESS_DBA",
+            "ACOUSTIC_MIN_SNR_DB",
+            "ACOUSTIC_MAX_CLIPPING_RATIO",
         ):
             os.environ.pop(key, None)
         get_settings.cache_clear()
@@ -70,7 +74,13 @@ class LocalAcousticAnalysisProviderTest(unittest.TestCase):
         self.assertGreaterEqual(result.speaking_duration_seconds, 1.8)
         self.assertLessEqual(result.speaking_duration_seconds, 2.2)
         self.assertEqual(result.long_pause_over_3s_count, 1)
-        self.assertGreater(result.loudness_dba, 60)
+        self.assertEqual(result.pause_over_1s_count, 1)
+        self.assertGreater(result.internal_pause_duration_seconds, 3.0)
+        self.assertGreater(result.pause_ratio, 0.5)
+        self.assertGreater(result.longest_pause_seconds, 3.0)
+        self.assertAlmostEqual(result.total_duration_seconds, 5.2, places=1)
+        self.assertLess(result.loudness_dbfs, 0)
+        self.assertGreater(result.snr_db, 10)
         self.assertEqual(result.quality_status, "pass")
         self.assertFalse(result.too_short)
         self.assertFalse(result.too_quiet)
@@ -89,7 +99,7 @@ class LocalAcousticAnalysisProviderTest(unittest.TestCase):
         finally:
             os.remove(audio_path)
 
-        self.assertEqual(result.quality_status, "low_quality")
+        self.assertEqual(result.quality_status, "unusable")
         self.assertEqual(result.quality_reason, "too_short")
         self.assertTrue(result.too_short)
         self.assertFalse(result.too_quiet)
@@ -104,10 +114,32 @@ class LocalAcousticAnalysisProviderTest(unittest.TestCase):
         finally:
             os.remove(audio_path)
 
-        self.assertEqual(result.quality_status, "low_quality")
-        self.assertEqual(result.quality_reason, "too_short_and_quiet")
+        self.assertEqual(result.quality_status, "unusable")
+        self.assertEqual(result.quality_reason, "too_short_and_too_quiet")
         self.assertTrue(result.too_short)
         self.assertTrue(result.too_quiet)
+
+    def test_marks_clipped_audio_as_low_quality(self) -> None:
+        samples = array("h", [32767, -32767] * 16000)
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+            audio_path = temp_file.name
+        try:
+            write_wav(audio_path, samples)
+            result = LocalAcousticAnalysisProvider().analyze(audio_path)
+        finally:
+            os.remove(audio_path)
+
+        self.assertEqual(result.quality_status, "low_quality")
+        self.assertIn("clipped", result.quality_reason)
+        self.assertTrue(result.clipped)
+        self.assertGreater(result.clipping_ratio, 0.99)
+
+    def test_marks_low_snr_as_noisy(self) -> None:
+        fields = LocalAcousticAnalysisProvider()._quality_fields(2.0, 65.0, 5.0, 0.0)
+
+        self.assertEqual(fields["quality_status"], "low_quality")
+        self.assertEqual(fields["quality_reason"], "too_noisy")
+        self.assertTrue(fields["too_noisy"])
 
 
 if __name__ == "__main__":

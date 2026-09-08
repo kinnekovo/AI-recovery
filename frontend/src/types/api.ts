@@ -363,6 +363,8 @@ export interface Attempt {
   skipped: boolean
   requested_help: boolean
   audio_quality: string | null
+  analysis_error_code: string | null
+  analysis_error_message: string | null
   analysis_status: string
   created_at: string
 }
@@ -435,7 +437,7 @@ export interface ReportEffectComparison {
 }
 
 export type EvaluationMetricCategory = 'process' | 'long_term_effect'
-export type EvaluationSource = 'mock_ai' | 'human' | 'clinician'
+export type EvaluationSource = 'mock_ai' | 'system_rule' | 'provider_ai' | 'human' | 'clinician'
 
 export interface EvaluationMetric {
   id: string
@@ -500,7 +502,7 @@ export interface AssessmentMetrics {
 
 export interface AssessmentCreatePayload {
   assessment_type: AssessmentType
-  evaluation_source?: Exclude<EvaluationSource, 'mock_ai'>
+  evaluation_source?: Exclude<EvaluationSource, 'mock_ai' | 'system_rule' | 'provider_ai'>
   assessed_at?: string | null
   metrics: AssessmentMetrics
   notes?: string | null

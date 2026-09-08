@@ -1,7 +1,7 @@
 import enum
 import uuid
 
-from sqlalchemy import Boolean, Enum, ForeignKey, Integer
+from sqlalchemy import Boolean, Enum, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,6 +26,8 @@ class Attempt(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     skipped: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     requested_help: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     audio_quality: Mapped[str | None] = mapped_column(nullable=True)
+    analysis_error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    analysis_error_message: Mapped[str | None] = mapped_column(String(255), nullable=True)
     analysis_status: Mapped[AnalysisStatus] = mapped_column(
         Enum(AnalysisStatus, name="analysis_status"), default=AnalysisStatus.pending, nullable=False
     )

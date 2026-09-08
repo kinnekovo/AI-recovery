@@ -4,7 +4,7 @@ from fastapi import HTTPException, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.modules.attempts.model import Attempt
+from app.modules.attempts.model import AnalysisStatus, Attempt
 from app.modules.attempts.schema import AttemptCreate
 from app.modules.files.model import FileType
 from app.modules.files.service import save_upload
@@ -52,9 +52,14 @@ def get_attempt(db: Session, user: User, attempt_id: UUID) -> Attempt:
 
 def upload_audio(db: Session, user: User, attempt_id: UUID, upload: UploadFile) -> Attempt:
     attempt = get_attempt(db, user, attempt_id)
+    if attempt.score:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该次训练已完成评分，请创建新的训练记录后重新录音")
     asset = save_upload(db, user, upload, FileType.training_audio)
     attempt.audio_file_id = asset.id
-    attempt.audio_quality = "mock_pass"
+    attempt.audio_quality = None
+    attempt.analysis_error_code = None
+    attempt.analysis_error_message = None
+    attempt.analysis_status = AnalysisStatus.pending
     db.commit()
     db.refresh(attempt)
     return attempt

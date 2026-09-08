@@ -245,7 +245,7 @@ def build_trend_evidence(deltas: dict[str, float]) -> list[str]:
         "script_accuracy": ("完整度", "%"),
         "error_count": ("错误", "次"),
         "speech_rate": ("语速", "字/min"),
-        "loudness": ("音量", "dBA"),
+        "loudness": ("相对响度", "dBFS"),
     }
     points = []
     for key, value in deltas.items():

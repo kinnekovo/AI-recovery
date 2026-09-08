@@ -15,6 +15,8 @@ class EvaluationMetricCategory(str, enum.Enum):
 
 class EvaluationSource(str, enum.Enum):
     mock_ai = "mock_ai"
+    system_rule = "system_rule"
+    provider_ai = "provider_ai"
     human = "human"
     clinician = "clinician"
 

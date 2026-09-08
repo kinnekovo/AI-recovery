@@ -25,5 +25,7 @@ class AttemptRead(BaseModel):
     skipped: bool
     requested_help: bool
     audio_quality: str | None = None
+    analysis_error_code: str | None = None
+    analysis_error_message: str | None = None
     analysis_status: str
     created_at: datetime

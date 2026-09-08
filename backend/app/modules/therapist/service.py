@@ -48,8 +48,6 @@ def list_patients(
     backfill: bool = True,
     include_assessment_summary: bool = True,
 ) -> list[TherapistPatientRead]:
-    if backfill:
-        backfill_auto_assessments(db)
     if include_assessment_summary:
         stmt = (
             select(
@@ -218,8 +216,9 @@ def summarize_trial_quality_attempts(training_session_count: int, completed_sess
     )
     provider_failure_count = sum(
         1
-        for _attempt, analysis in attempt_rows
-        if analysis and analysis.semantic_metrics.get("asr_error_code")
+        for attempt, analysis in attempt_rows
+        if (getattr(attempt, "analysis_error_code", None) or "").startswith("asr:")
+        or (analysis and analysis.semantic_metrics.get("asr_error_code"))
     )
     return {
         "completion_rate": round(completed_session_count / training_session_count, 3) if training_session_count else 0.0,
@@ -233,56 +232,13 @@ def summarize_trial_quality_attempts(training_session_count: int, completed_sess
     }
 
 
-def backfill_auto_assessments(db: Session) -> None:
-    profiles = list(db.scalars(select(PatientProfile)))
-    changed = False
-    for profile in profiles:
-        changed = backfill_profile_auto_assessments(db, profile) or changed
-    if changed:
-        db.commit()
-
-
-def backfill_profile_auto_assessments(db: Session, profile: PatientProfile) -> bool:
-    changed = False
-    attempts = db.execute(
-        select(Attempt)
-        .join(SessionTask, SessionTask.id == Attempt.session_task_id)
-        .join(TrainingSession, TrainingSession.id == SessionTask.training_session_id)
-        .outerjoin(AssessmentSession, AssessmentSession.source_attempt_id == Attempt.id)
-        .where(
-            TrainingSession.patient_profile_id == profile.id,
-            Attempt.analysis_status == AnalysisStatus.completed,
-            AssessmentSession.id.is_(None),
-        )
-        .order_by(Attempt.created_at.asc())
-    ).scalars()
-    for attempt in attempts:
-        metrics = process_metrics_for_attempt(db, attempt.id)
-        if PROCESS_METRIC_NAMES.issubset(metrics.keys()):
-            db.add(
-                AssessmentSession(
-                    patient_profile_id=profile.id,
-                    source_attempt_id=attempt.id,
-                    assessment_type=AssessmentType.during,
-                    evaluation_source=EvaluationSource.mock_ai,
-                    review_status=AssessmentReviewStatus.pending_review.value,
-                    assessed_at=attempt.created_at,
-                    metrics=metrics,
-                    notes="系统根据历史训练分析自动补生成，等待治疗师复核。",
-                )
-            )
-            profile.assessment_status = "started"
-            changed = True
-    return changed
-
-
 def process_metrics_for_attempt(db: Session, attempt_id: UUID) -> dict[str, float]:
     rows = db.execute(
         select(EvaluationMetric.name, AttemptEvaluation.value)
         .join(AttemptEvaluation, AttemptEvaluation.metric_id == EvaluationMetric.id)
         .where(
             AttemptEvaluation.attempt_id == attempt_id,
-            AttemptEvaluation.evaluation_source == EvaluationSource.mock_ai,
+            AttemptEvaluation.evaluation_source == EvaluationSource.system_rule,
             EvaluationMetric.name.in_(PROCESS_METRIC_NAMES),
         )
     ).all()
@@ -420,8 +376,9 @@ def summarize_stage_attempt_rows(attempt_rows) -> dict[str, int | float]:
     )
     provider_failure_count = sum(
         1
-        for _attempt, _session, _task, _score, analysis in attempt_rows
-        if analysis and analysis.semantic_metrics.get("asr_error_code")
+        for attempt, _session, _task, _score, analysis in attempt_rows
+        if (getattr(attempt, "analysis_error_code", None) or "").startswith("asr:")
+        or (analysis and analysis.semantic_metrics.get("asr_error_code"))
     )
     return {
         "training_count": training_count,
@@ -558,7 +515,7 @@ def trend_bucket_summary(attempt_count: int, metrics: dict[str, float | None]) -
     if speech_rate is not None:
         parts.append("节奏稳定" if 180 <= speech_rate <= 240 else "节奏需观察")
     if loudness is not None:
-        parts.append("音量稳定" if 60 <= loudness <= 78 else "音量需观察")
+        parts.append("音量稳定" if -35 <= loudness <= -12 else "音量需观察")
     return "，".join(parts) + "。" if parts else "已有训练记录，暂缺完整指标。"
 
 
@@ -607,8 +564,6 @@ def list_patient_assessments(
     review_status: AssessmentReviewStatus | None = None,
 ) -> list[AssessmentRead]:
     profile = get_patient_profile_by_user_id(db, patient_user_id)
-    if backfill_profile_auto_assessments(db, profile):
-        db.commit()
     stmt = (
         select(AssessmentSession)
         .where(AssessmentSession.patient_profile_id == profile.id)
