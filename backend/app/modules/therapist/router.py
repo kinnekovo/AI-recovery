@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
@@ -24,12 +24,27 @@ from app.modules.training.service import (
     update_task_template,
 )
 from app.modules.therapist.schema import RecommendationNoteCreate, TherapistPatientAssignmentCreate
+from app.modules.pronunciation.schema import IntelligibilityReviewCreate, PronunciationRevisionCreate
+from app.modules.pronunciation import service as pronunciation_service
 from app.modules.training.model import TrainingType
 from app.modules.training.schema import StrategyFeedbackCreate, TaskTemplateCreate, TaskTemplateUpdate
 from app.modules.users.model import User
 from app.modules.users.service import require_therapist
 
 router = APIRouter(prefix="/therapist", tags=["therapist"])
+
+
+def require_pronunciation_access(db: Session, current_user: User, analysis_id: UUID) -> None:
+    attempt_id = pronunciation_service.get_analysis_attempt_id(db, analysis_id)
+    attempt = db.get(service.Attempt, attempt_id)
+    task = db.get(service.SessionTask, attempt.session_task_id) if attempt else None
+    session = db.get(service.TrainingSession, task.training_session_id) if task else None
+    if not session:
+        raise HTTPException(status_code=404, detail="精细发音评估上下文不存在")
+    profile = db.get(service.PatientProfile, session.patient_profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="患者档案不存在")
+    service.require_therapist_patient_access(db, current_user, profile.user_id)
 
 
 @router.get("/patients")
@@ -173,6 +188,17 @@ def training_records(
     return api_success([item.model_dump(mode="json") for item in result])
 
 
+@router.get("/patients/{patient_user_id}/pronunciation/inter-rater-agreement")
+def pronunciation_inter_rater_agreement(
+    patient_user_id: UUID,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
+    result = service.get_patient_inter_rater_agreement(db, patient_user_id)
+    return api_success(result.model_dump(mode="json"))
+
+
 @router.get("/patients/{patient_user_id}/training-trends")
 def training_trends(
     patient_user_id: UUID,
@@ -285,6 +311,51 @@ def phase3_demo_status(
 ):
     result = get_phase3_demo_status(db)
     return api_success(result.model_dump(mode="json"))
+
+
+@router.get("/pronunciation/{analysis_id}")
+def pronunciation_detail(
+    analysis_id: UUID,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    require_pronunciation_access(db, current_user, analysis_id)
+    attempt_id = pronunciation_service.get_analysis_attempt_id(db, analysis_id)
+    return api_success(pronunciation_service.get_attempt_pronunciation(db, attempt_id).model_dump(mode="json"))
+
+
+@router.post("/pronunciation/{analysis_id}/revisions")
+def add_pronunciation_revision(
+    analysis_id: UUID,
+    payload: PronunciationRevisionCreate,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    require_pronunciation_access(db, current_user, analysis_id)
+    return api_success(pronunciation_service.add_revision(db, analysis_id, current_user, payload).model_dump(mode="json"))
+
+
+@router.post("/pronunciation/{analysis_id}/intelligibility-reviews")
+def add_intelligibility_review(
+    analysis_id: UUID,
+    payload: IntelligibilityReviewCreate,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    require_pronunciation_access(db, current_user, analysis_id)
+    return api_success(
+        pronunciation_service.add_intelligibility_review(db, analysis_id, current_user, payload).model_dump(mode="json")
+    )
+
+
+@router.post("/pronunciation/{analysis_id}/complete-review")
+def complete_pronunciation_review(
+    analysis_id: UUID,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    require_pronunciation_access(db, current_user, analysis_id)
+    return api_success(pronunciation_service.complete_review(db, analysis_id, current_user).model_dump(mode="json"))
 
 
 @router.get("/patients/{patient_user_id}/assessments/compare")

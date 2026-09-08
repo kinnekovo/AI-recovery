@@ -6,7 +6,7 @@ from app.core.config import get_settings
 
 class SettingsTest(unittest.TestCase):
     def tearDown(self) -> None:
-        for key in ("DATABASE_URL", "DATABASE_CONNECT_TIMEOUT_SECONDS"):
+        for key in ("DATABASE_URL", "DATABASE_CONNECT_TIMEOUT_SECONDS", "PRONUNCIATION_SHADOW_MODE"):
             os.environ.pop(key, None)
         get_settings.cache_clear()
 
@@ -28,6 +28,12 @@ class SettingsTest(unittest.TestCase):
             get_settings().effective_database_url,
             "postgresql+psycopg://user:pass@localhost:5432/app?connect_timeout=3",
         )
+
+    def test_pronunciation_shadow_mode_can_be_disabled(self) -> None:
+        os.environ["PRONUNCIATION_SHADOW_MODE"] = "false"
+        get_settings.cache_clear()
+
+        self.assertFalse(get_settings().pronunciation_shadow_mode)
 
 
 if __name__ == "__main__":

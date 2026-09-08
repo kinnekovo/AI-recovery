@@ -17,7 +17,11 @@ import type {
   TaskTemplate,
   TaskTemplatePayload,
   TrainingRecommendation,
-  TherapistPatient
+  TherapistPatient,
+  PronunciationAnalysis,
+  PronunciationRevisionPayload,
+  IntelligibilityReviewPayload,
+  TherapistInterRaterAgreement
 } from '@/types/api'
 
 export const therapistApi = {
@@ -63,6 +67,23 @@ export const therapistApi = {
   },
   trainingRecords(patientUserId: string) {
     return request<TherapistTrainingRecord[]>(http.get(`/therapist/patients/${patientUserId}/training-records`))
+  },
+  pronunciationInterRaterAgreement(patientUserId: string) {
+    return request<TherapistInterRaterAgreement>(
+      http.get(`/therapist/patients/${patientUserId}/pronunciation/inter-rater-agreement`)
+    )
+  },
+  pronunciation(analysisId: string) {
+    return request<PronunciationAnalysis>(http.get(`/therapist/pronunciation/${analysisId}`))
+  },
+  revisePronunciation(analysisId: string, payload: PronunciationRevisionPayload) {
+    return request<PronunciationAnalysis>(http.post(`/therapist/pronunciation/${analysisId}/revisions`, payload))
+  },
+  addIntelligibilityReview(analysisId: string, payload: IntelligibilityReviewPayload) {
+    return request<PronunciationAnalysis>(http.post(`/therapist/pronunciation/${analysisId}/intelligibility-reviews`, payload))
+  },
+  completePronunciationReview(analysisId: string) {
+    return request<PronunciationAnalysis>(http.post(`/therapist/pronunciation/${analysisId}/complete-review`))
   },
   trainingTrends(patientUserId: string) {
     return request<TherapistTrainingTrends>(http.get(`/therapist/patients/${patientUserId}/training-trends`))

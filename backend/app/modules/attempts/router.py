@@ -8,6 +8,7 @@ from app.database.session import get_db
 from app.modules.attempts import service
 from app.modules.attempts.schema import AttemptCreate, AttemptRead
 from app.modules.scoring.service import analyze_attempt
+from app.modules.pronunciation.service import get_patient_attempt_pronunciation
 from app.modules.users.model import User
 from app.modules.users.service import require_patient
 
@@ -43,6 +44,17 @@ def get_attempt(
 ):
     attempt = service.get_attempt(db, current_user, attempt_id)
     return api_success(AttemptRead.model_validate(attempt).model_dump(mode="json"))
+
+
+@router.get("/{attempt_id}/pronunciation")
+def pronunciation(
+    attempt_id: UUID,
+    current_user: User = Depends(require_patient),
+    db: Session = Depends(get_db),
+):
+    service.get_attempt(db, current_user, attempt_id)
+    result = get_patient_attempt_pronunciation(db, attempt_id)
+    return api_success(result.model_dump(mode="json"))
 
 
 @router.post("/{attempt_id}/analyze")

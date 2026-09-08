@@ -1,6 +1,6 @@
 <template>
   <div class="audio-playback" :class="{ compact }">
-    <audio v-if="objectUrl" :src="objectUrl" controls></audio>
+    <audio v-if="objectUrl" ref="audioElement" :src="objectUrl" controls></audio>
     <span v-else>{{ loading ? '正在准备录音' : error || '暂无录音' }}</span>
   </div>
 </template>
@@ -12,6 +12,7 @@ import { toUserMessage } from '@/utils/errors'
 
 const props = defineProps<{ src: string | null | undefined; compact?: boolean }>()
 const objectUrl = ref('')
+const audioElement = ref<HTMLAudioElement | null>(null)
 const loading = ref(false)
 const error = ref('')
 
@@ -42,4 +43,12 @@ function revokeObjectUrl() {
 }
 
 onBeforeUnmount(revokeObjectUrl)
+
+function seek(seconds: number) {
+  if (!audioElement.value || !Number.isFinite(seconds)) return
+  audioElement.value.currentTime = Math.max(0, seconds)
+  void audioElement.value.play()
+}
+
+defineExpose({ seek })
 </script>

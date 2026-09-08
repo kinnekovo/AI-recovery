@@ -80,6 +80,14 @@
                   <span>{{ analysisStatusLabel(record.analysis_status) }}</span>
                   <span v-if="record.recommendation_source">{{ record.recommendation_matched ? '符合推荐' : '未按推荐' }}</span>
                 </div>
+                <button
+                  v-if="record.pronunciation_analysis_id"
+                  class="app-button secondary compact-action"
+                  type="button"
+                  @click="openPronunciationReview(record)"
+                >
+                  精细发音复核
+                </button>
               </div>
               <div class="record-metric-strip">
                 <span>完整度 {{ metricValue(record.process_metrics.script_accuracy, '%') }}</span>
@@ -92,6 +100,118 @@
           <div v-else class="empty-state">
             <p>暂无训练记录。患者完成一次训练并生成评分后，这里会自动出现。</p>
           </div>
+        </article>
+
+        <article v-if="selectedPronunciationRecord" class="therapist-panel pronunciation-review-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>精细发音复核</h2>
+              <p>{{ selectedPronunciationRecord.task_title }} · {{ pronunciationSummary }}</p>
+            </div>
+            <button class="app-button secondary" type="button" :disabled="pronunciationLoading" @click="closePronunciationReview">关闭</button>
+          </div>
+          <p v-if="pronunciationLoading" class="success-text">正在读取字词级评测结果。</p>
+          <p v-else-if="pronunciationError" class="error-text">{{ pronunciationError }}</p>
+          <template v-else-if="pronunciation">
+            <div class="record-metric-strip">
+              <span>准确度 {{ metricValue(pronunciation.overall_accuracy, '%') }}</span>
+              <span>流畅度 {{ metricValue(pronunciation.fluency == null ? null : pronunciation.fluency * 100, '%') }}</span>
+              <span>完成度 {{ metricValue(pronunciation.completion == null ? null : pronunciation.completion * 100, '%') }}</span>
+              <span>覆盖度 {{ metricValue(pronunciation.coverage * 100, '%') }}</span>
+              <span>影子分 {{ metricValue(selectedPronunciationRecord.pronunciation_shadow_score, ' 分') }}</span>
+              <span>可懂度代理 {{ metricValue(pronunciation.intelligibility_proxy, '%') }}</span>
+            </div>
+            <p v-if="pronunciation.error_message" class="error-text">{{ pronunciation.error_message }}</p>
+            <AudioPlayback ref="reviewAudio" :src="selectedPronunciationRecord.audio_url" />
+            <label v-if="pronunciation.segments.some((item) => item.level === 'phoneme')" class="pronunciation-level-picker">
+              复核层级
+              <select v-model="segmentLevel">
+                <option value="word">字词</option>
+                <option value="phoneme">音素</option>
+              </select>
+            </label>
+            <div v-if="pronunciation.segments.length" class="pronunciation-segment-list">
+              <button
+                v-for="segment in visibleSegments"
+                :key="segment.id"
+                class="pronunciation-segment"
+                :class="{ active: selectedSegment?.id === segment.id }"
+                type="button"
+                @click="selectSegment(segment)"
+              >
+                <strong>{{ segment.reference_text || '未标注' }}</strong>
+                <span>{{ matchTypeLabel(segment.match_type) }}</span>
+                <small>{{ segment.recognized_text || '未识别' }} · {{ metricValue(segment.accuracy, '%') }}</small>
+              </button>
+            </div>
+            <form v-if="selectedSegment" class="pronunciation-correction-form" @submit.prevent="correctSelectedSegment">
+              <strong>修正“{{ selectedSegment.reference_text || '该片段' }}”的机器标签</strong>
+              <div class="template-form-grid">
+                <label>
+                  修正类型
+                  <select v-model="correctionMatchType">
+                    <option value="matched">匹配</option>
+                    <option value="addition">多读</option>
+                    <option value="omission">漏读</option>
+                    <option value="substitution">替换或错读</option>
+                    <option value="out_of_vocabulary">词表外</option>
+                    <option value="unavailable">无法判断</option>
+                  </select>
+                </label>
+                <label>
+                  复核原因
+                  <input v-model="correctionReason" maxlength="300" placeholder="简要说明听辨依据" />
+                </label>
+              </div>
+              <div class="form-actions">
+                <button class="app-button secondary" type="submit" :disabled="reviewSaving">
+                  保存片段修正
+                </button>
+              </div>
+            </form>
+            <form class="pronunciation-correction-form" @submit.prevent="saveIntelligibilityReview">
+              <strong>人工可懂度记录</strong>
+              <div class="template-form-grid">
+                <label>
+                  听者类型
+                  <input v-model="intelligibilityForm.listener_role" maxlength="80" placeholder="例如：治疗师、家属" required />
+                </label>
+                <label>
+                  正确理解比例
+                  <input v-model.number="intelligibilityForm.understood_percent" type="number" min="0" max="100" required />
+                </label>
+                <label>
+                  播放次数
+                  <input v-model.number="intelligibilityForm.playback_count" type="number" min="1" max="20" required />
+                </label>
+                <label>
+                  听辨环境
+                  <input v-model="intelligibilityForm.listening_environment" maxlength="500" placeholder="例如：安静办公室、耳机" />
+                </label>
+              </div>
+              <label>
+                听者转写
+                <textarea v-model="intelligibilityForm.listener_transcript" rows="2" maxlength="2000" required placeholder="不参考目标文本，按实际听到的内容转写。"></textarea>
+              </label>
+              <label>
+                备注
+                <input v-model="intelligibilityForm.notes" maxlength="2000" placeholder="可选" />
+              </label>
+              <div class="form-actions">
+                <button class="app-button secondary" type="submit" :disabled="reviewSaving">保存可懂度记录</button>
+              </div>
+              <p v-if="pronunciation.intelligibility_reviews.length" class="success-text">已有 {{ pronunciation.intelligibility_reviews.length }} 条人工可懂度记录。</p>
+            </form>
+            <div class="form-actions">
+              <button class="app-button secondary" type="button" :disabled="reviewSaving" @click="confirmVisibleSegments">
+                {{ reviewSaving ? '保存中' : '确认当前机器标注' }}
+              </button>
+              <button class="app-button primary" type="button" :disabled="reviewSaving || pronunciation.review_status === 'completed'" @click="completePronunciationReview">
+                {{ pronunciation.review_status === 'completed' ? '已完成复核' : '完成复核' }}
+              </button>
+            </div>
+            <p v-if="pronunciation.revisions.length" class="success-text">已保留 {{ pronunciation.revisions.length }} 条人工审阅记录。</p>
+          </template>
         </article>
 
         <article class="therapist-panel">
@@ -119,6 +239,22 @@
           </div>
           <div v-else class="empty-state">
             <p>暂无趋势数据。</p>
+          </div>
+        </article>
+
+        <article class="therapist-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>双标一致性</h2>
+              <p>{{ agreement?.summary || '需要两名记录者对同一录音分别完成听辨记录。' }}</p>
+            </div>
+          </div>
+          <div v-if="agreement" class="record-metric-strip">
+            <span>人工记录 {{ agreement.listener_review_count }} 条</span>
+            <span>双标训练 {{ agreement.double_labeled_attempt_count }} 次</span>
+            <span>平均差异 {{ metricValue(agreement.mean_absolute_percent_difference, ' 个百分点') }}</span>
+            <span>10% 内一致 {{ metricValue(agreement.within_ten_percent_rate == null ? null : agreement.within_ten_percent_rate * 100, '%') }}</span>
+            <span>转写相似 {{ metricValue(agreement.mean_transcript_similarity == null ? null : agreement.mean_transcript_similarity * 100, '%') }}</span>
           </div>
         </article>
       </div>
@@ -275,6 +411,9 @@ import type {
   TherapistPatient,
   TherapistTrainingRecord,
   TherapistTrainingTrends,
+  TherapistInterRaterAgreement,
+  PronunciationAnalysis,
+  PronunciationSegment,
   TrainingRecommendation
 } from '@/types/api'
 import { toUserMessage } from '@/utils/errors'
@@ -285,7 +424,26 @@ const ability = ref<AbilityProfile | null>(null)
 const recommendation = ref<TrainingRecommendation | null>(null)
 const effects = ref<RecommendationEffectSummary | null>(null)
 const records = ref<TherapistTrainingRecord[]>([])
+const selectedPronunciationRecord = ref<TherapistTrainingRecord | null>(null)
+const pronunciation = ref<PronunciationAnalysis | null>(null)
+const pronunciationLoading = ref(false)
+const pronunciationError = ref('')
+const reviewSaving = ref(false)
+const reviewAudio = ref<InstanceType<typeof AudioPlayback> | null>(null)
+const selectedSegment = ref<PronunciationSegment | null>(null)
+const correctionMatchType = ref('matched')
+const correctionReason = ref('')
+const segmentLevel = ref<'word' | 'phoneme'>('word')
+const intelligibilityForm = ref({
+  listener_role: '',
+  listener_transcript: '',
+  understood_percent: 100,
+  playback_count: 1,
+  listening_environment: '',
+  notes: ''
+})
 const trends = ref<TherapistTrainingTrends | null>(null)
+const agreement = ref<TherapistInterRaterAgreement | null>(null)
 const taskTemplates = ref<TaskTemplate[]>([])
 const noteText = ref('')
 const templateForm = ref<TaskTemplatePayload>({
@@ -312,6 +470,12 @@ const contentLevels = ['L1', 'L2', 'L3', 'L4', 'L5']
 const autonomyLevels = ['S1', 'S2', 'S3', 'S4']
 
 const selectedPatient = computed(() => patients.value.find((item) => item.user_id === selectedPatientId.value))
+const pronunciationSummary = computed(() => {
+  if (!pronunciation.value) return '等待加载'
+  if (pronunciation.value.status !== 'completed') return pronunciation.value.status === 'unavailable' ? '服务未启用' : '评测未完成'
+  return `准确度 ${metricValue(pronunciation.value.overall_accuracy, '%')}，覆盖度 ${metricValue(pronunciation.value.coverage * 100, '%')}`
+})
+const visibleSegments = computed(() => pronunciation.value?.segments.filter((item) => item.level === segmentLevel.value) || [])
 
 onMounted(async () => {
   try {
@@ -337,24 +501,136 @@ async function reloadSelected() {
   pageError.value = ''
   noteSaved.value = ''
   try {
-    const [abilityResult, recommendationResult, recordsResult, trendsResult, noteResult, effectsResult] = await Promise.all([
+    const [abilityResult, recommendationResult, recordsResult, trendsResult, noteResult, effectsResult, agreementResult] = await Promise.all([
       therapistApi.abilityProfile(selectedPatientId.value),
       therapistApi.trainingRecommendation(selectedPatientId.value),
       therapistApi.trainingRecords(selectedPatientId.value),
       therapistApi.trainingTrends(selectedPatientId.value),
       therapistApi.recommendationNote(selectedPatientId.value),
-      therapistApi.recommendationEffects(selectedPatientId.value)
+      therapistApi.recommendationEffects(selectedPatientId.value),
+      therapistApi.pronunciationInterRaterAgreement(selectedPatientId.value)
     ])
     ability.value = abilityResult
     recommendation.value = recommendationResult
     records.value = recordsResult
+    closePronunciationReview()
     trends.value = trendsResult
     effects.value = effectsResult
+    agreement.value = agreementResult
     noteText.value = noteResult.note || recommendationResult.therapist_notes || ''
   } catch (err) {
     pageError.value = toUserMessage(err, '患者训练数据加载失败')
   } finally {
     loadingPatientData.value = false
+  }
+}
+
+async function openPronunciationReview(record: TherapistTrainingRecord) {
+  if (!record.pronunciation_analysis_id) return
+  selectedPronunciationRecord.value = record
+  pronunciation.value = null
+  selectedSegment.value = null
+  segmentLevel.value = 'word'
+  intelligibilityForm.value = { listener_role: '', listener_transcript: '', understood_percent: 100, playback_count: 1, listening_environment: '', notes: '' }
+  pronunciationError.value = ''
+  pronunciationLoading.value = true
+  try {
+    pronunciation.value = await therapistApi.pronunciation(record.pronunciation_analysis_id)
+  } catch (err) {
+    pronunciationError.value = toUserMessage(err, '精细发音评测加载失败')
+  } finally {
+    pronunciationLoading.value = false
+  }
+}
+
+function closePronunciationReview() {
+  selectedPronunciationRecord.value = null
+  pronunciation.value = null
+  selectedSegment.value = null
+  pronunciationError.value = ''
+}
+
+async function saveIntelligibilityReview() {
+  if (!pronunciation.value) return
+  reviewSaving.value = true
+  try {
+    pronunciation.value = await therapistApi.addIntelligibilityReview(pronunciation.value.id, {
+      listener_role: intelligibilityForm.value.listener_role.trim(),
+      listener_transcript: intelligibilityForm.value.listener_transcript.trim(),
+      understood_percent: intelligibilityForm.value.understood_percent,
+      playback_count: intelligibilityForm.value.playback_count,
+      listening_environment: intelligibilityForm.value.listening_environment.trim() || null,
+      notes: intelligibilityForm.value.notes.trim() || null
+    })
+    intelligibilityForm.value = { listener_role: '', listener_transcript: '', understood_percent: 100, playback_count: 1, listening_environment: '', notes: '' }
+  } catch (err) {
+    pronunciationError.value = toUserMessage(err, '人工可懂度记录保存失败')
+  } finally {
+    reviewSaving.value = false
+  }
+}
+
+function seekSegment(startMs: number | null) {
+  if (startMs != null) reviewAudio.value?.seek(startMs / 1000)
+}
+
+function selectSegment(segment: PronunciationSegment) {
+  selectedSegment.value = segment
+  correctionMatchType.value = segment.match_type
+  correctionReason.value = ''
+  seekSegment(segment.start_ms)
+}
+
+async function correctSelectedSegment() {
+  if (!pronunciation.value || !selectedSegment.value) return
+  reviewSaving.value = true
+  try {
+    const revisedMatchType = correctionMatchType.value
+    await therapistApi.revisePronunciation(pronunciation.value.id, {
+      segment_id: selectedSegment.value.id,
+      metric_name: 'match_type',
+      revised_value: { match_type: revisedMatchType },
+      judgment: revisedMatchType === selectedSegment.value.match_type ? 'confirmed' : 'corrected',
+      error_category: revisedMatchType === selectedSegment.value.match_type ? null : revisedMatchType,
+      reason: correctionReason.value.trim() || null
+    })
+    pronunciation.value = await therapistApi.pronunciation(pronunciation.value.id)
+  } catch (err) {
+    pronunciationError.value = toUserMessage(err, '片段修正保存失败')
+  } finally {
+    reviewSaving.value = false
+  }
+}
+
+async function confirmVisibleSegments() {
+  if (!pronunciation.value) return
+  reviewSaving.value = true
+  try {
+    for (const segment of pronunciation.value.segments.filter((item) => item.level === 'word')) {
+      await therapistApi.revisePronunciation(pronunciation.value.id, {
+        segment_id: segment.id,
+        metric_name: 'match_type',
+        revised_value: { match_type: segment.match_type },
+        judgment: 'confirmed'
+      })
+    }
+    pronunciation.value = await therapistApi.pronunciation(pronunciation.value.id)
+  } catch (err) {
+    pronunciationError.value = toUserMessage(err, '人工确认保存失败')
+  } finally {
+    reviewSaving.value = false
+  }
+}
+
+async function completePronunciationReview() {
+  if (!pronunciation.value) return
+  reviewSaving.value = true
+  try {
+    pronunciation.value = await therapistApi.completePronunciationReview(pronunciation.value.id)
+  } catch (err) {
+    pronunciationError.value = toUserMessage(err, '完成复核失败')
+  } finally {
+    reviewSaving.value = false
   }
 }
 
@@ -433,6 +709,10 @@ function analysisStatusLabel(status: string) {
   if (status === 'completed') return '已评分'
   if (status === 'failed') return '分析失败'
   return '分析中'
+}
+
+function matchTypeLabel(value: string) {
+  return { matched: '匹配', addition: '多读', omission: '漏读', substitution: '替换', out_of_vocabulary: '词表外' }[value] || '未判断'
 }
 
 function metricValue(value: number | null | undefined, unit: string) {

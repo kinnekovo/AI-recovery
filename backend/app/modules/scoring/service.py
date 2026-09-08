@@ -2,6 +2,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.observability import log_event
 from app.core.redaction import provider_error_summary
 from app.integrations.acoustic_analysis.provider import get_acoustic_analysis_provider
@@ -12,6 +13,7 @@ from app.modules.evaluations.model import AttemptEvaluation, EvaluationMetric, E
 from app.modules.evaluations.service import generate_process_evaluation, save_process_evaluation
 from app.modules.files.model import FileAsset
 from app.modules.files.service import public_url
+from app.modules.pronunciation.service import analyze_attempt_pronunciation, get_attempt_pronunciation
 from app.modules.scoring.model import AttemptAnalysisResult, AttemptScore
 from app.modules.scoring.schema import (
     ProcessMetricsRead,
@@ -113,6 +115,23 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
     )
     score_dimensions = build_rule_score_dimensions(process_evaluation)
     llm_feedback = safe_llm_feedback(llm_provider, template.target_text, transcript, template.task_type.value, process_evaluation)
+    pronunciation = None
+    try:
+        pronunciation = analyze_attempt_pronunciation(
+            db,
+            attempt,
+            template,
+            transcript,
+            process_evaluation.script_accuracy,
+        )
+    except Exception as exc:
+        log_event(
+            "error",
+            "analysis",
+            "pronunciation_shadow_failed",
+            attempt_id=str(attempt.id),
+            error_message=provider_error_summary("精细发音影子评估失败", exc),
+        )
     analysis = AttemptAnalysisResult(
         attempt_id=attempt.id,
         asr_text=transcript,
@@ -167,6 +186,12 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
         scoring_config=score_dimensions["scoring_config"],
         confidence=score_dimensions["confidence"],
         is_scorable=True,
+        pronunciation_shadow_score=_pronunciation_shadow_score(process_evaluation, pronunciation)
+        if get_settings().pronunciation_shadow_mode
+        else None,
+        pronunciation_coverage=pronunciation.coverage if pronunciation and get_settings().pronunciation_shadow_mode else None,
+        pronunciation_status=pronunciation.status if pronunciation else "failed",
+        pronunciation_confidence=pronunciation.confidence if pronunciation and get_settings().pronunciation_shadow_mode else None,
         main_strength=llm_feedback["main_strength"],
         main_issue=llm_feedback["main_issue"],
         suggestion=llm_feedback["suggestion"],
@@ -437,6 +462,10 @@ def to_training_feedback_read(db: Session, attempt_id, transcript: str | None) -
         speech_rate=values.get("speech_rate", 0.0),
         loudness=values.get("loudness", 0.0),
     )
+    try:
+        pronunciation = get_attempt_pronunciation(db, attempt_id).model_dump(mode="json")
+    except HTTPException:
+        pronunciation = None
     return TrainingFeedbackRead(
         attempt_id=attempt_id,
         process_metrics=metrics,
@@ -444,7 +473,24 @@ def to_training_feedback_read(db: Session, attempt_id, transcript: str | None) -
         transcript=transcript or analysis.asr_text if analysis else transcript,
         audio_url=public_url(attempt.audio_file) if attempt and attempt.audio_file else None,
         process_details=analysis.semantic_metrics.get("process_monitoring") if analysis else None,
+        pronunciation=pronunciation,
     )
+
+
+def _pronunciation_shadow_score(process_evaluation, pronunciation) -> int | None:
+    if not pronunciation or pronunciation.status != "completed" or pronunciation.overall_accuracy is None:
+        return None
+    prosody = pronunciation.prosody_metrics or {}
+    prosody_score = 100 if prosody.get("status") == "completed" else 0
+    score = (
+        process_evaluation.script_accuracy * 0.35
+        + pronunciation.overall_accuracy * 0.20
+        + (pronunciation.fluency or 0) * 100 * 0.20
+        + max(0, 100 - process_evaluation.error_count * 10) * 0.10
+        + prosody_score * 0.10
+        + float((process_evaluation.details or {}).get("independence_score", 100)) * 0.05
+    )
+    return round(max(0, min(100, score)))
 
 
 def build_feedback(metrics: ProcessMetricsRead) -> list[TrainingFeedbackItem]:

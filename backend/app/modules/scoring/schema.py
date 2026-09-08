@@ -46,3 +46,4 @@ class TrainingFeedbackRead(BaseModel):
     transcript: str | None = None
     audio_url: str | None = None
     process_details: dict | None = None
+    pronunciation: dict | None = None

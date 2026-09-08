@@ -39,6 +39,9 @@ class TherapistTrainingRecordRead(BaseModel):
     task_title: str
     target_text: str
     analysis_status: str
+    pronunciation_analysis_id: UUID | None = None
+    pronunciation_status: str | None = None
+    pronunciation_shadow_score: int | None = None
     overall_score: int | None = None
     content_score: int | None = None
     clarity_score: int | None = None
@@ -118,3 +121,14 @@ class TherapistTrialQualityRead(BaseModel):
     low_quality_attempt_count: int
     low_quality_rate: float
     provider_failure_count: int
+
+
+class TherapistInterRaterAgreementRead(BaseModel):
+    patient_user_id: UUID
+    listener_review_count: int
+    double_labeled_attempt_count: int
+    comparison_count: int
+    mean_absolute_percent_difference: float | None = None
+    within_ten_percent_rate: float | None = None
+    mean_transcript_similarity: float | None = None
+    summary: str

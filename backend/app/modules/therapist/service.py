@@ -21,6 +21,8 @@ from app.modules.attempts.model import AnalysisStatus, Attempt
 from app.modules.evaluations.model import AttemptEvaluation, EvaluationMetric, EvaluationSource
 from app.modules.files.service import public_url
 from app.modules.scoring.model import AttemptAnalysisResult, AttemptScore
+from app.modules.pronunciation.model import PronunciationAnalysisResult
+from app.modules.pronunciation.model import IntelligibilityReview
 from app.modules.therapist.schema import (
     RecommendationNoteRead,
     TherapistPatientAssignmentRead,
@@ -31,6 +33,7 @@ from app.modules.therapist.schema import (
     TherapistTrainingTrendsRead,
     TherapistTrendBucketRead,
     TherapistTrialQualityRead,
+    TherapistInterRaterAgreementRead,
 )
 from app.modules.training.model import (
     RecommendationStrategyFeedback,
@@ -252,11 +255,12 @@ def list_patient_training_records(
 ) -> list[TherapistTrainingRecordRead]:
     profile = get_patient_profile_by_user_id(db, patient_user_id)
     rows = db.execute(
-        select(Attempt, TrainingSession, SessionTask, AttemptScore, AttemptAnalysisResult)
+        select(Attempt, TrainingSession, SessionTask, AttemptScore, AttemptAnalysisResult, PronunciationAnalysisResult)
         .join(SessionTask, SessionTask.id == Attempt.session_task_id)
         .join(TrainingSession, TrainingSession.id == SessionTask.training_session_id)
         .outerjoin(AttemptScore, AttemptScore.attempt_id == Attempt.id)
         .outerjoin(AttemptAnalysisResult, AttemptAnalysisResult.attempt_id == Attempt.id)
+        .outerjoin(PronunciationAnalysisResult, PronunciationAnalysisResult.attempt_id == Attempt.id)
         .where(TrainingSession.patient_profile_id == profile.id)
         .order_by(Attempt.created_at.desc())
         .limit(limit)
@@ -270,6 +274,9 @@ def list_patient_training_records(
             task_title=task.task_template.title,
             target_text=task.task_template.target_text,
             analysis_status=attempt.analysis_status.value,
+            pronunciation_analysis_id=pronunciation.id if pronunciation else None,
+            pronunciation_status=pronunciation.status if pronunciation else None,
+            pronunciation_shadow_score=score.pronunciation_shadow_score if score else None,
             overall_score=score.overall_score if score else None,
             content_score=score.content_score if score else None,
             clarity_score=score.clarity_score if score else None,
@@ -283,8 +290,77 @@ def list_patient_training_records(
             recommendation_source=session.recommendation_source,
             recommendation_matched=session.recommendation_matched,
         )
-        for attempt, session, task, score, analysis in rows
+        for attempt, session, task, score, analysis, pronunciation in rows
     ]
+
+
+def get_patient_inter_rater_agreement(db: Session, patient_user_id: UUID) -> TherapistInterRaterAgreementRead:
+    profile = get_patient_profile_by_user_id(db, patient_user_id)
+    rows = db.execute(
+        select(IntelligibilityReview)
+        .join(PronunciationAnalysisResult, PronunciationAnalysisResult.id == IntelligibilityReview.analysis_id)
+        .join(Attempt, Attempt.id == PronunciationAnalysisResult.attempt_id)
+        .join(SessionTask, SessionTask.id == Attempt.session_task_id)
+        .join(TrainingSession, TrainingSession.id == SessionTask.training_session_id)
+        .where(TrainingSession.patient_profile_id == profile.id)
+        .order_by(IntelligibilityReview.created_at.desc())
+    ).scalars().all()
+    result = summarize_inter_rater_agreement(rows)
+    return TherapistInterRaterAgreementRead(patient_user_id=patient_user_id, **result)
+
+
+def summarize_inter_rater_agreement(reviews) -> dict[str, int | float | str | None]:
+    by_analysis: dict[UUID, dict[UUID, IntelligibilityReview]] = {}
+    for review in reviews:
+        by_analysis.setdefault(review.analysis_id, {}).setdefault(review.recorded_by_user_id, review)
+
+    percentage_differences: list[float] = []
+    transcript_similarities: list[float] = []
+    double_labeled_attempt_count = 0
+    for reviewer_entries in by_analysis.values():
+        values = list(reviewer_entries.values())
+        if len(values) < 2:
+            continue
+        double_labeled_attempt_count += 1
+        for index, left in enumerate(values):
+            for right in values[index + 1 :]:
+                percentage_differences.append(abs(float(left.understood_percent) - float(right.understood_percent)))
+                transcript_similarities.append(_normalized_transcript_similarity(left.listener_transcript, right.listener_transcript))
+    if not percentage_differences:
+        summary = "尚未形成不同记录者对同一录音的双标数据。"
+    else:
+        mean_difference = sum(percentage_differences) / len(percentage_differences)
+        within_ten_rate = sum(value <= 10 for value in percentage_differences) / len(percentage_differences)
+        summary = f"已形成 {len(percentage_differences)} 组双标比较，理解比例平均差异 {mean_difference:.1f} 个百分点。"
+    return {
+        "listener_review_count": len(reviews),
+        "double_labeled_attempt_count": double_labeled_attempt_count,
+        "comparison_count": len(percentage_differences),
+        "mean_absolute_percent_difference": round(sum(percentage_differences) / len(percentage_differences), 2) if percentage_differences else None,
+        "within_ten_percent_rate": round(sum(value <= 10 for value in percentage_differences) / len(percentage_differences), 3)
+        if percentage_differences
+        else None,
+        "mean_transcript_similarity": round(sum(transcript_similarities) / len(transcript_similarities), 3)
+        if transcript_similarities
+        else None,
+        "summary": summary,
+    }
+
+
+def _normalized_transcript_similarity(left: str, right: str) -> float:
+    left = "".join(left.split())
+    right = "".join(right.split())
+    if not left and not right:
+        return 1.0
+    if not left or not right:
+        return 0.0
+    previous = list(range(len(right) + 1))
+    for left_index, left_char in enumerate(left, 1):
+        current = [left_index]
+        for right_index, right_char in enumerate(right, 1):
+            current.append(min(previous[right_index] + 1, current[right_index - 1] + 1, previous[right_index - 1] + (left_char != right_char)))
+        previous = current
+    return round(max(0.0, 1 - previous[-1] / max(len(left), len(right))), 4)
 
 
 def get_patient_training_trends(db: Session, patient_user_id: UUID) -> TherapistTrainingTrendsRead:

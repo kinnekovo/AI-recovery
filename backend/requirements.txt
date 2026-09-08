@@ -12,5 +12,7 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 tencentcloud-sdk-python-common>=3.0.0
 tencentcloud-sdk-python-asr>=3.0.0
+tencentcloud-sdk-python-soe>=3.0.0
+websocket-client>=1.8.0
 numpy>=2.0.0
 imageio-ffmpeg>=0.5.1

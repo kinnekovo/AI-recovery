@@ -41,6 +41,13 @@ class Settings:
     ffmpeg_bin: str | None
     acoustic_dba_calibration_offset: float
     acoustic_voice_threshold_dbfs: float
+    pronunciation_provider: str
+    tencent_soe_app_id: str | None
+    tencent_soe_server_type: int
+    tencent_soe_engine_type: str
+    tencent_soe_score_coeff: float
+    pronunciation_timeout_seconds: int
+    pronunciation_shadow_mode: bool
     tts_provider: str
     tts_api_key: str | None
     tts_base_url: str | None
@@ -91,6 +98,13 @@ class Settings:
         self.acoustic_min_loudness_dba = float(os.getenv("ACOUSTIC_MIN_LOUDNESS_DBA", "45"))
         self.acoustic_min_snr_db = float(os.getenv("ACOUSTIC_MIN_SNR_DB", "10"))
         self.acoustic_max_clipping_ratio = float(os.getenv("ACOUSTIC_MAX_CLIPPING_RATIO", "0.01"))
+        self.pronunciation_provider = os.getenv("PRONUNCIATION_PROVIDER", "disabled").strip().lower() or "disabled"
+        self.tencent_soe_app_id = os.getenv("TENCENT_SOE_APP_ID") or None
+        self.tencent_soe_server_type = int(os.getenv("TENCENT_SOE_SERVER_TYPE", "1"))
+        self.tencent_soe_engine_type = os.getenv("TENCENT_SOE_ENGINE_TYPE", "16k_zh").strip() or "16k_zh"
+        self.tencent_soe_score_coeff = float(os.getenv("TENCENT_SOE_SCORE_COEFF", "1.0"))
+        self.pronunciation_timeout_seconds = int(os.getenv("PRONUNCIATION_TIMEOUT_SECONDS", "30"))
+        self.pronunciation_shadow_mode = os.getenv("PRONUNCIATION_SHADOW_MODE", "true").strip().lower() not in {"0", "false", "no"}
         self.tts_provider = os.getenv("TTS_PROVIDER", "mock").strip().lower() or "mock"
         self.tts_api_key = os.getenv("TTS_API_KEY")
         self.tts_base_url = os.getenv("TTS_BASE_URL")

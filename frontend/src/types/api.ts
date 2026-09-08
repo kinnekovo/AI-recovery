@@ -150,6 +150,9 @@ export interface TherapistTrainingRecord {
   task_title: string
   target_text: string
   analysis_status: string
+  pronunciation_analysis_id: string | null
+  pronunciation_status: string | null
+  pronunciation_shadow_score: number | null
   overall_score: number | null
   content_score: number | null
   clarity_score: number | null
@@ -179,6 +182,104 @@ export interface TherapistTrendBucket {
 export interface TherapistTrainingTrends {
   buckets: TherapistTrendBucket[]
   overall_summary: string
+}
+
+export interface TherapistInterRaterAgreement {
+  patient_user_id: string
+  listener_review_count: number
+  double_labeled_attempt_count: number
+  comparison_count: number
+  mean_absolute_percent_difference: number | null
+  within_ten_percent_rate: number | null
+  mean_transcript_similarity: number | null
+  summary: string
+}
+
+export interface PronunciationSegment {
+  id: string
+  level: 'word' | 'phoneme' | string
+  ordinal: number
+  reference_text: string | null
+  recognized_text: string | null
+  start_ms: number | null
+  end_ms: number | null
+  accuracy: number | null
+  fluency: number | null
+  match_type: 'matched' | 'addition' | 'omission' | 'substitution' | 'out_of_vocabulary' | 'unavailable' | string
+  reference_tone: number | null
+  recognized_tone: number | null
+  tone_correct: boolean | null
+}
+
+export interface PronunciationRevision {
+  id: string
+  analysis_id: string
+  segment_id: string | null
+  metric_name: string
+  original_value: Record<string, unknown>
+  revised_value: Record<string, unknown>
+  judgment: 'confirmed' | 'corrected' | 'unjudgeable' | string
+  error_category: string | null
+  reason: string | null
+  reviewed_by_user_id: string
+  created_at: string
+}
+
+export interface IntelligibilityReview {
+  id: string
+  analysis_id: string
+  listener_role: string
+  listener_transcript: string
+  understood_percent: number
+  playback_count: number
+  listening_environment: string | null
+  notes: string | null
+  recorded_by_user_id: string
+  created_at: string
+}
+
+export interface IntelligibilityReviewPayload {
+  listener_role: string
+  listener_transcript: string
+  understood_percent: number
+  playback_count: number
+  listening_environment?: string | null
+  notes?: string | null
+}
+
+export interface PronunciationAnalysis {
+  id: string
+  attempt_id: string
+  provider: string
+  provider_version: string
+  evaluation_mode: string
+  status: 'completed' | 'failed' | 'unavailable' | string
+  overall_accuracy: number | null
+  fluency: number | null
+  completion: number | null
+  suggested_score: number | null
+  intelligibility_proxy: number | null
+  confidence: number | null
+  coverage: number
+  prosody_metrics: Record<string, unknown>
+  algorithm_version: string
+  error_code: string | null
+  error_message: string | null
+  review_status: string
+  reviewed_by_user_id: string | null
+  segments: PronunciationSegment[]
+  revisions: PronunciationRevision[]
+  intelligibility_reviews: IntelligibilityReview[]
+  created_at: string
+}
+
+export interface PronunciationRevisionPayload {
+  segment_id?: string | null
+  metric_name: string
+  revised_value: Record<string, unknown>
+  judgment: 'confirmed' | 'corrected' | 'unjudgeable'
+  error_category?: string | null
+  reason?: string | null
 }
 
 export interface TherapistTrialQuality {

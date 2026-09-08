@@ -55,6 +55,11 @@ def provider_statuses(settings) -> dict[str, dict[str, str | list[str] | bool]]:
             settings.acoustic_provider,
             acoustic_missing_env(settings) if settings.acoustic_provider == "local" else [],
         ),
+        "pronunciation": provider_status(
+            "pronunciation",
+            settings.pronunciation_provider,
+            tencent_soe_missing_env(settings) if settings.pronunciation_provider == "tencent_soe" else [],
+        ),
         "tts": provider_status(
             "tts",
             settings.tts_provider,
@@ -76,6 +81,16 @@ def provider_statuses(settings) -> dict[str, dict[str, str | list[str] | bool]]:
 
 
 def provider_status(name: str, provider: str, missing_env: list[str]) -> dict[str, str | list[str] | bool]:
+    if provider == "disabled":
+        return {
+            "name": name,
+            "provider": provider,
+            "mode": "disabled",
+            "status": "disabled",
+            "ready": False,
+            "missing_env": [],
+            "message": "精细发音评测未启用，不会生成模拟分数。",
+        }
     if provider == "mock":
         return {
             "name": name,
@@ -113,6 +128,17 @@ def tencent_asr_missing_env(settings) -> list[str]:
         {
             "TENCENTCLOUD_SECRET_ID": settings.tencentcloud_secret_id,
             "TENCENTCLOUD_SECRET_KEY": settings.tencentcloud_secret_key,
+        },
+    )
+
+
+def tencent_soe_missing_env(settings) -> list[str]:
+    return required_missing(
+        settings,
+        {
+            "TENCENTCLOUD_SECRET_ID": settings.tencentcloud_secret_id,
+            "TENCENTCLOUD_SECRET_KEY": settings.tencentcloud_secret_key,
+            "TENCENT_SOE_APP_ID": settings.tencent_soe_app_id,
         },
     )
 
