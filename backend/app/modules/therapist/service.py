@@ -18,7 +18,13 @@ from app.modules.assessment.schema import (
 )
 from app.modules.assessment.service import calculate_change, to_read
 from app.modules.attempts.model import AnalysisStatus, Attempt
-from app.modules.evaluations.model import AttemptEvaluation, EvaluationMetric, EvaluationSource
+from app.modules.evaluations.model import (
+    AttemptEvaluation,
+    EvaluationMetric,
+    EvaluationSource,
+    ScenarioExpressionReview,
+    ScenarioReviewStatus,
+)
 from app.modules.files.service import public_url
 from app.modules.scoring.model import AttemptAnalysisResult, AttemptScore
 from app.modules.pronunciation.model import PronunciationAnalysisResult
@@ -34,6 +40,8 @@ from app.modules.therapist.schema import (
     TherapistTrendBucketRead,
     TherapistTrialQualityRead,
     TherapistInterRaterAgreementRead,
+    ScenarioExpressionReviewRead,
+    ScenarioExpressionReviewUpdate,
 )
 from app.modules.training.model import (
     RecommendationStrategyFeedback,
@@ -87,19 +95,36 @@ def list_patients(
         row if include_assessment_summary else (row[0], row[1], 0, None)
         for row in rows
     ]
-    return [
-        TherapistPatientRead(
-            user_id=user.id,
-            patient_profile_id=profile.id,
-            username=user.username,
-            assessment_status=profile.assessment_status,
-            training_status=profile.training_status,
-            pending_review_count=pending_review_count,
-            latest_assessment_at=latest_assessment_at,
-            created_at=user.created_at,
+    result = []
+    for user, profile, pending_review_count, latest_assessment_at in normalized_rows:
+        scenario_pending_review_count = 0
+        if include_assessment_summary:
+            scenario_pending_review_count = int(
+                db.scalar(
+                    select(func.count(ScenarioExpressionReview.id))
+                    .join(Attempt, Attempt.id == ScenarioExpressionReview.attempt_id)
+                    .join(SessionTask, SessionTask.id == Attempt.session_task_id)
+                    .join(TrainingSession, TrainingSession.id == SessionTask.training_session_id)
+                    .where(
+                        TrainingSession.patient_profile_id == profile.id,
+                        ScenarioExpressionReview.review_status == ScenarioReviewStatus.pending_review,
+                    )
+                )
+                or 0
+            )
+        result.append(
+            TherapistPatientRead(
+                user_id=user.id,
+                patient_profile_id=profile.id,
+                username=user.username,
+                assessment_status=profile.assessment_status,
+                training_status=profile.training_status,
+                pending_review_count=int(pending_review_count or 0) + scenario_pending_review_count,
+                latest_assessment_at=latest_assessment_at,
+                created_at=user.created_at,
+            )
         )
-        for user, profile, pending_review_count, latest_assessment_at in normalized_rows
-    ]
+    return result
 
 
 def therapist_has_patient_access(db: Session, therapist: User, patient_user_id: UUID) -> bool:
@@ -255,12 +280,13 @@ def list_patient_training_records(
 ) -> list[TherapistTrainingRecordRead]:
     profile = get_patient_profile_by_user_id(db, patient_user_id)
     rows = db.execute(
-        select(Attempt, TrainingSession, SessionTask, AttemptScore, AttemptAnalysisResult, PronunciationAnalysisResult)
+        select(Attempt, TrainingSession, SessionTask, AttemptScore, AttemptAnalysisResult, PronunciationAnalysisResult, ScenarioExpressionReview)
         .join(SessionTask, SessionTask.id == Attempt.session_task_id)
         .join(TrainingSession, TrainingSession.id == SessionTask.training_session_id)
         .outerjoin(AttemptScore, AttemptScore.attempt_id == Attempt.id)
         .outerjoin(AttemptAnalysisResult, AttemptAnalysisResult.attempt_id == Attempt.id)
         .outerjoin(PronunciationAnalysisResult, PronunciationAnalysisResult.attempt_id == Attempt.id)
+        .outerjoin(ScenarioExpressionReview, ScenarioExpressionReview.attempt_id == Attempt.id)
         .where(TrainingSession.patient_profile_id == profile.id)
         .order_by(Attempt.created_at.desc())
         .limit(limit)
@@ -289,9 +315,71 @@ def list_patient_training_records(
             feedback_summary=score.suggestion if score else attempt_status_summary(attempt),
             recommendation_source=session.recommendation_source,
             recommendation_matched=session.recommendation_matched,
+            scenario_review_status=scenario_review.review_status.value if scenario_review else None,
+            scenario_review_notes=scenario_review.notes if scenario_review else None,
         )
-        for attempt, session, task, score, analysis, pronunciation in rows
+        for attempt, session, task, score, analysis, pronunciation, scenario_review in rows
     ]
+
+
+def get_scenario_expression_review(
+    db: Session,
+    therapist: User,
+    patient_user_id: UUID,
+    attempt_id: UUID,
+) -> ScenarioExpressionReviewRead:
+    require_therapist_patient_access(db, therapist, patient_user_id)
+    review = db.scalar(
+        select(ScenarioExpressionReview)
+        .join(Attempt, Attempt.id == ScenarioExpressionReview.attempt_id)
+        .join(SessionTask, SessionTask.id == Attempt.session_task_id)
+        .join(TrainingSession, TrainingSession.id == SessionTask.training_session_id)
+        .join(PatientProfile, PatientProfile.id == TrainingSession.patient_profile_id)
+        .where(ScenarioExpressionReview.attempt_id == attempt_id, PatientProfile.user_id == patient_user_id)
+    )
+    if not review:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="场景表达复核记录不存在")
+    return _scenario_review_to_read(review)
+
+
+def review_scenario_expression(
+    db: Session,
+    therapist: User,
+    patient_user_id: UUID,
+    attempt_id: UUID,
+    payload: ScenarioExpressionReviewUpdate,
+) -> ScenarioExpressionReviewRead:
+    if payload.review_status not in {ScenarioReviewStatus.confirmed.value, ScenarioReviewStatus.adjusted.value}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="场景复核只能确认或调整")
+    review = get_scenario_expression_review(db, therapist, patient_user_id, attempt_id)
+    entity = db.scalar(select(ScenarioExpressionReview).where(ScenarioExpressionReview.attempt_id == review.attempt_id))
+    if not entity:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="场景表达复核记录不存在")
+    entity.review_status = ScenarioReviewStatus(payload.review_status)
+    entity.goal_status = payload.goal_status or entity.goal_status
+    entity.information_unit_overrides = payload.information_unit_overrides
+    entity.notes = payload.notes.strip() if payload.notes else None
+    entity.reviewed_by_user_id = therapist.id
+    entity.reviewed_at = utc_now()
+    db.commit()
+    db.refresh(entity)
+    from app.modules.profiles.service import refresh_ability_profile
+
+    profile = get_patient_profile_by_user_id(db, patient_user_id)
+    refresh_ability_profile(db, profile.id)
+    return _scenario_review_to_read(entity)
+
+
+def _scenario_review_to_read(review: ScenarioExpressionReview) -> ScenarioExpressionReviewRead:
+    return ScenarioExpressionReviewRead(
+        attempt_id=review.attempt_id,
+        review_status=review.review_status.value,
+        goal_status=review.goal_status,
+        information_unit_overrides=review.information_unit_overrides or {},
+        notes=review.notes,
+        reviewed_by_user_id=review.reviewed_by_user_id,
+        reviewed_at=review.reviewed_at,
+    )
 
 
 def get_patient_inter_rater_agreement(db: Session, patient_user_id: UUID) -> TherapistInterRaterAgreementRead:

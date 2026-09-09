@@ -40,6 +40,7 @@ const router = createRouter({
         { path: 'agent/list', component: AgentListView, meta: { role: 'patient' } },
         { path: 'training', component: TrainingView, meta: { role: 'patient' } },
         { path: 'training/:type(repeat|scenario)', component: TrainingSessionView, meta: { role: 'patient' } },
+        { path: 'training/scenario/result/:dialogueId', component: () => import('@/views/patient/ScenarioDialogueResultView.vue'), meta: { role: 'patient' } },
         { path: 'training/result', component: TrainingResultView, meta: { role: 'patient' } },
         { path: 'evaluation', component: () => import('@/views/patient/EvaluationView.vue'), meta: { role: 'patient' } },
         { path: 'ability', component: () => import('@/views/patient/AbilityProfileView.vue'), meta: { role: 'patient' } },
@@ -70,6 +71,7 @@ const router = createRouter({
           component: () => import('@/views/therapist/TherapistProfilesView.vue'),
           meta: { role: 'therapist' }
         },
+        { path: 'scenario-dialogues/:dialogueId', component: () => import('@/views/therapist/TherapistScenarioDialogueReviewView.vue'), meta: { role: 'therapist' } },
         {
           path: 'status',
           component: () => import('@/views/therapist/SystemStatusView.vue'),

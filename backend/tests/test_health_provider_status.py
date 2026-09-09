@@ -37,6 +37,7 @@ class HealthProviderStatusTest(unittest.TestCase):
             llm_feedback_provider="external",
             llm_feedback_api_key="sk-secret-value",
             llm_feedback_base_url="",
+            llm_feedback_model="",
         )
 
         statuses = provider_statuses(settings)
@@ -44,7 +45,7 @@ class HealthProviderStatusTest(unittest.TestCase):
         self.assertFalse(statuses["asr"]["ready"])
         self.assertEqual(statuses["asr"]["missing_env"], ["TENCENTCLOUD_SECRET_ID"])
         self.assertEqual(statuses["tts"]["missing_env"], ["TTS_API_KEY"])
-        self.assertEqual(statuses["llm_feedback"]["missing_env"], ["LLM_FEEDBACK_BASE_URL"])
+        self.assertEqual(statuses["llm_feedback"]["missing_env"], ["LLM_FEEDBACK_BASE_URL", "LLM_FEEDBACK_MODEL"])
         self.assertEqual(statuses["pronunciation"]["missing_env"], ["TENCENTCLOUD_SECRET_ID", "TENCENT_SOE_APP_ID"])
         self.assertNotIn("super-secret-value", str(statuses))
         self.assertNotIn("sk-secret-value", str(statuses))

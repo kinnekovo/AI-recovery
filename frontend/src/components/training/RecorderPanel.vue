@@ -24,6 +24,7 @@ import AppButton from '@/components/common/AppButton.vue'
 import { RecorderService } from '@/services/recorder'
 import { toUserMessage } from '@/utils/errors'
 
+const props = withDefaults(defineProps<{ mode?: 'repeat' | 'scenario' }>(), { mode: 'repeat' })
 const emit = defineEmits<{ recorded: [blob: Blob]; recordingState: [recording: boolean]; recorderError: [message: string] }>()
 const recorder = new RecorderService()
 const recording = ref(false)
@@ -33,7 +34,7 @@ const elapsedSeconds = ref(0)
 const error = ref('')
 let timer: ReturnType<typeof window.setInterval> | null = null
 const hint = computed(() => {
-  if (recording.value) return '请自然说话，尽量把屏幕上的句子说完整。'
+  if (recording.value) return props.mode === 'scenario' ? '请自然说话，把最想表达的事慢慢说清楚。' : '请自然说话，尽量把屏幕上的句子说完整。'
   if (audioBlob.value) return '录音已经保存到本页，还没有上传评分。'
   return '请在安静环境中完成，开始前把麦克风靠近一些。'
 })

@@ -1,3 +1,4 @@
+from copy import deepcopy
 from pathlib import Path
 from uuid import UUID
 
@@ -117,57 +118,188 @@ SEED_TASKS = [
     {
         "task_type": TrainingType.scenario,
         "title": "医院看病场景",
-        "instruction": "请说说在医院看病时你想表达什么。",
+        "instruction": "你来到医院挂号处。请用自己的话说清楚你的问题和需要的帮助。",
         "target_text": "我想去医院看病，请医生帮我检查。",
         "content_level": "L3",
         "autonomy_level": "S3",
         "scene_prompt": "医院看病",
         "tags": ["医疗", "需求表达", "场景"],
         "recommendation_weight": 86,
+        "scoring_config": {
+            "version": "scenario-contract-v1",
+            "mode": "functional_scenario",
+            "agent_role": "医院挂号处工作人员",
+            "opening_line": "您好，这里是挂号处。请问您今天需要办理什么？",
+            "completion_response": "好的，请先到挂号窗口办理；工作人员会再告诉您对应诊室的位置。",
+            "display_prompt": "你来到医院挂号处。请说清楚你的问题和需要的帮助。",
+            "communication_goal": "让工作人员知道你需要就医，并能为你提供挂号、咨询或检查帮助。",
+            "required_information_units": [
+                {"id": "medical_intent", "label": "需要看病、挂号或咨询", "keywords": ["看病", "医院", "医生", "挂号", "检查", "就医", "门诊"]},
+                {"id": "problem", "label": "哪里不舒服或遇到什么问题", "keywords": ["头疼", "头痛", "头晕", "难受", "不舒服", "疼", "发烧", "咳嗽", "不适"]},
+                {"id": "request", "label": "希望对方提供什么帮助", "keywords": ["帮", "请问", "麻烦", "怎么", "哪个科", "挂", "看看", "咨询"]},
+            ],
+            "optional_information_units": [
+                {"id": "time", "label": "症状持续多久", "keywords": ["今天", "两天", "几天", "最近", "一直", "上午", "晚上"]},
+            ],
+            "goal_requirements": ["medical_intent", "request"],
+            "prompt_hints": ["先想一想：你想请工作人员帮什么忙？", "可以先说：我想挂号或看医生。", "再补充：你哪里不舒服，或者想问什么。"],
+        },
     },
     {
         "task_type": TrainingType.scenario,
         "title": "家庭吃饭场景",
-        "instruction": "请说说吃饭时你想表达什么。",
+        "instruction": "家人正在准备吃饭。请用自己的话说清楚你想吃什么，或需要什么帮助。",
         "target_text": "我想少吃一点米饭，多吃一些青菜。",
         "content_level": "L2",
         "autonomy_level": "S2",
         "scene_prompt": "家庭吃饭",
         "tags": ["家庭", "饮食", "场景"],
         "recommendation_weight": 84,
+        "scoring_config": {
+            "version": "scenario-contract-v1", "mode": "functional_scenario",
+            "agent_role": "家人",
+            "opening_line": "饭快准备好了，你今天想怎么吃？",
+            "completion_response": "好的，我知道你的用餐需要了，我会按你的想法准备。",
+            "display_prompt": "家人正在准备吃饭。请说清楚你想吃什么，或需要什么帮助。",
+            "communication_goal": "让家人理解你的饮食选择或用餐需要。",
+            "required_information_units": [
+                {"id": "food", "label": "想吃或不想吃什么", "keywords": ["米饭", "菜", "青菜", "面", "粥", "肉", "水果", "吃", "不要", "少", "多"]},
+                {"id": "request", "label": "希望家人怎么做", "keywords": ["我想", "帮我", "给我", "少", "多", "不要", "来点"]},
+            ],
+            "optional_information_units": [{"id": "reason", "label": "原因或感受", "keywords": ["饿", "饱", "没胃口", "喜欢", "不想", "累"]}],
+            "goal_requirements": ["food", "request"],
+            "prompt_hints": ["先想一想：你想吃什么？", "可以先说：我想吃……", "再说：想要多一点、少一点，还是需要家人帮忙。"],
+        },
     },
     {
         "task_type": TrainingType.scenario,
         "title": "外出购物场景",
-        "instruction": "请说说买东西时你想表达什么。",
+        "instruction": "你在商店买东西。请用自己的话说清楚你想买什么，或想问什么。",
         "target_text": "请问这个多少钱？我想买两个苹果。",
         "content_level": "L3",
         "autonomy_level": "S3",
         "scene_prompt": "外出购物",
         "tags": ["生活", "购物", "场景"],
         "recommendation_weight": 76,
+        "scoring_config": {
+            "version": "scenario-contract-v1", "mode": "functional_scenario",
+            "agent_role": "店员",
+            "opening_line": "您好，需要看看什么？",
+            "completion_response": "好的，我来帮你确认商品、数量和价格。",
+            "display_prompt": "你在商店买东西。请说清楚你想买什么，或想问什么。",
+            "communication_goal": "让店员理解你要购买的物品或需要回答的问题。",
+            "required_information_units": [
+                {"id": "item", "label": "想买的物品", "keywords": ["苹果", "水果", "水", "牛奶", "面包", "东西", "这个", "那个", "买"]},
+                {"id": "request", "label": "购买数量、价格或需要的帮助", "keywords": ["多少", "钱", "几个", "两个", "一个", "买", "帮我", "请问"]},
+            ],
+            "optional_information_units": [{"id": "preference", "label": "颜色、大小或其他偏好", "keywords": ["大", "小", "红", "新鲜", "便宜", "好的"]}],
+            "goal_requirements": ["item", "request"],
+            "prompt_hints": ["先说：你想买什么？", "还可以问：多少钱，或想买几个。", "不用和示范句一模一样，说清楚就可以。"],
+        },
     },
     {
         "task_type": TrainingType.scenario,
         "title": "家人沟通场景",
-        "instruction": "请试着把自己的想法说给家人听。",
+        "instruction": "请把你现在的想法或感受说给家人听，并告诉他们你希望怎么做。",
         "target_text": "我今天有点累，想先休息一会儿，晚点再训练。",
         "content_level": "L4",
         "autonomy_level": "S4",
         "scene_prompt": "家人沟通",
         "tags": ["家庭", "情绪", "自主表达"],
         "recommendation_weight": 72,
+        "scoring_config": {
+            "version": "scenario-contract-v1", "mode": "functional_scenario",
+            "agent_role": "家人",
+            "opening_line": "我在听。你现在感觉怎么样，想让我怎么帮你？",
+            "completion_response": "好的，我明白你的想法了，我们按这个安排。",
+            "display_prompt": "请把你现在的想法或感受说给家人听，并告诉他们你希望怎么做。",
+            "communication_goal": "让家人理解你的感受、计划或需要的支持。",
+            "required_information_units": [
+                {"id": "state", "label": "你的感受、状态或想法", "keywords": ["累", "高兴", "难受", "想", "今天", "休息", "训练", "担心", "不舒服"]},
+                {"id": "request", "label": "希望家人怎么做", "keywords": ["帮我", "让我", "先", "晚点", "一起", "不要", "需要"]},
+            ],
+            "optional_information_units": [{"id": "reason", "label": "原因或时间安排", "keywords": ["因为", "所以", "今天", "晚点", "一会儿", "上午", "下午"]}],
+            "goal_requirements": ["state", "request"],
+            "prompt_hints": ["先说一说：你现在感觉怎么样？", "再说：你希望家人怎么做。", "可以只说关键词，也可以说完整句子。"],
+        },
     },
     {
         "task_type": TrainingType.scenario,
         "title": "社区问路场景",
-        "instruction": "请围绕问路场景说清楚自己的需求。",
+        "instruction": "你在社区需要问路。请用自己的话说清楚你要去哪里，以及想得到什么帮助。",
         "target_text": "请问去社区卫生服务中心怎么走？我想坐电梯上去。",
         "content_level": "L5",
         "autonomy_level": "S4",
         "scene_prompt": "社区问路",
         "tags": ["社区", "问路", "自主表达"],
         "recommendation_weight": 64,
+        "scoring_config": {
+            "version": "scenario-contract-v1", "mode": "functional_scenario",
+            "agent_role": "社区居民",
+            "opening_line": "你好，需要我帮你找哪个地方吗？",
+            "completion_response": "好的，我知道你要去哪里了，我来告诉你下一步该往哪边走。",
+            "display_prompt": "你在社区需要问路。请说清楚你要去哪里，以及想得到什么帮助。",
+            "communication_goal": "让对方理解目的地，并能够为你指路或提供通行帮助。",
+            "required_information_units": [
+                {"id": "destination", "label": "想去的地点", "keywords": ["社区", "医院", "卫生服务中心", "服务中心", "电梯", "楼", "那里", "地方"]},
+                {"id": "request", "label": "询问路线或通行帮助", "keywords": ["怎么走", "怎么去", "请问", "帮我", "问路", "方向", "哪里", "带我"]},
+            ],
+            "optional_information_units": [{"id": "access", "label": "行动或通行需要", "keywords": ["电梯", "轮椅", "楼梯", "方便", "近", "远"]}],
+            "goal_requirements": ["destination", "request"],
+            "prompt_hints": ["先说：你要去哪里？", "再问：怎么走，或能不能帮忙。", "慢慢说清楚，不需要照着示范句说。"],
+        },
+    },
+    {
+        "task_type": TrainingType.scenario,
+        "title": "药店咨询泛化探测",
+        "instruction": "你来到药店。请用自己的话说明你的问题，并问清楚需要的帮助。",
+        "target_text": "我最近头晕，想请药师帮我看看该怎么办。",
+        "content_level": "L3",
+        "autonomy_level": "S3",
+        "scene_prompt": "药店咨询",
+        "tags": ["医疗", "泛化探测", "非训练题"],
+        "recommendation_weight": 0,
+        "scoring_config": {
+            "version": "scenario-contract-v1", "mode": "functional_scenario", "evaluation_role": "generalization_probe",
+            "agent_role": "药师",
+            "opening_line": "您好，请问您哪里不舒服，或者需要咨询什么？",
+            "completion_response": "我明白你的咨询需要了，请当面向药师说明这些情况并按其指引处理。",
+            "display_prompt": "你来到药店。请说清楚你的问题，并问清楚需要什么帮助。",
+            "communication_goal": "让药师理解你的不适或咨询需要，并能提供下一步建议。",
+            "required_information_units": [
+                {"id": "problem", "label": "身体不适或咨询问题", "keywords": ["头晕", "头疼", "头痛", "难受", "不舒服", "疼", "咳嗽", "发烧", "不适"]},
+                {"id": "request", "label": "希望药师提供的帮助", "keywords": ["帮", "请问", "麻烦", "什么药", "怎么办", "看看", "咨询", "建议"]},
+            ],
+            "optional_information_units": [{"id": "time", "label": "症状持续时间", "keywords": ["今天", "两天", "几天", "最近", "一直"]}],
+            "goal_requirements": ["problem", "request"],
+            "prompt_hints": ["先说：你哪里不舒服，或者想问什么。", "再说：你希望药师帮你做什么。", "这是一道新场景小测，不用说得和以前一样。"],
+        },
+    },
+    {
+        "task_type": TrainingType.scenario,
+        "title": "电话预约泛化探测",
+        "instruction": "你正在打电话预约服务。请用自己的话说明你要办什么，并提出请求。",
+        "target_text": "你好，我想预约明天的复诊，请问还有时间吗？",
+        "content_level": "L3",
+        "autonomy_level": "S3",
+        "scene_prompt": "电话预约",
+        "tags": ["生活", "泛化探测", "非训练题"],
+        "recommendation_weight": 0,
+        "scoring_config": {
+            "version": "scenario-contract-v1", "mode": "functional_scenario", "evaluation_role": "generalization_probe",
+            "agent_role": "预约接听员",
+            "opening_line": "您好，这里是预约服务，请问您想办理什么？",
+            "completion_response": "好的，我知道你的预约需要了，我来继续帮你确认可安排的时间。",
+            "display_prompt": "你正在打电话预约服务。请说清楚你要办什么，并提出请求。",
+            "communication_goal": "让接听者理解预约或办理需求，并能安排下一步。",
+            "required_information_units": [
+                {"id": "purpose", "label": "预约或办理的事情", "keywords": ["预约", "复诊", "挂号", "明天", "时间", "办理", "看医生"]},
+                {"id": "request", "label": "向对方提出请求或询问", "keywords": ["请问", "帮", "麻烦", "可以", "还有", "吗", "安排"]},
+            ],
+            "optional_information_units": [{"id": "time", "label": "希望的时间", "keywords": ["明天", "上午", "下午", "几点", "今天"]}],
+            "goal_requirements": ["purpose", "request"],
+            "prompt_hints": ["先说：你想预约或办理什么。", "再问：有没有时间，或能不能帮忙安排。", "这是一道新场景小测，用自己的话说清楚即可。"],
+        },
     },
 ]
 
@@ -175,7 +307,8 @@ SEED_TASKS = [
 def ensure_seed_tasks(db: Session) -> None:
     existing = {item.title: item for item in db.scalars(select(TaskTemplate))}
     changed = False
-    for item in SEED_TASKS:
+    for seed in SEED_TASKS:
+        item = _complete_seed_dialogue_contract(deepcopy(seed))
         template = existing.get(item["title"])
         if template:
             for field in [
@@ -185,6 +318,7 @@ def ensure_seed_tasks(db: Session) -> None:
                 "content_level",
                 "autonomy_level",
                 "scene_prompt",
+                "scoring_config",
                 "tags",
                 "recommendation_weight",
             ]:
@@ -195,7 +329,10 @@ def ensure_seed_tasks(db: Session) -> None:
                 template.is_active = True
                 changed = True
             continue
-        db.add(TaskTemplate(**item, scoring_config={"mode": "mock"}))
+        # Older repeat seeds have no explicit contract; add their default before
+        # construction instead of passing scoring_config twice.
+        seed_data = {**item, "scoring_config": item.get("scoring_config", {"mode": "repeat"})}
+        db.add(TaskTemplate(**seed_data))
         changed = True
     legacy = existing.get("短句跟读")
     if legacy and legacy.is_active:
@@ -203,6 +340,30 @@ def ensure_seed_tasks(db: Session) -> None:
         changed = True
     if changed:
         db.commit()
+
+
+def _complete_seed_dialogue_contract(item: dict) -> dict:
+    """Backfill the explicit dialogue fields for maintained scenario seed tasks."""
+    if item.get("task_type") != TrainingType.scenario:
+        return item
+    contract = item.get("scoring_config") or {}
+    if contract.get("mode") != "functional_scenario":
+        return item
+    contract.setdefault("opening_line", "您好，请问有什么需要帮助的吗？")
+    contract.setdefault("minimum_patient_turns", 2)
+    contract.setdefault("maximum_patient_turns", 5)
+    contract.setdefault("completion_response", "好的，我已了解你的需要。接下来请按现场工作人员的指引办理。")
+    units = contract.get("required_information_units") or []
+    contract.setdefault(
+        "follow_up_questions",
+        [
+            {"target_information_unit": unit.get("id"), "question": f"为了更好地帮助你，能再说说{unit.get('label', '这方面的信息')}吗？"}
+            for unit in units
+            if isinstance(unit, dict) and unit.get("id")
+        ],
+    )
+    item["scoring_config"] = contract
+    return item
 
 
 def get_training_types() -> list[str]:
@@ -228,7 +389,28 @@ def list_task_templates(
     return [TaskTemplateRead.model_validate(item) for item in db.scalars(stmt)]
 
 
+def is_generalization_probe(template: TaskTemplate) -> bool:
+    return (template.scoring_config or {}).get("evaluation_role") == "generalization_probe"
+
+
+def has_functional_scenario_contract(template: TaskTemplate) -> bool:
+    """Return whether a template is safe to offer as free-expression training.
+
+    Older databases can contain scenario templates created before scoring contracts
+    existed. They must remain editable by therapists, but must never be assigned to
+    patients where they could fall back to reference-sentence alignment.
+    """
+    if template.task_type != TrainingType.scenario:
+        return True
+    try:
+        _validate_scenario_contract(template.task_type, template.scoring_config)
+    except HTTPException:
+        return False
+    return True
+
+
 def create_task_template(db: Session, payload: TaskTemplateCreate) -> TaskTemplateRead:
+    _validate_scenario_contract(payload.task_type, payload.scoring_config)
     template = TaskTemplate(
         task_type=payload.task_type,
         title=payload.title.strip(),
@@ -237,10 +419,10 @@ def create_task_template(db: Session, payload: TaskTemplateCreate) -> TaskTempla
         content_level=payload.content_level.strip() or "L1",
         autonomy_level=payload.autonomy_level.strip() or "S1",
         scene_prompt=payload.scene_prompt.strip() if payload.scene_prompt else None,
+        scoring_config=payload.scoring_config,
         tags=[item.strip() for item in payload.tags if item.strip()],
         recommendation_weight=max(0, min(payload.recommendation_weight, 100)),
         is_active=payload.is_active,
-        scoring_config={"mode": "mock"},
     )
     if not template.title or not template.instruction or not template.target_text:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="训练材料标题、说明和文本不能为空")
@@ -254,7 +436,7 @@ def update_task_template(db: Session, template_id: UUID, payload: TaskTemplateUp
     template = db.get(TaskTemplate, template_id)
     if not template:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="训练材料不存在")
-    for field in ["title", "instruction", "target_text", "content_level", "autonomy_level", "scene_prompt"]:
+    for field in ["title", "instruction", "target_text", "content_level", "autonomy_level", "scene_prompt", "scoring_config"]:
         value = getattr(payload, field)
         if value is not None:
             setattr(template, field, value.strip() if isinstance(value, str) else value)
@@ -264,11 +446,58 @@ def update_task_template(db: Session, template_id: UUID, payload: TaskTemplateUp
         template.recommendation_weight = max(0, min(payload.recommendation_weight, 100))
     if payload.is_active is not None:
         template.is_active = payload.is_active
+    _validate_scenario_contract(template.task_type, template.scoring_config)
     if not template.title or not template.instruction or not template.target_text:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="训练材料标题、说明和文本不能为空")
     db.commit()
     db.refresh(template)
     return TaskTemplateRead.model_validate(template)
+
+
+def _validate_scenario_contract(task_type: TrainingType, scoring_config: dict | None) -> None:
+    """Keep free-expression tasks from silently falling back to sentence matching."""
+    if task_type != TrainingType.scenario:
+        return
+    config = scoring_config or {}
+    required_units = config.get("required_information_units")
+    if (
+        config.get("mode") != "functional_scenario"
+        or not isinstance(config.get("version"), str)
+        or not config["version"].strip()
+        or not isinstance(config.get("display_prompt"), str)
+        or not config["display_prompt"].strip()
+        or not isinstance(config.get("communication_goal"), str)
+        or not config["communication_goal"].strip()
+        or not isinstance(required_units, list)
+        or len(required_units) < 2
+        or not isinstance(config.get("goal_requirements"), list)
+        or not config["goal_requirements"]
+        or not isinstance(config.get("prompt_hints"), list)
+        or not any(isinstance(hint, str) and hint.strip() for hint in config["prompt_hints"])
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="场景表达必须配置功能性沟通评分契约：目标、至少两个关键信息单元和分级提示。",
+        )
+    unit_ids = set()
+    for unit in required_units:
+        if (
+            not isinstance(unit, dict)
+            or not isinstance(unit.get("id"), str)
+            or not unit["id"].strip()
+            or not isinstance(unit.get("label"), str)
+            or not unit["label"].strip()
+        ):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="场景表达的信息单元格式不完整。")
+        if (
+            not isinstance(unit.get("keywords"), list)
+            or not any(isinstance(keyword, str) and keyword.strip() for keyword in unit["keywords"])
+            or unit["id"] in unit_ids
+        ):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="每个场景信息单元至少需要一个可接受表达。")
+        unit_ids.add(unit["id"])
+    if not set(config["goal_requirements"]).issubset(unit_ids):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="场景沟通目标引用了不存在的信息单元。")
 
 
 def get_training_recommendation(db: Session, user: User) -> TrainingRecommendationRead:
@@ -1052,6 +1281,11 @@ def pick_template_for_recommendation(
             )
         )
     )
+    templates = [
+        template
+        for template in templates
+        if not is_generalization_probe(template) and has_functional_scenario_contract(template)
+    ]
     if not templates:
         return None
     return min(
@@ -1073,13 +1307,18 @@ def pick_task_sequence_for_recommendation(
 ) -> list[TaskTemplate]:
     content = level_number(content_level)
     autonomy = level_number(autonomy_level)
-    candidates = list(
+    candidates = [
+        template
+        for template in
+        list(
         db.scalars(
             select(TaskTemplate)
             .where(TaskTemplate.is_active.is_(True))
             .order_by(TaskTemplate.recommendation_weight.desc(), TaskTemplate.created_at.asc())
         )
-    )
+        )
+        if not is_generalization_probe(template) and has_functional_scenario_contract(template)
+    ]
     if not candidates:
         return []
 
@@ -1147,13 +1386,18 @@ def get_or_create_today_plan(db: Session, user: User) -> TrainingPlan:
     plan = TrainingPlan(patient_profile_id=profile.id, title="今日训练")
     db.add(plan)
     db.flush()
-    templates = list(
+    templates = [
+        template
+        for template in
+        list(
         db.scalars(
             select(TaskTemplate)
             .where(TaskTemplate.is_active.is_(True))
             .order_by(TaskTemplate.task_type.asc(), TaskTemplate.content_level.asc(), TaskTemplate.recommendation_weight.desc())
         )
-    )
+        )
+        if not is_generalization_probe(template) and has_functional_scenario_contract(template)
+    ]
     for index, template in enumerate(templates):
         db.add(TrainingPlanItem(training_plan_id=plan.id, task_template_id=template.id, order_index=index))
     db.commit()
@@ -1189,24 +1433,67 @@ def create_session(
     recommendation_source: str | None = None,
     recommendation_headline: str | None = None,
     recommendation_task_ids: list[UUID] | None = None,
+    scenario_mode: str = "training",
 ) -> TrainingSession:
     profile = get_patient_profile(db, user)
     if profile.current_agent_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先创建并选择智能体")
+    if scenario_mode not in {"training", "generalization_probe"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="未知的场景会话类型")
+    if scenario_mode == "generalization_probe" and training_type != TrainingType.scenario:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="泛化探测仅适用于场景表达")
     recommendation = get_training_recommendation(db, user) if recommendation_source else None
     recommended_template = recommendation.task_template if recommendation else None
     recommended_task_ids = recommendation_task_ids or [item.id for item in (recommendation.task_sequence if recommendation else [])]
     plan = get_or_create_today_plan(db, user)
     plan_item = None
-    if recommended_template and recommendation and recommendation.recommended_type == training_type:
+    if scenario_mode == "generalization_probe":
+        probe = next(
+            (
+                item
+                for item in db.scalars(select(TaskTemplate).where(TaskTemplate.task_type == TrainingType.scenario, TaskTemplate.is_active.is_(True)))
+                if is_generalization_probe(item) and has_functional_scenario_contract(item)
+            ),
+            None,
+        )
+        if not probe:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="暂时没有可用的泛化探测场景")
+        plan_item = next((item for item in plan.items if item.task_template_id == probe.id), None)
+        if plan_item is None:
+            plan_item = TrainingPlanItem(training_plan_id=plan.id, task_template_id=probe.id, order_index=len(plan.items))
+            db.add(plan_item)
+            db.flush()
+    if (
+        plan_item is None
+        and recommended_template
+        and recommendation
+        and recommendation.recommended_type == training_type
+        and has_functional_scenario_contract(recommended_template)
+    ):
         plan_item = next((item for item in plan.items if item.task_template_id == recommended_template.id), None)
     if plan_item is None:
-        plan_item = next((item for item in plan.items if item.task_template.task_type == training_type), None)
+        plan_item = next(
+            (
+                item
+                for item in plan.items
+                if item.task_template.task_type == training_type
+                and has_functional_scenario_contract(item.task_template)
+                and (scenario_mode == "generalization_probe" or not is_generalization_probe(item.task_template))
+            ),
+            None,
+        )
     if plan_item is None:
-        template = db.scalar(
-            select(TaskTemplate)
-            .where(TaskTemplate.task_type == training_type, TaskTemplate.is_active.is_(True))
-            .order_by(TaskTemplate.recommendation_weight.desc(), TaskTemplate.created_at.asc())
+        template = next(
+            (
+                item
+                for item in db.scalars(
+                    select(TaskTemplate)
+                    .where(TaskTemplate.task_type == training_type, TaskTemplate.is_active.is_(True))
+                    .order_by(TaskTemplate.recommendation_weight.desc(), TaskTemplate.created_at.asc())
+                )
+                if not is_generalization_probe(item) and has_functional_scenario_contract(item)
+            ),
+            None,
         )
         if not template:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="训练题不存在")
@@ -1229,7 +1516,7 @@ def create_session(
     if recommendation_source and recommended_task_ids:
         for index, task_template_id in enumerate(recommended_task_ids):
             template = db.get(TaskTemplate, task_template_id)
-            if not template or not template.is_active:
+            if not template or not template.is_active or not has_functional_scenario_contract(template):
                 continue
             existing_plan_item = next((item for item in plan.items if item.task_template_id == template.id), None)
             if existing_plan_item is None:

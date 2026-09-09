@@ -119,6 +119,64 @@ textarea {
   max-width: 720px;
 }
 
+.scenario-result-page {
+  max-width: 880px;
+}
+
+.scenario-summary-panel,
+.scenario-next-step,
+.scenario-secondary-observation {
+  padding: 28px;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 18px 45px rgba(31, 50, 42, 0.08);
+}
+
+.scenario-summary-panel h2,
+.scenario-next-step h2,
+.scenario-evidence-grid h2 {
+  margin-bottom: 10px;
+}
+
+.scenario-summary-panel p,
+.scenario-next-step p,
+.scenario-evidence-grid p,
+.scenario-secondary-observation p {
+  margin: 0;
+  color: #52645c;
+  line-height: 1.7;
+}
+
+.scenario-review-note {
+  margin-top: 16px !important;
+  color: #8a5b1f !important;
+}
+
+.scenario-evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border-radius: 14px;
+  background: #dce7e1;
+}
+
+.scenario-evidence-grid article {
+  min-height: 168px;
+  padding: 24px;
+  background: #ffffff;
+}
+
+.scenario-secondary-observation summary {
+  color: #29483a;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.scenario-secondary-observation p {
+  margin-top: 14px;
+}
+
 .page-heading {
   display: grid;
   gap: 8px;
@@ -865,6 +923,64 @@ textarea {
   font-weight: 700;
 }
 
+.free-expression-note {
+  color: #66756f;
+  margin: 0.75rem 0 0;
+}
+
+.scene-clue-list {
+  display: grid;
+  gap: 0.45rem;
+  margin: 1rem 0 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+.scene-clue-list li,
+.scene-help {
+  color: #40544b;
+  font-size: 0.95rem;
+}
+
+.scene-clue-list li::before {
+  content: '·';
+  color: #1d6f51;
+  font-weight: 800;
+  margin-right: 0.5rem;
+}
+
+.text-action {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #1d6f51;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0.35rem 0;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.text-action:disabled {
+  color: #66756f;
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
+.text-action:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid #1d6f51;
+  outline-offset: 3px;
+}
+
+.scene-help {
+  background: #f1f7f4;
+  border-radius: 10px;
+  margin: 0.5rem 0 0;
+  padding: 0.7rem 0.85rem;
+}
+
 .patient-trial-hints {
   display: flex;
   flex-wrap: wrap;
@@ -949,6 +1065,112 @@ textarea {
   margin: 0;
   color: #66756f;
   line-height: 1.6;
+}
+
+.scenario-result-panel {
+  background: #ffffff;
+  border: 1px solid #dce7e1;
+  border-radius: 14px;
+  display: grid;
+  gap: 1rem;
+  padding: 1.15rem;
+}
+
+.scenario-result-panel h3 {
+  margin: 0.45rem 0 0.3rem;
+}
+
+.scenario-result-panel > div > p,
+.scene-boundary {
+  color: #66756f;
+  margin: 0;
+}
+
+.scenario-unit-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.scenario-unit {
+  align-items: center;
+  background: #f1f7f4;
+  border-radius: 10px;
+  display: flex;
+  gap: 0.65rem;
+  padding: 0.7rem 0.8rem;
+}
+
+.scenario-unit > span {
+  color: #66756f;
+  font-weight: 800;
+}
+
+.scenario-unit.matched > span {
+  color: #1d6f51;
+}
+
+.scenario-unit strong,
+.scenario-unit small {
+  display: block;
+}
+
+.scenario-report-summary {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.scenario-report-summary > div {
+  background: #f1f7f4;
+  border-radius: 12px;
+  padding: 0.9rem;
+}
+
+.scenario-report-summary span {
+  color: #1d6f51;
+  font-size: 1.3rem;
+  font-weight: 800;
+}
+
+.scenario-report-summary p,
+.scenario-report-note {
+  color: #66756f;
+  margin: 0.35rem 0 0;
+}
+
+.scenario-probe-link {
+  display: inline-flex;
+  margin-top: 1rem;
+}
+
+.generalization-note {
+  background: #f8fbf9;
+  border: 1px solid #dce7e1;
+  border-radius: 12px;
+  margin-top: 1rem;
+  padding: 0.9rem;
+}
+
+.generalization-note p {
+  color: #66756f;
+  margin: 0.35rem 0 0;
+}
+
+.scenario-review-note {
+  color: #40544b;
+  font-size: 0.9rem;
+  margin: 0.8rem 0 0;
+}
+
+@media (max-width: 640px) {
+  .scenario-report-summary {
+    grid-template-columns: 1fr;
+  }
+}
+
+.scenario-unit small {
+  color: #66756f;
+  margin-top: 0.15rem;
 }
 
 .metric-card small {

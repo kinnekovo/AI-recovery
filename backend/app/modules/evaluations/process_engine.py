@@ -139,6 +139,90 @@ def _independence_score(prompt_level: int, requested_help: bool, start_latency_m
     }
 
 
+def _scenario_information_evaluation(template: TaskTemplate, transcript: str) -> dict[str, Any] | None:
+    """Evaluate a free response against a scenario contract, never against a model sentence.
+
+    The first production version deliberately uses transparent, task-authored lexical evidence.
+    Semantic-provider evidence can be added later, but may not replace this auditable contract.
+    """
+    config = getattr(template, "scoring_config", None) or {}
+    if template.task_type != TrainingType.scenario or config.get("mode") != "functional_scenario":
+        return None
+
+    def evaluate_units(raw_units: object, required: bool) -> list[dict[str, Any]]:
+        units: list[dict[str, Any]] = []
+        for raw_unit in raw_units if isinstance(raw_units, list) else []:
+            if not isinstance(raw_unit, dict):
+                continue
+            keywords = [keyword.strip() for keyword in raw_unit.get("keywords", []) if isinstance(keyword, str) and keyword.strip()]
+            matches = [keyword for keyword in keywords if keyword in transcript]
+            units.append(
+                {
+                    "id": str(raw_unit.get("id", "")),
+                    "label": str(raw_unit.get("label", "关键信息")),
+                    "required": required,
+                    "matched": bool(matches),
+                    "matches": matches,
+                }
+            )
+        return units
+
+    required_units = evaluate_units(config.get("required_information_units"), True)
+    optional_units = evaluate_units(config.get("optional_information_units"), False)
+    contract_snapshot = {
+        "version": config.get("version", "scenario-contract-v1"),
+        "display_prompt": config.get("display_prompt", ""),
+        "communication_goal": config.get("communication_goal", ""),
+        "goal_requirements": list(config.get("goal_requirements") or []),
+        "required_information_units": [
+            {
+                "id": unit["id"],
+                "label": unit["label"],
+                "keywords": [
+                    keyword.strip()
+                    for keyword in raw_unit.get("keywords", [])
+                    if isinstance(keyword, str) and keyword.strip()
+                ],
+            }
+            for raw_unit, unit in zip(config.get("required_information_units") or [], required_units)
+            if isinstance(raw_unit, dict)
+        ],
+    }
+    matched_required_ids = {unit["id"] for unit in required_units if unit["matched"]}
+    goal_requirements = [item for item in config.get("goal_requirements", []) if isinstance(item, str)]
+    goal_matched = sum(1 for item in goal_requirements if item in matched_required_ids)
+    required_completion = round(len(matched_required_ids) / len(required_units) * 100, 2) if required_units else 0.0
+    if goal_requirements and goal_matched == len(goal_requirements):
+        goal_status, goal_score = "achieved", 100.0
+    elif goal_matched:
+        goal_status, goal_score = "partly_achieved", 60.0
+    elif matched_required_ids:
+        goal_status, goal_score = "partly_achieved", 35.0
+    else:
+        goal_status, goal_score = "not_achieved", 0.0
+    next_units = [unit["label"] for unit in required_units if not unit["matched"]]
+    return {
+        "version": config.get("version", "scenario-contract-v1"),
+        "evaluation_role": config.get("evaluation_role", "training"),
+        "scoring_method": "scenario-information-units-v1",
+        "contract_snapshot": contract_snapshot,
+        "communication_goal": config.get("communication_goal", ""),
+        "goal_status": goal_status,
+        "goal_score": goal_score,
+        "information_unit_score": required_completion,
+        "required_information_units": required_units,
+        "optional_information_units": optional_units,
+        "matched_required_count": len(matched_required_ids),
+        "required_count": len(required_units),
+        "next_information_units": next_units,
+        "repair_ability": {"status": "not_observed", "reason": "本题没有发生真实澄清或追问回合。"},
+        "limitations": [
+            "当前以场景契约中的可接受词语识别信息单元；未识别的同义表达不等同于表达错误。",
+            "自动识别不确定时应由治疗师结合录音和场景复核。",
+        ],
+    }
+
+
 def _mock_process_evaluation(template: TaskTemplate, acoustic: AcousticAnalysisResult) -> ProcessEvaluation:
     total_script_chars = max(count_effective_chars(template.target_text), 1)
     accuracy = 95.0 if template.task_type == TrainingType.repeat else 88.0
@@ -181,17 +265,26 @@ def generate_process_evaluation(
     if transcript == "这是一次模拟转写结果":
         return _mock_process_evaluation(template, acoustic)
 
+    scenario_evaluation = _scenario_information_evaluation(template, transcript)
     target_chars = normalize_chars(template.target_text, drop_fillers=True)
     correction_events = _self_correction_analysis(transcript, template.target_text)
     evaluated_transcript = _final_corrected_segment(transcript, correction_events)
     transcript_chars = normalize_chars(evaluated_transcript, drop_fillers=True)
     raw_transcript_chars = normalize_chars(transcript)
     total_script_chars = max(len(target_chars), 1)
-    alignment, alignment_events = _alignment_analysis(target_chars, transcript_chars)
-    repetition_count, repeated_chars, repetition_events = _repetition_analysis(target_chars, transcript_chars)
-
-    correct_chars = min(alignment["correct"], total_script_chars)
-    correct_rate = round(correct_chars / total_script_chars * 100, 2)
+    if scenario_evaluation:
+        # A free scenario answer is not a script: do not compare it with target_text.
+        alignment = {"correct": 0, "substitution": 0, "addition": 0, "omission": 0}
+        alignment_events: list[dict] = []
+        repetition_count, repeated_chars, repetition_events = _repetition_analysis([], transcript_chars)
+        correct_rate = float(scenario_evaluation["information_unit_score"])
+        correct_chars = scenario_evaluation["matched_required_count"]
+        total_script_chars = max(scenario_evaluation["required_count"], 1)
+    else:
+        alignment, alignment_events = _alignment_analysis(target_chars, transcript_chars)
+        repetition_count, repeated_chars, repetition_events = _repetition_analysis(target_chars, transcript_chars)
+        correct_chars = min(alignment["correct"], total_script_chars)
+        correct_rate = round(correct_chars / total_script_chars * 100, 2)
     filler_count = sum(1 for char in raw_transcript_chars if char in FILLER_CHARS)
     effective_chars = max(len(transcript_chars) - repeated_chars, 0)
     speaking_duration = max(acoustic.speaking_duration_seconds, 0.1)
@@ -208,7 +301,9 @@ def generate_process_evaluation(
     }
     limitations = ["尚未接入音素级发音评测，构音准确性未测量。"]
     if template.task_type == TrainingType.scenario:
-        limitations.append("场景表达暂使用文本对齐，语义信息单元评分将在后续阶段接入。")
+        limitations.append("场景表达按沟通目标和信息单元评价，不与参考句进行字符对齐。")
+        if scenario_evaluation:
+            limitations.extend(scenario_evaluation["limitations"])
     if acoustic_provider_name == "mock":
         limitations.append("声学指标来自 mock provider，不可用于正式趋势。")
 
@@ -239,6 +334,7 @@ def generate_process_evaluation(
             "addition": alignment["addition"],
             "omission": alignment["omission"],
         },
+        "scenario_evaluation": scenario_evaluation,
         "independence_score": independence_score,
         "independence_evidence": independence_evidence,
         "quality_status": acoustic.quality_status,

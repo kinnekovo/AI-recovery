@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.modules.training.model import TrainingType
 
@@ -54,6 +54,25 @@ class TherapistTrainingRecordRead(BaseModel):
     feedback_summary: str
     recommendation_source: str | None = None
     recommendation_matched: bool = False
+    scenario_review_status: str | None = None
+    scenario_review_notes: str | None = None
+
+
+class ScenarioExpressionReviewUpdate(BaseModel):
+    review_status: str
+    goal_status: str | None = None
+    information_unit_overrides: dict = Field(default_factory=dict)
+    notes: str | None = None
+
+
+class ScenarioExpressionReviewRead(BaseModel):
+    attempt_id: UUID
+    review_status: str
+    goal_status: str | None = None
+    information_unit_overrides: dict = Field(default_factory=dict)
+    notes: str | None = None
+    reviewed_by_user_id: UUID | None = None
+    reviewed_at: datetime | None = None
 
 
 class TherapistTrendBucketRead(BaseModel):

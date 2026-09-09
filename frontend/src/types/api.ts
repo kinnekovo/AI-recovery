@@ -72,6 +72,7 @@ export interface TaskTemplate {
   content_level: string
   autonomy_level: string
   scene_prompt?: string | null
+  scoring_config?: Record<string, unknown>
   tags: string[]
   recommendation_weight: number
   is_active: boolean
@@ -85,6 +86,7 @@ export interface TaskTemplatePayload {
   content_level: string
   autonomy_level: string
   scene_prompt?: string | null
+  scoring_config?: Record<string, unknown>
   tags: string[]
   recommendation_weight: number
   is_active: boolean
@@ -165,6 +167,84 @@ export interface TherapistTrainingRecord {
   feedback_summary: string
   recommendation_source: string | null
   recommendation_matched: boolean
+  scenario_review_status: 'pending_review' | 'confirmed' | 'adjusted' | null
+  scenario_review_notes: string | null
+}
+
+export interface ScenarioDialogueTurn {
+  turn_index: number
+  speaker: 'agent' | 'patient'
+  dialogue_act: string
+  text: string
+  created_at: string
+}
+
+export interface ScenarioDialogue {
+  id: string
+  status: 'active' | 'completed' | 'aborted'
+  current_state: string
+  patient_turn_count: number
+  prompt_count: number
+  maximum_prompt_level: number
+  communication_goal: string
+  turns: ScenarioDialogueTurn[]
+}
+
+export interface ScenarioDialogueEvaluation {
+  goal_status: 'achieved' | 'partly_achieved' | 'not_achieved'
+  goal_score: number
+  information_score: number
+  response_score: number
+  relevance_score: number
+  independence_score: number
+  repair_score: number | null
+  overall_score: number | null
+  confidence: number
+  review_status: string
+  evidence_snapshot: { collected_information_unit_ids?: string[]; required_information_unit_ids?: string[]; fallback_used?: boolean }
+  scoring_version: string
+}
+
+export interface TherapistScenarioDialogueTurn extends ScenarioDialogueTurn {
+  audio_file_id: string | null
+}
+
+export interface TherapistScenarioDialogue {
+  id: string
+  status: string
+  current_state: string
+  patient_turn_count: number
+  prompt_count: number
+  maximum_prompt_level: number
+  communication_goal: string
+  turns: TherapistScenarioDialogueTurn[]
+}
+
+export interface TherapistScenarioDialogueListItem {
+  id: string
+  created_at: string
+  status: string
+  current_state: string
+  communication_goal: string
+  patient_turn_count: number
+  review_status: string | null
+}
+
+export interface ScenarioExpressionReview {
+  attempt_id: string
+  review_status: 'pending_review' | 'confirmed' | 'adjusted'
+  goal_status: 'achieved' | 'partly_achieved' | 'not_achieved' | null
+  information_unit_overrides: Record<string, boolean>
+  notes: string | null
+  reviewed_by_user_id: string | null
+  reviewed_at: string | null
+}
+
+export interface ScenarioExpressionReviewPayload {
+  review_status: 'confirmed' | 'adjusted'
+  goal_status?: 'achieved' | 'partly_achieved' | 'not_achieved' | null
+  information_unit_overrides?: Record<string, boolean>
+  notes?: string | null
 }
 
 export interface TherapistTrendBucket {
@@ -307,6 +387,7 @@ export interface RecommendationNote {
 
 export interface TrainingSessionCreatePayload {
   type: 'repeat' | 'scenario'
+  scenario_mode?: 'training' | 'generalization_probe'
   recommendation_id?: string | null
   recommendation_source?: string | null
   recommendation_headline?: string | null
@@ -507,12 +588,39 @@ export interface ProcessDetails {
   reference_ranges?: Record<string, string>
   input_sources?: Record<string, string>
   limitations?: string[]
+  task_type?: 'repeat' | 'scenario'
+  independence_score?: number
+  scenario_evaluation?: ScenarioEvaluation | null
   [key: string]: unknown
+}
+
+export interface ScenarioInformationUnit {
+  id: string
+  label: string
+  required: boolean
+  matched: boolean
+  matches: string[]
+}
+
+export interface ScenarioEvaluation {
+  version: string
+  communication_goal: string
+  goal_status: 'achieved' | 'partly_achieved' | 'not_achieved' | string
+  goal_score: number
+  information_unit_score: number
+  required_information_units: ScenarioInformationUnit[]
+  optional_information_units: ScenarioInformationUnit[]
+  matched_required_count: number
+  required_count: number
+  next_information_units: string[]
+  repair_ability?: { status: string; reason: string }
+  limitations?: string[]
 }
 
 export interface LatestReport {
   training_count: number
   process_monitoring_summary: ProcessMonitoringSummary
+  scenario_communication_summary: ScenarioCommunicationSummary
   effect_comparison: ReportEffectComparison
   suggestion: string
 }
@@ -522,6 +630,21 @@ export interface ProcessMonitoringSummary {
   avg_error_count: number | null
   avg_speech_rate: number | null
   avg_loudness: number | null
+}
+
+export interface ScenarioCommunicationSummary {
+  attempt_count: number
+  recent_valid_count: number
+  independent_goal_achievement_rate: number | null
+  median_information_unit_score: number | null
+  median_independence_score: number | null
+  generalization_probe_count: number
+  generalization_probe_distinct_date_count: number
+  generalization_independent_goal_achievement_rate: number | null
+  generalization_summary: string
+  therapist_reviewed_count: number
+  therapist_adjusted_count: number
+  summary: string
 }
 
 export interface ReportMetricComparison {

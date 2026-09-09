@@ -90,6 +90,14 @@
                 >
                   复核发音 <ChevronRight :size="16" />
                 </button>
+                <button
+                  v-if="record.training_type === 'scenario' && record.scenario_review_status"
+                  class="record-review-action"
+                  type="button"
+                  @click="openScenarioReview(record)"
+                >
+                  {{ scenarioReviewLabel(record.scenario_review_status) }} <ChevronRight :size="16" />
+                </button>
               </div>
               <div class="record-metric-strip">
                 <span>完整度 {{ metricValue(record.process_metrics.script_accuracy, '%') }}</span>
@@ -106,6 +114,16 @@
           <div v-else class="empty-state">
             <p>暂无训练记录。患者完成一次训练并生成评分后，这里会自动出现。</p>
           </div>
+        </article>
+
+        <article class="therapist-panel training-records-panel">
+          <div class="panel-heading records-heading"><div><h2>多轮场景对话</h2><p>按完整对话复核，不与单句跟读记录混在一起。</p></div></div>
+          <div v-if="scenarioDialogues.length" class="therapist-record-list">
+            <article v-for="item in scenarioDialogues" :key="item.id" class="training-record-row">
+              <div class="record-main"><strong>{{ item.communication_goal }}</strong><p>{{ dateTimeLabel(item.created_at) }} · 患者表达 {{ item.patient_turn_count }} 轮</p><div class="record-tags"><span>{{ item.status === 'completed' ? '已结束' : '进行中' }}</span><span>{{ item.review_status || '待复核' }}</span></div><RouterLink class="record-review-action" :to="`/therapist/scenario-dialogues/${item.id}`">逐轮复核 <ChevronRight :size="16" /></RouterLink></div>
+            </article>
+          </div>
+          <div v-else class="empty-state"><p>该患者尚未完成多轮场景对话。</p></div>
         </article>
 
         <Teleport to="body">
@@ -222,6 +240,48 @@
           </template>
         </aside>
         </div>
+        </Teleport>
+
+        <Teleport to="body">
+          <div v-if="selectedScenarioRecord" class="pronunciation-drawer-backdrop" @click.self="closeScenarioReview">
+            <aside class="pronunciation-review-panel" aria-label="场景表达复核">
+              <div class="panel-heading">
+                <div>
+                  <h2>场景表达复核</h2>
+                  <p>{{ selectedScenarioRecord.task_title }} · 先听录音，再确认自动识别的沟通信息。</p>
+                </div>
+                <button class="icon-button" type="button" title="关闭场景表达复核" :disabled="scenarioReviewSaving" @click="closeScenarioReview"><X :size="20" /></button>
+              </div>
+              <p v-if="scenarioReviewError" class="error-text">{{ scenarioReviewError }}</p>
+              <template v-else>
+                <AudioPlayback v-if="selectedScenarioRecord.audio_url" :src="selectedScenarioRecord.audio_url" />
+                <p class="review-transcript">系统转写：{{ selectedScenarioRecord.asr_text || '未获得转写' }}</p>
+                <label>
+                  沟通目标结论
+                  <select v-model="scenarioReviewForm.goal_status">
+                    <option value="achieved">已达成</option>
+                    <option value="partly_achieved">部分达成</option>
+                    <option value="not_achieved">尚未达成</option>
+                  </select>
+                </label>
+                <fieldset class="scenario-review-units">
+                  <legend>关键信息（以录音为准）</legend>
+                  <label v-for="unit in scenarioReviewUnits" :key="unit.id" class="scenario-review-check">
+                    <input v-model="scenarioReviewForm.information_unit_overrides[unit.id]" type="checkbox" />
+                    {{ unit.label }}
+                  </label>
+                </fieldset>
+                <label>
+                  治疗师备注
+                  <textarea v-model="scenarioReviewForm.notes" rows="3" maxlength="1000" placeholder="说明自动识别是否需要修正，或记录下一轮训练重点。"></textarea>
+                </label>
+                <div class="form-actions">
+                  <button class="app-button secondary" type="button" :disabled="scenarioReviewSaving" @click="saveScenarioReview('confirmed')">确认自动结论</button>
+                  <button class="app-button primary" type="button" :disabled="scenarioReviewSaving" @click="saveScenarioReview('adjusted')">保存调整</button>
+                </div>
+              </template>
+            </aside>
+          </div>
         </Teleport>
 
         <article class="therapist-panel">
@@ -374,8 +434,8 @@
               材料标题
               <input v-model="templateForm.title" maxlength="80" placeholder="例如：家庭问候短句" />
             </label>
-            <label>
-              训练文本
+            <label v-if="templateForm.task_type === 'repeat'">
+              跟读文本
               <textarea v-model="templateForm.target_text" maxlength="180" rows="3" placeholder="请输入患者需要练习的句子或表达内容。"></textarea>
             </label>
             <div class="template-form-grid">
@@ -398,6 +458,40 @@
                   <option v-for="level in autonomyLevels" :key="level" :value="level">{{ level }}</option>
                 </select>
               </label>
+            </div>
+            <div v-if="templateForm.task_type === 'scenario'" class="scenario-contract-form">
+              <p>场景表达按“沟通目标和关键信息”评分，不使用固定参考句。</p>
+              <label>
+                患者端场景任务
+                <textarea v-model="scenarioContractForm.displayPrompt" maxlength="180" rows="2" placeholder="例如：你来到药店。请说清楚你的问题和需要的帮助。"></textarea>
+              </label>
+              <label>
+                沟通目标
+                <textarea v-model="scenarioContractForm.communicationGoal" maxlength="180" rows="2" placeholder="例如：让药师理解患者的不适，并能提供下一步建议。"></textarea>
+              </label>
+              <div class="template-form-grid">
+                <label>
+                  关键信息一
+                  <input v-model="scenarioContractForm.firstLabel" maxlength="40" placeholder="例如：身体不适或问题" />
+                </label>
+                <label>
+                  可接受表达（逗号分隔）
+                  <input v-model="scenarioContractForm.firstKeywords" maxlength="180" placeholder="例如：头晕,头疼,难受" />
+                </label>
+                <label>
+                  关键信息二
+                  <input v-model="scenarioContractForm.secondLabel" maxlength="40" placeholder="例如：希望对方提供的帮助" />
+                </label>
+                <label>
+                  可接受表达（逗号分隔）
+                  <input v-model="scenarioContractForm.secondKeywords" maxlength="180" placeholder="例如：帮我,请问,怎么办" />
+                </label>
+              </div>
+              <label>
+                轻提示（可选）
+                <input v-model="scenarioContractForm.firstHint" maxlength="100" placeholder="例如：先说一说你遇到了什么问题。" />
+              </label>
+              <small>新建的场景材料会自动记录为日常训练；泛化小测由系统单独配置，不进入推荐任务。</small>
             </div>
             <div class="form-actions">
               <button class="app-button secondary" type="submit" :disabled="savingTemplate">
@@ -426,8 +520,11 @@ import type {
   TherapistTrainingRecord,
   TherapistTrainingTrends,
   TherapistInterRaterAgreement,
+  TherapistScenarioDialogueListItem,
   PronunciationAnalysis,
   PronunciationSegment,
+  ScenarioExpressionReview,
+  ScenarioInformationUnit,
   TrainingRecommendation
 } from '@/types/api'
 import { toUserMessage } from '@/utils/errors'
@@ -440,7 +537,16 @@ const ability = ref<AbilityProfile | null>(null)
 const recommendation = ref<TrainingRecommendation | null>(null)
 const effects = ref<RecommendationEffectSummary | null>(null)
 const records = ref<TherapistTrainingRecord[]>([])
+const scenarioDialogues = ref<TherapistScenarioDialogueListItem[]>([])
 const selectedPronunciationRecord = ref<TherapistTrainingRecord | null>(null)
+const selectedScenarioRecord = ref<TherapistTrainingRecord | null>(null)
+const scenarioReviewLoading = ref(false)
+const scenarioReviewSaving = ref(false)
+const scenarioReviewError = ref('')
+const scenarioReviewUnits = ref<ScenarioInformationUnit[]>([])
+const scenarioReviewForm = ref<{ goal_status: 'achieved' | 'partly_achieved' | 'not_achieved'; information_unit_overrides: Record<string, boolean>; notes: string }>({
+  goal_status: 'partly_achieved', information_unit_overrides: {}, notes: ''
+})
 const pronunciation = ref<PronunciationAnalysis | null>(null)
 const pronunciationLoading = ref(false)
 const pronunciationError = ref('')
@@ -473,6 +579,15 @@ const templateForm = ref<TaskTemplatePayload>({
   tags: [],
   recommendation_weight: 60,
   is_active: true
+})
+const scenarioContractForm = ref({
+  displayPrompt: '',
+  communicationGoal: '',
+  firstLabel: '',
+  firstKeywords: '',
+  secondLabel: '',
+  secondKeywords: '',
+  firstHint: ''
 })
 const loading = ref(true)
 const loadingPatientData = ref(false)
@@ -523,18 +638,20 @@ async function reloadSelected() {
   pageError.value = ''
   noteSaved.value = ''
   try {
-    const [abilityResult, recommendationResult, recordsResult, trendsResult, noteResult, effectsResult, agreementResult] = await Promise.all([
+    const [abilityResult, recommendationResult, recordsResult, trendsResult, noteResult, effectsResult, agreementResult, dialogueResult] = await Promise.all([
       therapistApi.abilityProfile(selectedPatientId.value),
       therapistApi.trainingRecommendation(selectedPatientId.value),
       therapistApi.trainingRecords(selectedPatientId.value),
       therapistApi.trainingTrends(selectedPatientId.value),
       therapistApi.recommendationNote(selectedPatientId.value),
       therapistApi.recommendationEffects(selectedPatientId.value),
-      therapistApi.pronunciationInterRaterAgreement(selectedPatientId.value)
+      therapistApi.pronunciationInterRaterAgreement(selectedPatientId.value),
+      therapistApi.scenarioDialogues(selectedPatientId.value)
     ])
     ability.value = abilityResult
     recommendation.value = recommendationResult
     records.value = recordsResult
+    scenarioDialogues.value = dialogueResult
     closePronunciationReview()
     trends.value = trendsResult
     effects.value = effectsResult
@@ -570,6 +687,64 @@ function closePronunciationReview() {
   pronunciation.value = null
   selectedSegment.value = null
   pronunciationError.value = ''
+}
+
+async function openScenarioReview(record: TherapistTrainingRecord) {
+  if (!selectedPatientId.value) return
+  selectedScenarioRecord.value = record
+  scenarioReviewError.value = ''
+  scenarioReviewLoading.value = true
+  const autoScenario = record.process_details?.scenario_evaluation
+  const units = autoScenario && typeof autoScenario === 'object' && 'required_information_units' in autoScenario
+    ? (autoScenario.required_information_units as ScenarioInformationUnit[])
+    : []
+  scenarioReviewUnits.value = units
+  try {
+    const review: ScenarioExpressionReview = await therapistApi.scenarioReview(selectedPatientId.value, record.attempt_id)
+    scenarioReviewForm.value = {
+      goal_status: review.goal_status || (autoScenario && typeof autoScenario === 'object' && 'goal_status' in autoScenario ? autoScenario.goal_status as 'achieved' | 'partly_achieved' | 'not_achieved' : 'partly_achieved'),
+      information_unit_overrides: Object.keys(review.information_unit_overrides || {}).length
+        ? review.information_unit_overrides
+        : Object.fromEntries(units.map((unit) => [unit.id, unit.matched])),
+      notes: review.notes || ''
+    }
+  } catch (err) {
+    scenarioReviewError.value = toUserMessage(err, '场景表达复核记录加载失败')
+  } finally {
+    scenarioReviewLoading.value = false
+  }
+}
+
+function closeScenarioReview() {
+  if (scenarioReviewSaving.value) return
+  selectedScenarioRecord.value = null
+  scenarioReviewError.value = ''
+}
+
+async function saveScenarioReview(reviewStatus: 'confirmed' | 'adjusted') {
+  if (!selectedPatientId.value || !selectedScenarioRecord.value) return
+  scenarioReviewSaving.value = true
+  scenarioReviewError.value = ''
+  try {
+    await therapistApi.saveScenarioReview(selectedPatientId.value, selectedScenarioRecord.value.attempt_id, {
+      review_status: reviewStatus,
+      goal_status: scenarioReviewForm.value.goal_status,
+      information_unit_overrides: scenarioReviewForm.value.information_unit_overrides,
+      notes: scenarioReviewForm.value.notes || null
+    })
+    await reloadSelected()
+    closeScenarioReview()
+  } catch (err) {
+    scenarioReviewError.value = toUserMessage(err, '场景表达复核保存失败')
+  } finally {
+    scenarioReviewSaving.value = false
+  }
+}
+
+function scenarioReviewLabel(status: string) {
+  if (status === 'confirmed') return '已确认场景结论'
+  if (status === 'adjusted') return '已调整场景结论'
+  return '复核场景表达'
 }
 
 async function saveIntelligibilityReview() {
@@ -704,22 +879,55 @@ async function saveTemplate() {
   templateSaved.value = ''
   pageError.value = ''
   try {
+    const isScenario = templateForm.value.task_type === 'scenario'
+    const scenarioConfig = isScenario ? buildScenarioContract() : undefined
+    if (isScenario && !scenarioConfig) {
+      pageError.value = '请先填写场景任务、沟通目标，以及两项关键信息和可接受表达。'
+      return
+    }
     const payload: TaskTemplatePayload = {
       ...templateForm.value,
       title: templateForm.value.title.trim(),
-      instruction: templateForm.value.task_type === 'scenario' ? '请围绕这个场景说清楚自己的需求。' : '请跟我说这一句。',
-      target_text: templateForm.value.target_text.trim(),
+      instruction: isScenario ? scenarioConfig!.display_prompt : '请跟我说这一句。',
+      target_text: isScenario ? scenarioConfig!.display_prompt : templateForm.value.target_text.trim(),
+      scene_prompt: isScenario ? scenarioConfig!.display_prompt : null,
+      scoring_config: scenarioConfig || undefined,
       tags: templateForm.value.tags || []
     }
     await therapistApi.createTaskTemplate(payload)
     taskTemplates.value = await therapistApi.taskTemplates()
     templateForm.value.title = ''
     templateForm.value.target_text = ''
+    scenarioContractForm.value = { displayPrompt: '', communicationGoal: '', firstLabel: '', firstKeywords: '', secondLabel: '', secondKeywords: '', firstHint: '' }
     templateSaved.value = '训练材料已加入内容库。'
   } catch (err) {
     pageError.value = toUserMessage(err, '训练材料保存失败')
   } finally {
     savingTemplate.value = false
+  }
+}
+
+function buildScenarioContract() {
+  const form = scenarioContractForm.value
+  const splitKeywords = (value: string) => value.split(/[，,]/).map((item) => item.trim()).filter(Boolean)
+  const firstKeywords = splitKeywords(form.firstKeywords)
+  const secondKeywords = splitKeywords(form.secondKeywords)
+  if (!form.displayPrompt.trim() || !form.communicationGoal.trim() || !form.firstLabel.trim() || !form.secondLabel.trim() || !firstKeywords.length || !secondKeywords.length) {
+    return null
+  }
+  return {
+    version: 'scenario-contract-v1',
+    mode: 'functional_scenario',
+    evaluation_role: 'training',
+    display_prompt: form.displayPrompt.trim(),
+    communication_goal: form.communicationGoal.trim(),
+    required_information_units: [
+      { id: 'key_information_1', label: form.firstLabel.trim(), keywords: firstKeywords },
+      { id: 'key_information_2', label: form.secondLabel.trim(), keywords: secondKeywords }
+    ],
+    optional_information_units: [],
+    goal_requirements: ['key_information_1', 'key_information_2'],
+    prompt_hints: [form.firstHint.trim() || `先说一说：${form.firstLabel.trim()}。`, `再补充：${form.secondLabel.trim()}。`]
   }
 }
 

@@ -23,15 +23,52 @@ from app.modules.training.service import (
     save_patient_recommendation_review,
     update_task_template,
 )
-from app.modules.therapist.schema import RecommendationNoteCreate, TherapistPatientAssignmentCreate
+from app.modules.therapist.schema import (
+    RecommendationNoteCreate,
+    ScenarioExpressionReviewUpdate,
+    TherapistPatientAssignmentCreate,
+)
 from app.modules.pronunciation.schema import IntelligibilityReviewCreate, PronunciationRevisionCreate
 from app.modules.pronunciation import service as pronunciation_service
+from app.modules.scenario_dialogues import service as scenario_dialogue_service
+from app.modules.scenario_dialogues.schema import ScenarioDialogueReviewUpdate
 from app.modules.training.model import TrainingType
 from app.modules.training.schema import StrategyFeedbackCreate, TaskTemplateCreate, TaskTemplateUpdate
 from app.modules.users.model import User
 from app.modules.users.service import require_therapist
 
 router = APIRouter(prefix="/therapist", tags=["therapist"])
+
+
+@router.patch("/scenario-dialogues/{dialogue_id}/review")
+def review_scenario_dialogue(
+    dialogue_id: UUID,
+    payload: ScenarioDialogueReviewUpdate,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    result = scenario_dialogue_service.review_evaluation(db, current_user, dialogue_id, payload)
+    return api_success(result.model_dump(mode="json"))
+
+
+@router.get("/patients/{patient_user_id}/scenario-dialogues")
+def patient_scenario_dialogues(
+    patient_user_id: UUID,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    result = scenario_dialogue_service.list_dialogues_for_therapist(db, current_user, patient_user_id)
+    return api_success([item.model_dump(mode="json") for item in result])
+
+
+@router.get("/scenario-dialogues/{dialogue_id}")
+def scenario_dialogue_detail(
+    dialogue_id: UUID,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    result = scenario_dialogue_service.get_dialogue_for_therapist(db, current_user, dialogue_id)
+    return api_success(result.model_dump(mode="json"))
 
 
 def require_pronunciation_access(db: Session, current_user: User, analysis_id: UUID) -> None:
@@ -186,6 +223,29 @@ def training_records(
     service.require_therapist_patient_access(db, current_user, patient_user_id)
     result = service.list_patient_training_records(db, patient_user_id)
     return api_success([item.model_dump(mode="json") for item in result])
+
+
+@router.get("/patients/{patient_user_id}/attempts/{attempt_id}/scenario-review")
+def scenario_review(
+    patient_user_id: UUID,
+    attempt_id: UUID,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    result = service.get_scenario_expression_review(db, current_user, patient_user_id, attempt_id)
+    return api_success(result.model_dump(mode="json"))
+
+
+@router.patch("/patients/{patient_user_id}/attempts/{attempt_id}/scenario-review")
+def update_scenario_review(
+    patient_user_id: UUID,
+    attempt_id: UUID,
+    payload: ScenarioExpressionReviewUpdate,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    result = service.review_scenario_expression(db, current_user, patient_user_id, attempt_id, payload)
+    return api_success(result.model_dump(mode="json"))
 
 
 @router.get("/patients/{patient_user_id}/pronunciation/inter-rater-agreement")

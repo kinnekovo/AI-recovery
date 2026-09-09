@@ -13,8 +13,8 @@ function audioFilename(file: Blob): string {
 }
 
 export const attemptsApi = {
-  create(sessionTaskId: string) {
-    return request<Attempt>(http.post('/attempts', { session_task_id: sessionTaskId }))
+  create(sessionTaskId: string, metadata: { prompt_level?: number; requested_help?: boolean } = {}) {
+    return request<Attempt>(http.post('/attempts', { session_task_id: sessionTaskId, ...metadata }))
   },
   uploadAudio(attemptId: string, file: Blob) {
     const form = new FormData()

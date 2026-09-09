@@ -44,6 +44,7 @@ def create_session(
         recommendation_source=payload.recommendation_source,
         recommendation_headline=payload.recommendation_headline,
         recommendation_task_ids=payload.recommendation_task_ids,
+        scenario_mode=payload.scenario_mode,
     )
     return api_success(TrainingSessionRead.model_validate(session).model_dump(mode="json"))
 

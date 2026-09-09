@@ -7,12 +7,17 @@ from app.modules.evaluations.process_engine import generate_process_evaluation
 from app.modules.training.model import TrainingType
 
 
-def make_template(target_text: str, task_type: TrainingType = TrainingType.repeat) -> SimpleNamespace:
+def make_template(
+    target_text: str,
+    task_type: TrainingType = TrainingType.repeat,
+    scoring_config: dict | None = None,
+) -> SimpleNamespace:
     return SimpleNamespace(
         task_type=task_type,
         title="测试任务",
         instruction="请跟读",
         target_text=target_text,
+        scoring_config=scoring_config or {},
     )
 
 
@@ -169,6 +174,91 @@ class ProcessEngineTest(unittest.TestCase):
         self.assertEqual(result.details["evaluation_source"], "mock_ai")
         self.assertEqual(result.details["provider_version"], "mock-process-v1")
         self.assertGreater(result.script_accuracy, 0)
+
+    def test_scenario_scores_information_units_not_reference_sentence_alignment(self) -> None:
+        template = make_template(
+            "我想去医院看病，请医生帮我检查。",
+            TrainingType.scenario,
+            {
+                "version": "scenario-contract-v1",
+                "mode": "functional_scenario",
+                "communication_goal": "让工作人员知道需要就医并提供帮助。",
+                "required_information_units": [
+                    {"id": "intent", "label": "需要就医", "keywords": ["头晕", "看医生", "医院"]},
+                    {"id": "request", "label": "提出请求", "keywords": ["挂号", "挂个号", "帮忙", "请问"]},
+                ],
+                "goal_requirements": ["intent", "request"],
+            },
+        )
+        result = generate_process_evaluation(
+            template,
+            "我头晕两天了，麻烦帮我挂个号。",
+            make_acoustic(),
+            asr_provider_name="tencent",
+            acoustic_provider_name="local",
+        )
+
+        scenario = result.details["scenario_evaluation"]
+        self.assertEqual(scenario["goal_status"], "achieved")
+        self.assertEqual(scenario["information_unit_score"], 100.0)
+        self.assertEqual(scenario["contract_snapshot"]["communication_goal"], "让工作人员知道需要就医并提供帮助。")
+        self.assertEqual(scenario["contract_snapshot"]["required_information_units"][0]["keywords"], ["头晕", "看医生", "医院"])
+        self.assertEqual(result.script_accuracy, 100.0)
+        self.assertEqual(result.details["script_mismatch_events"], {"substitution": 0, "addition": 0, "omission": 0})
+        self.assertTrue(any("不与参考句进行字符对齐" in item for item in result.details["limitations"]))
+
+    def test_scenario_keeps_unmatched_information_as_missing_not_error(self) -> None:
+        template = make_template(
+            "请问这个多少钱？我想买两个苹果。",
+            TrainingType.scenario,
+            {
+                "mode": "functional_scenario",
+                "required_information_units": [
+                    {"id": "item", "label": "购买物品", "keywords": ["苹果", "水"]},
+                    {"id": "request", "label": "购买请求", "keywords": ["多少", "买"]},
+                ],
+                "goal_requirements": ["item", "request"],
+            },
+        )
+        result = generate_process_evaluation(
+            template,
+            "我想要苹果。",
+            make_acoustic(),
+            asr_provider_name="tencent",
+            acoustic_provider_name="local",
+            prompt_level=2,
+            requested_help=True,
+        )
+
+        scenario = result.details["scenario_evaluation"]
+        self.assertEqual(scenario["goal_status"], "partly_achieved")
+        self.assertEqual(scenario["next_information_units"], ["购买请求"])
+        self.assertEqual(result.error_count, 0)
+        self.assertLess(result.details["independence_score"], 100)
+
+    def test_generalization_probe_keeps_its_role_in_the_evidence(self) -> None:
+        template = make_template(
+            "我想预约明天的复诊。",
+            TrainingType.scenario,
+            {
+                "mode": "functional_scenario",
+                "evaluation_role": "generalization_probe",
+                "required_information_units": [
+                    {"id": "purpose", "label": "预约事项", "keywords": ["预约", "复诊"]},
+                    {"id": "request", "label": "提出请求", "keywords": ["请问", "帮"]},
+                ],
+                "goal_requirements": ["purpose", "request"],
+            },
+        )
+        result = generate_process_evaluation(
+            template,
+            "请问我想预约明天复诊。",
+            make_acoustic(),
+            asr_provider_name="tencent",
+            acoustic_provider_name="local",
+        )
+
+        self.assertEqual(result.details["scenario_evaluation"]["evaluation_role"], "generalization_probe")
 
     def test_process_reference_ranges_match_metric_definitions(self) -> None:
         result = generate_process_evaluation(

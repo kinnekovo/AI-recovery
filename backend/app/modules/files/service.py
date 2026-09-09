@@ -89,6 +89,11 @@ def can_access_agent_image(db: Session, user: User, asset: FileAsset) -> bool:
 
 
 def can_access_training_audio(db: Session, user: User, asset: FileAsset) -> bool:
+    # Multi-turn scenario recordings are not represented by a legacy Attempt.
+    # Resolve them through their dialogue session so assigned therapists can replay
+    # the exact turn they are reviewing.
+    from app.modules.scenario_dialogues.model import ScenarioDialogueSession, ScenarioDialogueTurn
+
     profile_id = db.scalar(
         select(TrainingSession.patient_profile_id)
         .join(SessionTask, SessionTask.training_session_id == TrainingSession.id)
@@ -96,6 +101,14 @@ def can_access_training_audio(db: Session, user: User, asset: FileAsset) -> bool
         .where(Attempt.audio_file_id == asset.id)
         .limit(1)
     )
+    if not profile_id:
+        profile_id = db.scalar(
+            select(TrainingSession.patient_profile_id)
+            .join(ScenarioDialogueSession, ScenarioDialogueSession.training_session_id == TrainingSession.id)
+            .join(ScenarioDialogueTurn, ScenarioDialogueTurn.dialogue_session_id == ScenarioDialogueSession.id)
+            .where(ScenarioDialogueTurn.audio_file_id == asset.id)
+            .limit(1)
+        )
     if not profile_id:
         return False
     return can_access_patient_profile_file(db, user, profile_id)

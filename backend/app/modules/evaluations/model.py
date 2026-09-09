@@ -1,7 +1,8 @@
 import enum
 import uuid
+from datetime import datetime
 
-from sqlalchemy import Enum, Float, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Enum, Float, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -50,3 +51,32 @@ class AttemptEvaluation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     attempt = relationship("Attempt", back_populates="evaluations")
     metric: Mapped[EvaluationMetric] = relationship(back_populates="attempt_evaluations")
+
+
+class ScenarioReviewStatus(str, enum.Enum):
+    pending_review = "pending_review"
+    confirmed = "confirmed"
+    adjusted = "adjusted"
+
+
+class ScenarioExpressionReview(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """Human confirmation for an automatically extracted scenario communication result."""
+
+    __tablename__ = "scenario_expression_reviews"
+
+    attempt_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("attempts.id"), unique=True, index=True, nullable=False
+    )
+    review_status: Mapped[ScenarioReviewStatus] = mapped_column(
+        Enum(ScenarioReviewStatus, name="scenario_review_status"),
+        default=ScenarioReviewStatus.pending_review,
+        nullable=False,
+    )
+    goal_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    information_unit_overrides: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    attempt = relationship("Attempt")
+    reviewed_by = relationship("User")

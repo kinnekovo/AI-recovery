@@ -9,7 +9,12 @@ from app.integrations.acoustic_analysis.provider import get_acoustic_analysis_pr
 from app.integrations.asr.provider import ASRProviderError, transcribe_with_fallback
 from app.integrations.llm.provider import get_llm_scoring_provider
 from app.modules.attempts.model import AnalysisStatus, Attempt
-from app.modules.evaluations.model import AttemptEvaluation, EvaluationMetric, EvaluationSource
+from app.modules.evaluations.model import (
+    AttemptEvaluation,
+    EvaluationMetric,
+    EvaluationSource,
+    ScenarioExpressionReview,
+)
 from app.modules.evaluations.service import generate_process_evaluation, save_process_evaluation
 from app.modules.files.model import FileAsset
 from app.modules.files.service import public_url
@@ -70,6 +75,18 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
         )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"语音识别失败：{exc.message}") from exc
     transcript = asr_result.text
+    if asr_result.provider_name == "mock":
+        # A fallback transcript is useful for diagnostics, but it cannot support a
+        # patient-facing communication conclusion or a rehabilitation trend.
+        attempt.analysis_status = AnalysisStatus.failed
+        attempt.audio_quality = "unusable"
+        attempt.analysis_error_code = "asr:mock_provider"
+        attempt.analysis_error_message = "正式评分需要可用的语音识别服务"
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="语音识别服务暂不可用，未生成正式场景结论，请稍后重试。",
+        )
     try:
         acoustic = acoustic_provider.analyze(audio.storage_path)
     except Exception as exc:
@@ -203,6 +220,15 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
     db.add(analysis)
     db.add(score)
     db.flush()
+    if template.task_type.value == "scenario":
+        scenario = process_evaluation.details.get("scenario_evaluation") or {}
+        db.add(
+            ScenarioExpressionReview(
+                attempt_id=attempt.id,
+                goal_status=scenario.get("goal_status"),
+                information_unit_overrides={},
+            )
+        )
     save_process_evaluation(db, attempt.id, process_evaluation)
     from app.modules.profiles.service import refresh_ability_profile
 
@@ -409,7 +435,7 @@ def rule_feedback_summary(process_evaluation) -> dict[str, str]:
         speech_rate=process_evaluation.speech_rate,
         loudness=process_evaluation.loudness,
     )
-    feedback = build_feedback(metrics)
+    feedback = build_feedback(metrics, process_evaluation.details)
     return {
         "main_strength": feedback[0].current_performance,
         "main_issue": feedback[1].current_performance if len(feedback) > 1 else "本次过程性指标已生成。",
@@ -466,13 +492,14 @@ def to_training_feedback_read(db: Session, attempt_id, transcript: str | None) -
         pronunciation = get_attempt_pronunciation(db, attempt_id).model_dump(mode="json")
     except HTTPException:
         pronunciation = None
+    process_details = analysis.semantic_metrics.get("process_monitoring") if analysis else None
     return TrainingFeedbackRead(
         attempt_id=attempt_id,
         process_metrics=metrics,
-        feedback=build_feedback(metrics),
+        feedback=build_feedback(metrics, process_details),
         transcript=transcript or analysis.asr_text if analysis else transcript,
         audio_url=public_url(attempt.audio_file) if attempt and attempt.audio_file else None,
-        process_details=analysis.semantic_metrics.get("process_monitoring") if analysis else None,
+        process_details=process_details,
         pronunciation=pronunciation,
     )
 
@@ -493,25 +520,73 @@ def _pronunciation_shadow_score(process_evaluation, pronunciation) -> int | None
     return round(max(0, min(100, score)))
 
 
-def build_feedback(metrics: ProcessMetricsRead) -> list[TrainingFeedbackItem]:
+def build_feedback(metrics: ProcessMetricsRead, details: dict | None = None) -> list[TrainingFeedbackItem]:
     feedback: list[TrainingFeedbackItem] = []
+    scenario = (details or {}).get("scenario_evaluation") if details else None
 
-    if metrics.script_accuracy >= 90:
+    if isinstance(scenario, dict):
+        status = scenario.get("goal_status")
+        if status == "achieved":
+            feedback.append(
+                TrainingFeedbackItem(
+                    metric="functional_communication",
+                    current_performance="这次已经把主要需求表达出来了。",
+                    suggestion="继续用自己的方式表达；下次可以再补充一个细节，让对方更容易帮到你。",
+                )
+            )
+        elif status == "partly_achieved":
+            feedback.append(
+                TrainingFeedbackItem(
+                    metric="functional_communication",
+                    current_performance="这次已经表达出一部分意思，再补充一点会更清楚。",
+                    suggestion="下次先说最想让对方帮你的事，再补充相关信息。",
+                )
+            )
+        else:
+            feedback.append(
+                TrainingFeedbackItem(
+                    metric="functional_communication",
+                    current_performance="这次还没有识别到足够的场景信息。",
+                    suggestion="可以先说最重要的需求；需要时点击“给我一个提示”。",
+                )
+            )
+        missing = scenario.get("next_information_units") or []
+        if missing:
+            feedback.append(
+                TrainingFeedbackItem(
+                    metric="information_units",
+                    current_performance=f"下次可以补充：{'、'.join(str(item) for item in missing[:2])}。",
+                    suggestion="不用照着固定句子说，能让对方明白就很好。",
+                )
+            )
         feedback.append(
             TrainingFeedbackItem(
-                metric="script_accuracy",
-                current_performance=f"脚本完成度较好，正确生成比例约为 {metrics.script_accuracy:g}%。",
-                suggestion="继续保持清晰稳定的跟读节奏，下一次可以尝试减少停顿。",
+                metric="independence",
+                current_performance=(
+                    "这次是在没有提示的情况下完成的。"
+                    if float((details or {}).get("independence_score", 100)) >= 90
+                    else "这次使用了提示，系统已把它记录为训练过程的一部分。"
+                ),
+                suggestion="下次可以先自己想一想；需要时再使用提示，不必着急。",
             )
         )
     else:
-        feedback.append(
-            TrainingFeedbackItem(
-                metric="script_accuracy",
-                current_performance=f"脚本完成度还有提升空间，正确生成比例约为 {metrics.script_accuracy:g}%。",
-                suggestion="建议先分短句练习，再逐步合成完整句子。",
+        if metrics.script_accuracy >= 90:
+            feedback.append(
+                TrainingFeedbackItem(
+                    metric="script_accuracy",
+                    current_performance=f"脚本完成度较好，正确生成比例约为 {metrics.script_accuracy:g}%。",
+                    suggestion="继续保持清晰稳定的跟读节奏，下一次可以尝试减少停顿。",
+                )
             )
-        )
+        else:
+            feedback.append(
+                TrainingFeedbackItem(
+                    metric="script_accuracy",
+                    current_performance=f"脚本完成度还有提升空间，正确生成比例约为 {metrics.script_accuracy:g}%。",
+                    suggestion="建议先分短句练习，再逐步合成完整句子。",
+                )
+            )
 
     if metrics.error_count <= 1:
         feedback.append(

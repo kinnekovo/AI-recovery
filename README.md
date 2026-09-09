@@ -2,6 +2,8 @@
 
 面向脑卒中后言语障碍患者的陪伴式言语康复训练 Web 系统。
 
+场景表达的重新开发以[多轮对话训练与评价系统设计](doc/场景表达多轮对话训练与评价系统设计.md)为主设计，以[功能性沟通评价与迭代依据](doc/场景表达功能性沟通评价与迭代依据.md)为评价原则；临床校准与试点评估执行标准见：[场景表达临床校准与试点评估方案](doc/场景表达临床校准与试点评估方案.md)。
+
 当前项目采用模块化单体架构：
 
 - 前端：Vue 3、TypeScript、Vite、Vue Router、Pinia、Axios
@@ -166,6 +168,19 @@ Mock 模式下应能完成：
 -> 分析反馈
 -> 查看训练记录和报告
 ```
+
+## 场景表达的结构化语义抽取
+
+多轮场景训练默认仍可在 mock 模式下演示对话流程，但不会生成正式自动总分。若要启用带原话证据与置信度的语义抽取，请配置兼容 OpenAI Chat Completions 的服务：
+
+```env
+LLM_FEEDBACK_PROVIDER=openai_compatible
+LLM_FEEDBACK_API_KEY=你的密钥
+LLM_FEEDBACK_BASE_URL=https://你的服务地址/v1
+LLM_FEEDBACK_MODEL=你的模型名
+```
+
+系统会把 `LLM_FEEDBACK_BASE_URL` 末尾拼接为 `/chat/completions`。健康检查中的 `providers.llm_feedback` 会显示模型配置是否完整；即使配置完整，仍应先用真实音频和治疗师复核验证服务质量。
 
 ## 常用命令
 

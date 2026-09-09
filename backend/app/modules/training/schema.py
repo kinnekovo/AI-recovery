@@ -8,6 +8,7 @@ from app.modules.training.model import TrainingType
 
 class TrainingSessionCreate(BaseModel):
     type: TrainingType
+    scenario_mode: str = "training"
     recommendation_id: UUID | None = None
     recommendation_source: str | None = None
     recommendation_headline: str | None = None
@@ -40,6 +41,7 @@ class TaskTemplateRead(BaseModel):
     content_level: str
     autonomy_level: str
     scene_prompt: str | None = None
+    scoring_config: dict = {}
     tags: list[str] = []
     recommendation_weight: int = 50
     is_active: bool = True
@@ -53,6 +55,7 @@ class TaskTemplateCreate(BaseModel):
     content_level: str = "L1"
     autonomy_level: str = "S1"
     scene_prompt: str | None = None
+    scoring_config: dict = {}
     tags: list[str] = []
     recommendation_weight: int = 50
     is_active: bool = True
@@ -65,6 +68,7 @@ class TaskTemplateUpdate(BaseModel):
     content_level: str | None = None
     autonomy_level: str | None = None
     scene_prompt: str | None = None
+    scoring_config: dict | None = None
     tags: list[str] | None = None
     recommendation_weight: int | None = None
     is_active: bool | None = None

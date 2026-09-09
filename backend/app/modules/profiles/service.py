@@ -6,12 +6,18 @@ from sqlalchemy.orm import Session
 
 from app.modules.assessment.model import AssessmentReviewStatus, AssessmentSession
 from app.modules.attempts.model import Attempt
-from app.modules.evaluations.model import AttemptEvaluation, EvaluationMetric, EvaluationSource
+from app.modules.evaluations.model import (
+    AttemptEvaluation,
+    EvaluationMetric,
+    EvaluationSource,
+    ScenarioExpressionReview,
+    ScenarioReviewStatus,
+)
 from app.modules.evaluations.service import PROCESS_METRIC_NAMES
 from app.modules.profiles.model import AbilityProfile
 from app.modules.profiles.schema import AbilityProfileRead
 from app.modules.scoring.model import AttemptAnalysisResult
-from app.modules.training.model import SessionTask, TrainingSession
+from app.modules.training.model import SessionTask, TrainingSession, TrainingType
 from app.modules.users.model import PatientProfile, User, UserRole
 from app.modules.users.service import get_patient_profile
 
@@ -41,10 +47,11 @@ def refresh_ability_profile(db: Session, patient_profile_id: UUID) -> AbilityPro
 
     process_metrics = recent_process_metrics(db, patient_profile_id)
     reviewed_assessments = reviewed_assessment_summary(db, patient_profile_id)
+    reviewed_scenarios = reviewed_scenario_summary(db, patient_profile_id)
     averages = average_metrics(process_metrics)
     content_level, autonomy_level = decide_levels(averages, reviewed_assessments["count"])
-    confidence = calculate_confidence(len(process_metrics), reviewed_assessments["count"])
-    summary = build_summary(averages, reviewed_assessments)
+    confidence = calculate_confidence(len(process_metrics), reviewed_assessments["count"], reviewed_scenarios["count"])
+    summary = build_summary(averages, reviewed_assessments, reviewed_scenarios)
     recommendation = build_recommendation(averages, confidence)
 
     ability = db.scalar(select(AbilityProfile).where(AbilityProfile.patient_profile_id == patient_profile_id))
@@ -66,6 +73,10 @@ def refresh_ability_profile(db: Session, patient_profile_id: UUID) -> AbilityPro
         "reviewed_assessment_count": reviewed_assessments["count"],
         "latest_review_status": reviewed_assessments["latest_status"],
         "latest_therapist_notes": reviewed_assessments["latest_notes"],
+        "scenario_reviewed_count": reviewed_scenarios["count"],
+        "scenario_adjusted_count": reviewed_scenarios["adjusted_count"],
+        "scenario_goal_achieved_count": reviewed_scenarios["achieved_count"],
+        "latest_scenario_review_notes": reviewed_scenarios["latest_notes"],
     }
     db.commit()
     db.refresh(ability)
@@ -91,6 +102,7 @@ def recent_process_metrics(db: Session, patient_profile_id: UUID) -> list[dict[s
             TrainingSession.patient_profile_id == patient_profile_id,
             AttemptEvaluation.evaluation_source == EvaluationSource.system_rule,
             EvaluationMetric.name.in_(PROCESS_METRIC_NAMES),
+            TrainingSession.training_type == TrainingType.repeat,
         )
         .order_by(Attempt.created_at.desc())
     ).all()
@@ -151,6 +163,28 @@ def reviewed_assessment_summary(db: Session, patient_profile_id: UUID) -> dict:
     }
 
 
+def reviewed_scenario_summary(db: Session, patient_profile_id: UUID) -> dict:
+    reviews = db.execute(
+        select(ScenarioExpressionReview)
+        .join(Attempt, Attempt.id == ScenarioExpressionReview.attempt_id)
+        .join(SessionTask, SessionTask.id == Attempt.session_task_id)
+        .join(TrainingSession, TrainingSession.id == SessionTask.training_session_id)
+        .where(
+            TrainingSession.patient_profile_id == patient_profile_id,
+            TrainingSession.training_type == TrainingType.scenario,
+            ScenarioExpressionReview.review_status.in_({ScenarioReviewStatus.confirmed, ScenarioReviewStatus.adjusted}),
+        )
+        .order_by(ScenarioExpressionReview.reviewed_at.desc().nullslast())
+    ).scalars().all()
+    latest = reviews[0] if reviews else None
+    return {
+        "count": len(reviews),
+        "adjusted_count": sum(item.review_status == ScenarioReviewStatus.adjusted for item in reviews),
+        "achieved_count": sum(item.goal_status == "achieved" for item in reviews),
+        "latest_notes": latest.notes if latest else None,
+    }
+
+
 def average_metrics(points: list[dict[str, float]]) -> dict[str, float]:
     if not points:
         return {}
@@ -176,14 +210,15 @@ def decide_levels(averages: dict[str, float], reviewed_count: int) -> tuple[str,
     return "L1", "S1"
 
 
-def calculate_confidence(attempt_count: int, reviewed_count: int) -> float:
-    process_part = min(attempt_count / 5, 1.0) * 0.65
-    review_part = min(reviewed_count / 2, 1.0) * 0.35
-    return round(process_part + review_part, 2)
+def calculate_confidence(attempt_count: int, reviewed_count: int, scenario_review_count: int = 0) -> float:
+    process_part = min(attempt_count / 5, 1.0) * 0.55
+    review_part = min(reviewed_count / 2, 1.0) * 0.30
+    scenario_part = min(scenario_review_count / 2, 1.0) * 0.15
+    return round(process_part + review_part + scenario_part, 2)
 
 
-def build_summary(averages: dict[str, float], reviewed: dict) -> str:
-    if not averages:
+def build_summary(averages: dict[str, float], reviewed: dict, scenario_reviewed: dict) -> str:
+    if not averages and not scenario_reviewed["count"]:
         return "训练数据还不够，完成几次训练后会形成更稳定的能力画像。"
     parts = []
     accuracy = averages.get("script_accuracy")
@@ -200,6 +235,13 @@ def build_summary(averages: dict[str, float], reviewed: dict) -> str:
         parts.append("声音偏轻" if loudness < -35 else "声音状态较稳定")
     if reviewed["latest_notes"]:
         parts.append(f"治疗师备注：{reviewed['latest_notes']}")
+    if scenario_reviewed["count"]:
+        parts.append(
+            f"治疗师已复核 {scenario_reviewed['count']} 次场景表达"
+            + (f"，其中 {scenario_reviewed['achieved_count']} 次沟通目标已达成" if scenario_reviewed["achieved_count"] else "")
+        )
+    if scenario_reviewed["latest_notes"]:
+        parts.append(f"场景复核备注：{scenario_reviewed['latest_notes']}")
     return "；".join(parts) + "。"
 
 

@@ -48,7 +48,7 @@
           <div>
             <span>{{ stepLabel(index) }} · {{ trainingTypeLabel(task.task_type) }} · {{ task.content_level }}/{{ task.autonomy_level }}</span>
             <strong>{{ task.title }}</strong>
-            <p>{{ task.target_text }}</p>
+            <p>{{ taskDisplayText(task) }}</p>
           </div>
         </article>
       </div>
@@ -127,6 +127,13 @@ function stepLabel(index: number) {
 
 function trainingTypeLabel(type: string) {
   return type === 'scenario' ? '场景表达' : '跟读'
+}
+
+function taskDisplayText(task: { task_type: string; target_text: string; scoring_config?: Record<string, unknown> }) {
+  if (task.task_type === 'scenario') {
+    return String(task.scoring_config?.display_prompt || '围绕生活场景自由表达，说清自己的需要。')
+  }
+  return task.target_text
 }
 
 async function playCoachIntro() {

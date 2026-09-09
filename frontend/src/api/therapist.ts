@@ -21,7 +21,12 @@ import type {
   PronunciationAnalysis,
   PronunciationRevisionPayload,
   IntelligibilityReviewPayload,
-  TherapistInterRaterAgreement
+  TherapistInterRaterAgreement,
+  ScenarioExpressionReview,
+  ScenarioExpressionReviewPayload,
+  TherapistScenarioDialogue,
+  ScenarioDialogueEvaluation,
+  TherapistScenarioDialogueListItem
 } from '@/types/api'
 
 export const therapistApi = {
@@ -67,6 +72,21 @@ export const therapistApi = {
   },
   trainingRecords(patientUserId: string) {
     return request<TherapistTrainingRecord[]>(http.get(`/therapist/patients/${patientUserId}/training-records`))
+  },
+  scenarioReview(patientUserId: string, attemptId: string) {
+    return request<ScenarioExpressionReview>(http.get(`/therapist/patients/${patientUserId}/attempts/${attemptId}/scenario-review`))
+  },
+  scenarioDialogue(dialogueId: string) {
+    return request<TherapistScenarioDialogue>(http.get(`/therapist/scenario-dialogues/${dialogueId}`))
+  },
+  scenarioDialogues(patientUserId: string) {
+    return request<TherapistScenarioDialogueListItem[]>(http.get(`/therapist/patients/${patientUserId}/scenario-dialogues`))
+  },
+  saveScenarioDialogueReview(dialogueId: string, payload: { evidence_overrides: Record<string, unknown>; review_notes?: string | null; review_status: string }) {
+    return request<ScenarioDialogueEvaluation>(http.patch(`/therapist/scenario-dialogues/${dialogueId}/review`, payload))
+  },
+  saveScenarioReview(patientUserId: string, attemptId: string, payload: ScenarioExpressionReviewPayload) {
+    return request<ScenarioExpressionReview>(http.patch(`/therapist/patients/${patientUserId}/attempts/${attemptId}/scenario-review`, payload))
   },
   pronunciationInterRaterAgreement(patientUserId: string) {
     return request<TherapistInterRaterAgreement>(

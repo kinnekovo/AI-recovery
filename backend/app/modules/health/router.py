@@ -72,7 +72,11 @@ def provider_statuses(settings) -> dict[str, dict[str, str | list[str] | bool]]:
             settings.llm_feedback_provider,
             required_missing(
                 settings,
-                {"LLM_FEEDBACK_API_KEY": settings.llm_feedback_api_key, "LLM_FEEDBACK_BASE_URL": settings.llm_feedback_base_url},
+                {
+                    "LLM_FEEDBACK_API_KEY": settings.llm_feedback_api_key,
+                    "LLM_FEEDBACK_BASE_URL": settings.llm_feedback_base_url,
+                    "LLM_FEEDBACK_MODEL": settings.llm_feedback_model,
+                },
             )
             if settings.llm_feedback_provider != "mock"
             else [],
