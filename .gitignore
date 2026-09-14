@@ -7,7 +7,10 @@ storage/agent-images/*
 storage/voice-samples/*
 storage/training-audio/*
 storage/generated-audio/*
+storage/generated-avatar-videos/*
+runtimes/
 !storage/agent-images/.gitkeep
 !storage/voice-samples/.gitkeep
 !storage/training-audio/.gitkeep
 !storage/generated-audio/.gitkeep
+!storage/generated-avatar-videos/.gitkeep

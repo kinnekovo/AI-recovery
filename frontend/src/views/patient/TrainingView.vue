@@ -11,7 +11,7 @@
         }}
       </p>
     </div>
-    <AvatarCoachPanel :snapshot="avatar.snapshot" :avatar-url="currentAgent?.avatar_url" title="今天由数字人陪你练">
+    <AvatarCoachPanel immersive :snapshot="avatar.snapshot" :avatar-url="currentAgent?.avatar_url" :avatar-animation-config="currentAgent?.avatar_animation_config" title="今天由数字人陪你练">
       <template #actions>
         <button class="app-button secondary avatar-action-button" type="button" :disabled="avatar.isBusy.value" @click="playCoachIntro">
           {{ avatar.isBusy.value ? '正在说明' : '听数字人说明' }}
@@ -80,6 +80,7 @@ import { trainingApi } from '@/api/training'
 import { useAvatarRuntime } from '@/composables/useAvatarRuntime'
 import { useAgentStore } from '@/stores/agent'
 import { useAuthStore } from '@/stores/auth'
+import { toUserMessage } from '@/utils/errors'
 import type { TodayTraining, TrainingRecommendation } from '@/types/api'
 
 const agentStore = useAgentStore()
@@ -155,11 +156,14 @@ function coachIntroText() {
 }
 
 async function speakWithGeneratedAudio(scene: string, text: string) {
+  error.value = ''
   try {
     const speech = await trainingApi.createAvatarSpeech({ scene, text })
-    await avatar.speak(speech.text, speech.audio_url)
-  } catch {
-    await avatar.speak(text)
+    await avatar.speak(speech.text, speech.audio_url, speech.video_task?.id)
+  } catch (err) {
+    const message = toUserMessage(err, '数字人语音未能生成。')
+    error.value = message
+    avatar.fail(`${message} 未创建动态形象任务，请检查后重试。`)
   }
 }
 </script>

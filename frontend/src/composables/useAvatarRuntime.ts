@@ -8,8 +8,13 @@ export function useAvatarRuntime(provider: AvatarProvider = new Static2DAvatarPr
     state: 'idle',
     line: '我会陪你慢慢练。准备好了就开始。',
     mouthOpen: false,
+    mouthEnergy: 0,
+    speechSource: 'none',
     canSpeak: provider.capabilities.speech,
-    error: ''
+    error: '',
+    videoUrl: null,
+    videoStatus: 'idle',
+    videoElapsedSeconds: 0
   })
 
   const context = {
@@ -18,10 +23,10 @@ export function useAvatarRuntime(provider: AvatarProvider = new Static2DAvatarPr
     }
   }
 
-  const isBusy = computed(() => snapshot.state === 'speaking' || snapshot.state === 'thinking')
+  const isBusy = computed(() => snapshot.state === 'loading_speech' || snapshot.state === 'speaking' || snapshot.state === 'thinking')
 
-  async function speak(text: string, audioUrl?: string | null) {
-    await provider.speak({ text, audioUrl, interrupt: true }, context)
+  async function speak(text: string, audioUrl?: string | null, videoTaskId?: string | null) {
+    await provider.speak({ text, audioUrl, videoTaskId, interrupt: true }, context)
   }
 
   function listen(line = '我在听，你可以按自己的节奏说。') {
@@ -29,7 +34,11 @@ export function useAvatarRuntime(provider: AvatarProvider = new Static2DAvatarPr
     provider.setState('listening', context)
     snapshot.line = line
     snapshot.mouthOpen = false
+    snapshot.mouthEnergy = 0
     snapshot.error = ''
+    snapshot.videoUrl = null
+    snapshot.videoStatus = 'idle'
+    snapshot.videoElapsedSeconds = 0
   }
 
   function think(line = '我正在整理这次训练结果。') {
@@ -37,7 +46,11 @@ export function useAvatarRuntime(provider: AvatarProvider = new Static2DAvatarPr
     provider.setState('thinking', context)
     snapshot.line = line
     snapshot.mouthOpen = false
+    snapshot.mouthEnergy = 0
     snapshot.error = ''
+    snapshot.videoUrl = null
+    snapshot.videoStatus = 'idle'
+    snapshot.videoElapsedSeconds = 0
   }
 
   function encourage(line: string) {
@@ -45,7 +58,11 @@ export function useAvatarRuntime(provider: AvatarProvider = new Static2DAvatarPr
     provider.setState('encouraging', context)
     snapshot.line = line
     snapshot.mouthOpen = false
+    snapshot.mouthEnergy = 0
     snapshot.error = ''
+    snapshot.videoUrl = null
+    snapshot.videoStatus = 'idle'
+    snapshot.videoElapsedSeconds = 0
   }
 
   function idle(line = '我会陪你慢慢练。准备好了就开始。') {
@@ -53,7 +70,11 @@ export function useAvatarRuntime(provider: AvatarProvider = new Static2DAvatarPr
     provider.setState('idle', context)
     snapshot.line = line
     snapshot.mouthOpen = false
+    snapshot.mouthEnergy = 0
     snapshot.error = ''
+    snapshot.videoUrl = null
+    snapshot.videoStatus = 'idle'
+    snapshot.videoElapsedSeconds = 0
   }
 
   function fail(line: string) {
@@ -61,7 +82,11 @@ export function useAvatarRuntime(provider: AvatarProvider = new Static2DAvatarPr
     provider.setState('error', context)
     snapshot.line = line
     snapshot.mouthOpen = false
+    snapshot.mouthEnergy = 0
     snapshot.error = line
+    snapshot.videoUrl = null
+    snapshot.videoStatus = 'idle'
+    snapshot.videoElapsedSeconds = 0
   }
 
   function setState(state: AvatarRuntimeState, line: string) {
@@ -75,6 +100,10 @@ export function useAvatarRuntime(provider: AvatarProvider = new Static2DAvatarPr
   function stop() {
     provider.stop()
     snapshot.mouthOpen = false
+    snapshot.mouthEnergy = 0
+    snapshot.videoUrl = null
+    snapshot.videoStatus = 'idle'
+    snapshot.videoElapsedSeconds = 0
   }
 
   onBeforeUnmount(stop)

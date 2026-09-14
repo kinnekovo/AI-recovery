@@ -1,4 +1,5 @@
 from copy import deepcopy
+from hashlib import sha256
 from pathlib import Path
 from uuid import UUID
 
@@ -6,7 +7,8 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.integrations.tts.provider import get_tts_provider
+from app.core.observability import log_event
+from app.integrations.tts.provider import TTSProviderError, get_tts_provider
 from app.modules.agents.model import Agent
 from app.modules.training.model import (
     RecommendationReviewStatus,
@@ -31,7 +33,7 @@ from app.modules.attempts.model import Attempt
 from app.modules.evaluations.model import AttemptEvaluation, EvaluationMetric, EvaluationSource
 from app.modules.evaluations.service import PROCESS_METRIC_NAMES
 from app.modules.files.service import public_url
-from app.modules.files.model import FileAsset, FileType
+from app.modules.files.model import FileAsset, FileStatus, FileType
 from app.modules.scoring.model import AttemptAnalysisResult
 from app.modules.consent.service import require_active_consent
 from app.modules.training.schema import (
@@ -1580,7 +1582,7 @@ def create_avatar_speech(db: Session, user: User, payload: AvatarSpeechCreate) -
     scene = payload.scene.strip()
     if not text:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="数字人口播文本不能为空")
-    if len(text) > 160:
+    if len(text) > 150:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="数字人口播文本过长")
     if not scene:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="数字人口播场景不能为空")
@@ -1606,14 +1608,48 @@ def create_avatar_speech(db: Session, user: User, payload: AvatarSpeechCreate) -
         if session and task.training_session_id != session.id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="训练任务不属于当前会话")
 
-    provider = get_tts_provider()
+    try:
+        provider = get_tts_provider()
+    except TTSProviderError as exc:
+        log_event("warning", "avatar_video", "speech_provider_unavailable", error_code=exc.code)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.message) from exc
     fallback = agent.voice_external_id is None
     if agent.voice_external_id:
         require_active_consent(db, user, agent.id, "voice")
-    audio_path = provider.synthesize(text, agent.voice_external_id or "default")
+    cache_name = avatar_speech_cache_name(provider.cache_identity(agent.voice_external_id or "default"), text)
+    cached_asset = db.scalar(
+        select(FileAsset).where(
+            FileAsset.owner_user_id == user.id,
+            FileAsset.file_type == FileType.generated_audio,
+            FileAsset.original_name == cache_name,
+            FileAsset.status == FileStatus.active,
+        )
+    )
+    if cached_asset and Path(cached_asset.storage_path).is_file() and Path(cached_asset.storage_path).stat().st_size > 0:
+        from app.modules.avatar_videos.service import enqueue_for_audio
+
+        video_task = enqueue_for_audio(db, user, agent, cached_asset)
+        return AvatarSpeechRead(
+            text=text,
+            audio_file_id=cached_asset.id,
+            audio_url=public_url(cached_asset),
+            provider=provider.name,
+            fallback=fallback,
+            cached=True,
+            video_task={"id": video_task.id, "status": video_task.status.value} if video_task else None,
+        )
+    try:
+        audio_path = provider.synthesize(text, agent.voice_external_id or "default")
+    except TTSProviderError as exc:
+        log_event("warning", "avatar_video", "speech_generation_failed", error_code=exc.code)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.message) from exc
     path = Path(audio_path)
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="数字人口播音频生成失败")
+    cache_path = path.with_name(cache_name)
+    if path != cache_path:
+        path.replace(cache_path)
+        path = cache_path
     asset = FileAsset(
         owner_user_id=user.id,
         file_type=FileType.generated_audio,
@@ -1625,13 +1661,23 @@ def create_avatar_speech(db: Session, user: User, payload: AvatarSpeechCreate) -
     db.add(asset)
     db.commit()
     db.refresh(asset)
+    from app.modules.avatar_videos.service import enqueue_for_audio
+
+    video_task = enqueue_for_audio(db, user, agent, asset)
     return AvatarSpeechRead(
         text=text,
         audio_file_id=asset.id,
         audio_url=public_url(asset),
         provider=provider.name,
         fallback=fallback,
+        cached=False,
+        video_task={"id": video_task.id, "status": video_task.status.value} if video_task else None,
     )
+
+
+def avatar_speech_cache_name(provider_identity: str, text: str) -> str:
+    digest = sha256(f"{provider_identity}|{text}".encode("utf-8")).hexdigest()
+    return f"avatar_{digest}.wav"
 
 
 def complete_session_if_needed(db: Session, session: TrainingSession) -> None:

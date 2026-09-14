@@ -5,7 +5,7 @@
       <h1>{{ task?.task_template.title || '准备训练' }}</h1>
       <p>{{ task?.task_template.instruction || '正在生成训练会话。' }}</p>
     </div>
-    <AvatarCoachPanel v-if="task" :snapshot="avatar.snapshot" :avatar-url="currentAgent?.avatar_url" title="数字人陪练中" compact>
+    <AvatarCoachPanel v-if="task" :snapshot="avatar.snapshot" :avatar-url="currentAgent?.avatar_url" :avatar-animation-config="currentAgent?.avatar_animation_config" title="数字人陪练中" compact>
       <template #actions>
         <button class="app-button secondary avatar-action-button" type="button" :disabled="avatar.isBusy.value" @click="() => speakCurrentTask()">
           {{ avatar.isBusy.value ? '正在示范' : '听数字人示范' }}
@@ -274,6 +274,7 @@ function showHint() {
 }
 
 async function speakWithGeneratedAudio(scene: string, text: string, sessionTaskId?: string) {
+  error.value = ''
   try {
     const speech = await trainingApi.createAvatarSpeech({
       scene,
@@ -281,9 +282,11 @@ async function speakWithGeneratedAudio(scene: string, text: string, sessionTaskI
       session_task_id: sessionTaskId ?? null,
       text
     })
-    await avatar.speak(speech.text, speech.audio_url)
-  } catch {
-    await avatar.speak(text)
+    await avatar.speak(speech.text, speech.audio_url, speech.video_task?.id)
+  } catch (err) {
+    const message = toUserMessage(err, '数字人语音未能生成。')
+    error.value = message
+    avatar.fail(`${message} 未创建动态形象任务，请检查后重试。`)
   }
 }
 </script>

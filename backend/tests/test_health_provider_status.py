@@ -21,6 +21,7 @@ class HealthProviderStatusTest(unittest.TestCase):
         self.assertEqual(statuses["asr"]["mode"], "mock")
         self.assertEqual(statuses["tts"]["status"], "ok")
         self.assertEqual(statuses["pronunciation"]["status"], "disabled")
+        self.assertEqual(statuses["avatar_video"]["status"], "ok")
 
     def test_external_provider_reports_missing_env_names_only(self) -> None:
         settings = SimpleNamespace(
@@ -49,6 +50,24 @@ class HealthProviderStatusTest(unittest.TestCase):
         self.assertEqual(statuses["pronunciation"]["missing_env"], ["TENCENTCLOUD_SECRET_ID", "TENCENT_SOE_APP_ID"])
         self.assertNotIn("super-secret-value", str(statuses))
         self.assertNotIn("sk-secret-value", str(statuses))
+
+    def test_tencent_tts_uses_shared_tencent_credentials(self) -> None:
+        settings = SimpleNamespace(
+            speech_eval_provider="mock",
+            asr_provider="mock",
+            acoustic_provider="mock",
+            pronunciation_provider="disabled",
+            tts_provider="tencent",
+            tencentcloud_secret_id="",
+            tencentcloud_secret_key="secret-value",
+            llm_feedback_provider="mock",
+        )
+
+        statuses = provider_statuses(settings)
+
+        self.assertFalse(statuses["tts"]["ready"])
+        self.assertEqual(statuses["tts"]["missing_env"], ["TENCENTCLOUD_SECRET_ID"])
+        self.assertNotIn("secret-value", str(statuses))
 
 
 if __name__ == "__main__":

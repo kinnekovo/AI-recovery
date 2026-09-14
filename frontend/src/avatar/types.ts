@@ -1,19 +1,27 @@
 export type AvatarProviderKind = 'static_2d' | 'live2d' | 'three_d' | 'external_streaming'
 
-export type AvatarRuntimeState = 'idle' | 'speaking' | 'listening' | 'thinking' | 'encouraging' | 'error'
+export type AvatarRuntimeState = 'idle' | 'loading_speech' | 'speaking' | 'listening' | 'thinking' | 'encouraging' | 'error'
+export type AvatarSpeechSource = 'none' | 'cloud_audio' | 'browser_tts' | 'silent'
 
 export interface AvatarRuntimeSnapshot {
   provider: AvatarProviderKind
   state: AvatarRuntimeState
   line: string
   mouthOpen: boolean
+  /** 0--1，来自真实音频能量或降级播放节奏。 */
+  mouthEnergy: number
+  speechSource: AvatarSpeechSource
   canSpeak: boolean
   error: string
+  videoUrl: string | null
+  videoStatus: 'idle' | 'queued' | 'running' | 'ready' | 'fallback' | 'failed'
+  videoElapsedSeconds: number
 }
 
 export interface AvatarSpeakInput {
   text: string
   audioUrl?: string | null
+  videoTaskId?: string | null
   interrupt?: boolean
 }
 
@@ -21,7 +29,12 @@ export interface AvatarProviderUpdate {
   state?: AvatarRuntimeState
   line?: string
   mouthOpen?: boolean
+  mouthEnergy?: number
+  speechSource?: AvatarSpeechSource
   error?: string
+  videoUrl?: string | null
+  videoStatus?: AvatarRuntimeSnapshot['videoStatus']
+  videoElapsedSeconds?: number
 }
 
 export interface AvatarProviderContext {

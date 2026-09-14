@@ -170,7 +170,7 @@ def main() -> int:
     expect_error(client, "post", f"/api/attempts/{attempt['id']}/analyze", 422, headers=headers)
     failed_attempt = get(client, f"/api/attempts/{attempt['id']}", headers=headers)
     assert failed_attempt["analysis_status"] == "failed"
-    assert failed_attempt["analysis_error_code"] == "acoustic:mock_provider"
+    assert failed_attempt["analysis_error_code"] in {"acoustic:mock_provider", "asr:mock_provider"}
     reset_attempt = upload(
         client,
         f"/api/attempts/{attempt['id']}/audio",

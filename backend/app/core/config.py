@@ -52,6 +52,25 @@ class Settings:
     tts_api_key: str | None
     tts_base_url: str | None
     tts_model: str | None
+    tencent_tts_region: str
+    tencent_tts_voice_type: int
+    tencent_tts_sample_rate: int
+    tencent_tts_speed: float
+    windows_tts_voice: str
+    windows_tts_speed: int
+    tts_timeout_seconds: int
+    vcl_provider: str
+    tencent_vcl_region: str
+    vcl_timeout_seconds: int
+    avatar_video_provider: str
+    sadtalker_home: str | None
+    sadtalker_python: str | None
+    sadtalker_timeout_seconds: int
+    sadtalker_preprocess: str
+    sadtalker_face_size: int
+    sadtalker_use_enhancer: bool
+    avatar_video_frontend_fallback_seconds: int
+    avatar_video_worker_poll_seconds: float
     llm_feedback_provider: str
     llm_feedback_api_key: str | None
     llm_feedback_base_url: str | None
@@ -109,6 +128,35 @@ class Settings:
         self.tts_api_key = os.getenv("TTS_API_KEY")
         self.tts_base_url = os.getenv("TTS_BASE_URL")
         self.tts_model = os.getenv("TTS_MODEL")
+        self.tencent_tts_region = os.getenv("TENCENT_TTS_REGION", "ap-guangzhou").strip() or "ap-guangzhou"
+        self.tencent_tts_voice_type = int(os.getenv("TENCENT_TTS_VOICE_TYPE", "502001"))
+        self.tencent_tts_sample_rate = int(os.getenv("TENCENT_TTS_SAMPLE_RATE", "24000"))
+        self.tencent_tts_speed = float(os.getenv("TENCENT_TTS_SPEED", "-1"))
+        self.windows_tts_voice = os.getenv("WINDOWS_TTS_VOICE", "Microsoft Huihui Desktop").strip() or "Microsoft Huihui Desktop"
+        self.windows_tts_speed = int(os.getenv("WINDOWS_TTS_SPEED", "-1"))
+        self.tts_timeout_seconds = int(os.getenv("TTS_TIMEOUT_SECONDS", "10"))
+        self.vcl_provider = os.getenv("VCL_PROVIDER", "mock").strip().lower() or "mock"
+        self.tencent_vcl_region = os.getenv("TENCENT_VCL_REGION", "ap-guangzhou").strip() or "ap-guangzhou"
+        self.vcl_timeout_seconds = int(os.getenv("VCL_TIMEOUT_SECONDS", "20"))
+        self.avatar_video_provider = os.getenv("AVATAR_VIDEO_PROVIDER", "mock").strip().lower() or "mock"
+        sadtalker_home = os.getenv("SADTALKER_HOME") or None
+        self.sadtalker_home = (
+            str((backend_dir / sadtalker_home).resolve())
+            if sadtalker_home and not Path(sadtalker_home).is_absolute()
+            else sadtalker_home
+        )
+        sadtalker_python = os.getenv("SADTALKER_PYTHON") or None
+        self.sadtalker_python = (
+            str((backend_dir / sadtalker_python).resolve())
+            if sadtalker_python and not Path(sadtalker_python).is_absolute()
+            else sadtalker_python
+        )
+        self.sadtalker_timeout_seconds = int(os.getenv("SADTALKER_TIMEOUT_SECONDS", "180"))
+        self.sadtalker_preprocess = os.getenv("SADTALKER_PREPROCESS", "crop").strip() or "crop"
+        self.sadtalker_face_size = int(os.getenv("SADTALKER_FACE_SIZE", "512"))
+        self.sadtalker_use_enhancer = os.getenv("SADTALKER_USE_ENHANCER", "false").strip().lower() in {"1", "true", "yes"}
+        self.avatar_video_frontend_fallback_seconds = int(os.getenv("AVATAR_VIDEO_FRONTEND_FALLBACK_SECONDS", "60"))
+        self.avatar_video_worker_poll_seconds = float(os.getenv("AVATAR_VIDEO_WORKER_POLL_SECONDS", "1"))
         self.llm_feedback_provider = os.getenv("LLM_FEEDBACK_PROVIDER", "mock").strip().lower() or "mock"
         self.llm_feedback_api_key = os.getenv("LLM_FEEDBACK_API_KEY")
         self.llm_feedback_base_url = os.getenv("LLM_FEEDBACK_BASE_URL")

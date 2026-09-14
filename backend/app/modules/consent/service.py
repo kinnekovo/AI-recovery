@@ -37,6 +37,9 @@ def revoke_consent(db: Session, user: User, agent_id, consent_type: str) -> Cons
     db.add(consent)
     if consent_type == "image":
         agent.image_consent_confirmed = False
+        from app.modules.avatar_videos.service import invalidate_agent_video_tasks
+
+        invalidate_agent_video_tasks(db, agent.id, user.id)
     if consent_type == "voice":
         agent.voice_consent_confirmed = False
         agent.voice_external_id = None

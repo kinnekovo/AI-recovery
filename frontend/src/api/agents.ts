@@ -1,5 +1,6 @@
 import { http, request } from './http'
 import type { Agent } from '@/types/api'
+import type { PortraitAnimationConfig } from '@/avatar/face/portrait'
 
 export const agentsApi = {
   create(payload: {
@@ -14,18 +15,31 @@ export const agentsApi = {
   list() {
     return request<Agent[]>(http.get('/agents'))
   },
+  remove(agentId: string) {
+    return request<{ current_agent_id: string | null }>(http.delete(`/agents/${agentId}`))
+  },
   setCurrent(agentId: string) {
     return request(http.put(`/users/current-agent/${agentId}`))
   },
-  uploadAvatar(agentId: string, file: File) {
+  uploadAvatar(agentId: string, file: File, animationConfig?: PortraitAnimationConfig | null) {
     const form = new FormData()
     form.append('avatar_file', file)
+    if (animationConfig) form.append('animation_config', JSON.stringify(animationConfig))
     return request<Agent>(http.post(`/agents/${agentId}/avatar`, form))
   },
-  uploadVoice(agentId: string, file: File) {
+  getVoiceTrainingText(agentId: string, refresh = false) {
+    return request<Agent>(http.post(`/agents/${agentId}/voice-training-text`, null, { params: { refresh } }))
+  },
+  uploadVoice(agentId: string, file: File, voiceGender: 1 | 2) {
     const form = new FormData()
     form.append('audio_file', file)
+    form.append('voice_gender', String(voiceGender))
     return request<Agent>(http.post(`/agents/${agentId}/voice`, form))
+  },
+  getVoiceStatus(agentId: string) {
+    return request<{ agent: Agent; task_status: string; task_status_code: number; error_message: string | null }>(
+      http.post(`/agents/${agentId}/voice-status`)
+    )
   },
   generateWelcome(agentId: string) {
     return request<{ agent: Agent; audio_url: string }>(http.post(`/agents/${agentId}/welcome-audio`))

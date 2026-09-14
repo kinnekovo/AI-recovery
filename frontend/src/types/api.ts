@@ -54,9 +54,12 @@ export interface Agent {
   personality_style: string
   avatar_file_id: string | null
   avatar_url: string | null
+  avatar_animation_config: Record<string, unknown> | null
   voice_sample_file_id: string | null
   welcome_audio_file_id: string | null
   voice_external_id: string | null
+  voice_clone_task_id: string | null
+  voice_training_text: string | null
   generation_status: string
   image_consent_confirmed: boolean
   voice_consent_confirmed: boolean
@@ -407,6 +410,22 @@ export interface AvatarSpeech {
   audio_url: string | null
   provider: string
   fallback: boolean
+  cached: boolean
+  video_task: AvatarVideoTaskBrief | null
+}
+
+export interface AvatarVideoTaskBrief {
+  id: string
+  status: 'queued' | 'running' | 'succeeded' | 'failed'
+}
+
+export interface AvatarVideoTask {
+  id: string
+  status: 'queued' | 'running' | 'succeeded' | 'failed'
+  video_url: string | null
+  error_message: string | null
+  generation_ms: number | null
+  created_at: string
 }
 
 export interface TodayTraining {

@@ -21,6 +21,10 @@ export const useAgentStore = defineStore('agent', {
     async revokeConsent(agentId: string, consentType: 'image' | 'voice') {
       await agentsApi.revokeConsent(agentId, consentType)
       await this.loadAgents()
+    },
+    async remove(agentId: string) {
+      await agentsApi.remove(agentId)
+      await this.loadAgents()
     }
   }
 })

@@ -63,9 +63,21 @@ def provider_statuses(settings) -> dict[str, dict[str, str | list[str] | bool]]:
         "tts": provider_status(
             "tts",
             settings.tts_provider,
-            required_missing(settings, {"TTS_API_KEY": settings.tts_api_key, "TTS_BASE_URL": settings.tts_base_url})
+            tencent_tts_missing_env(settings)
+            if settings.tts_provider == "tencent"
+            else required_missing(settings, {"TTS_API_KEY": settings.tts_api_key, "TTS_BASE_URL": settings.tts_base_url})
             if settings.tts_provider != "mock"
             else [],
+        ),
+        "voice_clone": provider_status(
+            "voice_clone",
+            getattr(settings, "vcl_provider", "mock"),
+            tencent_vcl_missing_env(settings) if getattr(settings, "vcl_provider", "mock") == "tencent" else [],
+        ),
+        "avatar_video": provider_status(
+            "avatar_video",
+            getattr(settings, "avatar_video_provider", "mock"),
+            sadtalker_missing_env(settings) if getattr(settings, "avatar_video_provider", "mock") == "sadtalker" else [],
         ),
         "llm_feedback": provider_status(
             "llm_feedback",
@@ -145,6 +157,35 @@ def tencent_soe_missing_env(settings) -> list[str]:
             "TENCENT_SOE_APP_ID": settings.tencent_soe_app_id,
         },
     )
+
+
+def tencent_tts_missing_env(settings) -> list[str]:
+    return required_missing(
+        settings,
+        {
+            "TENCENTCLOUD_SECRET_ID": settings.tencentcloud_secret_id,
+            "TENCENTCLOUD_SECRET_KEY": settings.tencentcloud_secret_key,
+        },
+    )
+
+
+def tencent_vcl_missing_env(settings) -> list[str]:
+    return required_missing(
+        settings,
+        {
+            "TENCENTCLOUD_SECRET_ID": settings.tencentcloud_secret_id,
+            "TENCENTCLOUD_SECRET_KEY": settings.tencentcloud_secret_key,
+        },
+    )
+
+
+def sadtalker_missing_env(settings) -> list[str]:
+    values = {
+        "SADTALKER_HOME": getattr(settings, "sadtalker_home", None),
+        "SADTALKER_PYTHON": getattr(settings, "sadtalker_python", None),
+        "FFMPEG_BIN": getattr(settings, "ffmpeg_bin", None) or which("ffmpeg"),
+    }
+    return required_missing(settings, values)
 
 
 def acoustic_missing_env(settings) -> list[str]:

@@ -1,8 +1,8 @@
 import enum
 import uuid
 
-from sqlalchemy import Boolean, Enum, ForeignKey, String
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import JSON, Boolean, Enum, ForeignKey, String
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship as orm_relationship
 
 from app.database.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -10,6 +10,7 @@ from app.database.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 class AgentGenerationStatus(str, enum.Enum):
     draft = "draft"
+    voice_training = "voice_training"
     voice_ready = "voice_ready"
     ready = "ready"
     failed = "failed"
@@ -25,9 +26,13 @@ class Agent(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     relationship: Mapped[str] = mapped_column(String(80), nullable=False)
     personality_style: Mapped[str] = mapped_column(String(120), default="gentle", nullable=False)
     avatar_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("files.id"), nullable=True)
+    avatar_animation_config: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=True)
     voice_sample_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("files.id"), nullable=True)
     welcome_audio_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("files.id"), nullable=True)
     voice_external_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    voice_clone_task_id: Mapped[str | None] = mapped_column(String(160), nullable=True, unique=True)
+    voice_training_text_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    voice_training_text: Mapped[str | None] = mapped_column(String(500), nullable=True)
     generation_status: Mapped[AgentGenerationStatus] = mapped_column(
         Enum(AgentGenerationStatus, name="agent_generation_status"),
         default=AgentGenerationStatus.draft,

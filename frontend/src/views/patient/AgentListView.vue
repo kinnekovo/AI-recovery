@@ -8,15 +8,21 @@
       <RouterLink class="secondary-link" to="/agent/create">新建</RouterLink>
     </div>
     <div v-if="agents.length" class="agent-grid">
-      <div v-for="agent in agents" :key="agent.id" class="agent-select">
+      <div v-for="agent in agents" :key="agent.id" class="agent-select" :class="{ 'agent-select-current': isCurrent(agent.id) }">
         <AgentCard :agent="agent" />
+        <p v-if="isCurrent(agent.id)" class="current-agent-label">当前陪练</p>
         <div class="agent-action-row">
-          <AppButton variant="secondary" @click="setCurrent(agent.id)">设为当前</AppButton>
+          <AppButton variant="secondary" :disabled="isCurrent(agent.id) || loadingCurrent" @click="setCurrent(agent.id)">
+            {{ isCurrent(agent.id) ? '当前陪练' : '设为当前' }}
+          </AppButton>
           <button class="app-button secondary" type="button" :disabled="loadingConsent" @click="revoke(agent.id, 'image')">
             撤回形象授权
           </button>
           <button class="app-button secondary" type="button" :disabled="loadingConsent" @click="revoke(agent.id, 'voice')">
             撤回声音授权
+          </button>
+          <button class="app-button quiet danger-button" type="button" :disabled="deletingAgentId === agent.id" @click="removeAgent(agent.id, agent.name)">
+            {{ deletingAgentId === agent.id ? '正在删除…' : '删除' }}
           </button>
         </div>
       </div>
@@ -35,18 +41,37 @@ import { computed, onMounted, ref } from 'vue'
 import AppButton from '@/components/common/AppButton.vue'
 import AgentCard from '@/components/agent/AgentCard.vue'
 import { useAgentStore } from '@/stores/agent'
+import { useAuthStore } from '@/stores/auth'
 import { toUserMessage } from '@/utils/errors'
 
 const store = useAgentStore()
+const auth = useAuthStore()
 const agents = computed(() => store.agents)
 const loadingConsent = ref(false)
+const loadingCurrent = ref(false)
+const deletingAgentId = ref<string | null>(null)
 const message = ref('')
 const error = ref('')
 
 onMounted(() => store.loadAgents())
 
-function setCurrent(agentId: string) {
-  store.setCurrent(agentId)
+function isCurrent(agentId: string) {
+  return auth.me?.patient_profile?.current_agent_id === agentId
+}
+
+async function setCurrent(agentId: string) {
+  loadingCurrent.value = true
+  message.value = ''
+  error.value = ''
+  try {
+    await store.setCurrent(agentId)
+    await auth.fetchMe()
+    message.value = '已设为当前陪练，之后的训练会使用这个 2.5D 形象。'
+  } catch (err) {
+    error.value = toUserMessage(err, '设为当前失败')
+  } finally {
+    loadingCurrent.value = false
+  }
 }
 
 async function revoke(agentId: string, consentType: 'image' | 'voice') {
@@ -60,6 +85,22 @@ async function revoke(agentId: string, consentType: 'image' | 'voice') {
     error.value = toUserMessage(err, '授权撤回失败')
   } finally {
     loadingConsent.value = false
+  }
+}
+
+async function removeAgent(agentId: string, agentName: string) {
+  if (!window.confirm(`确定删除“${agentName}”吗？关联的形象和声音素材将不再在系统中使用。`)) return
+  deletingAgentId.value = agentId
+  message.value = ''
+  error.value = ''
+  try {
+    await store.remove(agentId)
+    await auth.fetchMe()
+    message.value = '智能体已删除。'
+  } catch (err) {
+    error.value = toUserMessage(err, '删除智能体失败')
+  } finally {
+    deletingAgentId.value = null
   }
 }
 </script>

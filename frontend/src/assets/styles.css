@@ -375,6 +375,71 @@ textarea {
   align-items: start;
 }
 
+.agent-select-current {
+  background: #f4fbf7;
+  box-shadow: inset 0 0 0 2px #a8ddc6, 0 18px 45px rgba(31, 50, 42, 0.08);
+}
+
+.current-agent-label {
+  margin: 0;
+  color: #176a4a;
+  font-weight: 800;
+}
+
+.danger-button {
+  color: #b42318 !important;
+}
+
+.voice-clone-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.training-text {
+  margin: 0;
+  padding: 18px 20px;
+  border: 1px solid #dbe4fb;
+  border-radius: 10px;
+  background: #f4f7ff;
+  color: #1f2d4d;
+  font-size: 1.08rem;
+  line-height: 1.8;
+}
+
+.training-text-wrap {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.voice-input-choice {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.voice-input-choice section {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 16px;
+  border-radius: 8px;
+  background: #f7faf8;
+}
+
+.voice-input-choice p {
+  margin: 0;
+  color: #52645c;
+  line-height: 1.65;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 /* Therapist workbench: prioritize scan, then review. */
 .therapist-workbench-page { max-width: 1540px; }
 .workbench-header { align-items: center; padding-bottom: 4px; }
@@ -498,6 +563,14 @@ textarea {
   grid-template-columns: 132px minmax(0, 1fr);
 }
 
+/* Training home is the companion's main stage, not a thumbnail beside copy. */
+.avatar-coach-panel.immersive {
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  gap: 32px;
+  align-items: stretch;
+  padding: 28px;
+}
+
 .avatar-stage {
   position: relative;
   display: grid;
@@ -512,6 +585,10 @@ textarea {
   min-height: 122px;
 }
 
+.avatar-coach-panel.immersive .avatar-stage {
+  min-height: 324px;
+}
+
 .avatar-presence-ring {
   position: absolute;
   width: 112px;
@@ -519,6 +596,7 @@ textarea {
   border-radius: 999px;
   background: #dff3eb;
   box-shadow: 0 14px 32px rgba(31, 50, 42, 0.12);
+  transition: background 180ms ease, box-shadow 180ms ease, transform 180ms ease;
 }
 
 .avatar-head {
@@ -531,35 +609,84 @@ textarea {
   position: relative;
   z-index: 2;
   display: grid;
-  width: 96px;
-  height: 112px;
+  width: 108px;
+  height: 108px;
   place-items: center;
   overflow: hidden;
   border-radius: 8px;
   background: #f7fbf9;
   box-shadow: 0 12px 28px rgba(31, 50, 42, 0.16);
+  transform-origin: 50% 72%;
 }
 
-.avatar-photo-frame img {
-  width: 100%;
-  height: 100%;
+.avatar-coach-panel.immersive .avatar-photo-frame,
+.avatar-coach-panel.immersive .avatar-video {
+  width: clamp(224px, 20vw, 286px);
+  height: clamp(224px, 20vw, 286px);
+  border-radius: 14px;
+  box-shadow: 0 20px 42px rgba(31, 50, 42, 0.2);
+}
+
+.avatar-coach-panel.immersive .avatar-presence-ring {
+  width: clamp(246px, 23vw, 310px);
+  height: clamp(246px, 23vw, 310px);
+}
+
+.avatar-coach-panel.immersive .avatar-state-bars {
+  right: 22px;
+  bottom: 20px;
+  gap: 6px;
+}
+
+.avatar-coach-panel.immersive .avatar-state-bars i {
+  width: 6px;
+  height: 18px;
+}
+
+.avatar-video {
+  position: relative;
+  z-index: 2;
+  width: 108px;
+  height: 108px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #f7fbf9;
+  box-shadow: 0 12px 28px rgba(31, 50, 42, 0.16);
   object-fit: cover;
 }
 
-.avatar-photo-mouth {
-  position: absolute;
-  left: 50%;
-  bottom: 18px;
-  width: 22px;
-  height: 5px;
-  border-radius: 999px;
-  background: rgba(101, 39, 34, 0.74);
-  transform: translateX(-50%) scaleY(1);
-  transition: transform 0.12s ease;
+.avatar-photo-base {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: filter 180ms ease;
 }
 
-.avatar-photo-mouth.open {
-  transform: translateX(-50%) scaleY(2.7);
+.avatar-photo-mouth-region {
+  position: absolute;
+  left: var(--avatar-mouth-x, 50%);
+  top: var(--avatar-mouth-y, 64%);
+  width: var(--avatar-mouth-region-width, 24%);
+  height: var(--avatar-mouth-region-height, 10%);
+  overflow: hidden;
+  border-radius: 48%;
+  opacity: calc(var(--avatar-mouth-energy, 0) * 0.92);
+  transform: translate(-50%, -50%) scaleY(calc(1 + var(--avatar-mouth-energy, 0) * 0.18));
+  transform-origin: center;
+  transition: transform 70ms ease-out, opacity 90ms ease-out;
+  -webkit-mask-image: radial-gradient(ellipse, #000 54%, transparent 78%);
+  mask-image: radial-gradient(ellipse, #000 54%, transparent 78%);
+}
+
+.avatar-photo-mouth-region img {
+  position: absolute;
+  left: var(--avatar-mouth-source-left);
+  top: var(--avatar-mouth-source-top);
+  width: var(--avatar-mouth-source-width);
+  height: var(--avatar-mouth-source-height);
+  max-width: none;
+  object-fit: fill;
+  filter: brightness(calc(1 - var(--avatar-mouth-energy, 0) * 0.035));
 }
 
 .avatar-hair {
@@ -660,6 +787,44 @@ textarea {
   background: #fde8e3;
 }
 
+.state-loading_speech .avatar-presence-ring {
+  background: #e6efff;
+  box-shadow: 0 14px 32px rgba(47, 111, 237, 0.14);
+}
+
+.state-speaking .avatar-presence-ring {
+  background: #d9edff;
+  box-shadow: 0 16px 38px rgba(47, 111, 237, 0.2);
+  transform: scale(1.06);
+}
+
+.state-speaking .avatar-photo-frame img {
+  filter: saturate(1.04) brightness(1.02);
+}
+
+.state-encouraging .avatar-photo-frame {
+  animation: avatar-encourage 420ms cubic-bezier(0.16, 1, 0.3, 1) 1;
+}
+
+@keyframes avatar-encourage {
+  0% { filter: brightness(1); transform: scale(1); }
+  45% { filter: brightness(1.035); transform: scale(1.012); }
+  100% { filter: brightness(1); transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .avatar-photo-frame,
+  .state-encouraging .avatar-photo-frame {
+    animation: none;
+  }
+
+  .avatar-presence-ring,
+  .state-speaking .avatar-presence-ring {
+    transform: none;
+    transition: none;
+  }
+}
+
 .avatar-copy {
   display: grid;
   gap: 10px;
@@ -675,6 +840,34 @@ textarea {
   margin: 0;
   color: #40524b;
   line-height: 1.7;
+}
+
+.avatar-video-progress,
+.avatar-video-fallback {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.avatar-video-progress {
+  color: #2453b6;
+}
+
+.avatar-video-fallback {
+  color: #8a5b1f;
+}
+
+.avatar-upload-preview-wrap {
+  margin: 0;
+}
+
+.avatar-upload-preview {
+  width: min(100%, 220px);
+  max-height: 280px;
+  object-fit: cover;
+  border-radius: 12px;
+  box-shadow: 0 12px 28px rgba(31, 50, 42, 0.14);
 }
 
 .avatar-copy .avatar-action-hint {
@@ -3238,6 +3431,7 @@ textarea {
 
   .home-grid,
   .training-choice,
+  .voice-input-choice,
   .recommendation-panel,
   .avatar-coach-panel,
   .phase-demo-strip,
@@ -3316,6 +3510,16 @@ textarea {
   .avatar-stage,
   .avatar-coach-panel.compact .avatar-stage {
     min-height: 132px;
+  }
+
+  .avatar-coach-panel.immersive {
+    grid-template-columns: 1fr;
+    gap: 20px;
+    padding: 20px;
+  }
+
+  .avatar-coach-panel.immersive .avatar-stage {
+    min-height: 290px;
   }
 
   .family-progress-orb,
