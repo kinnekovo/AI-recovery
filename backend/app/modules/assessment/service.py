@@ -27,6 +27,14 @@ def create_assessment(db: Session, user: User, payload: AssessmentCreate) -> Ass
         assessed_at=payload.assessed_at or utc_now(),
         metrics=payload.metrics.compact(),
         notes=payload.notes,
+        instrument_name=payload.instrument_name, instrument_version=payload.instrument_version,
+        language_locale=payload.language_locale, localization_version=payload.localization_version,
+        assessment_stage=payload.assessment_stage, raw_item_results=payload.raw_item_results,
+        subscale_results=payload.subscale_results, total_result=payload.total_result,
+        missing_items=payload.missing_items, score_unit=payload.score_unit,
+        administration_mode=payload.administration_mode, device_and_environment=payload.device_and_environment,
+        duration_seconds=payload.duration_seconds, protocol_deviations=payload.protocol_deviations,
+        protocol_deviation_reasons=payload.protocol_deviation_reasons,
     )
     db.add(assessment)
     db.commit()
@@ -118,4 +126,10 @@ def to_read(assessment: AssessmentSession) -> AssessmentRead:
         notes=assessment.notes,
         therapist_notes=assessment.therapist_notes,
         created_at=assessment.created_at,
+        instrument_name=assessment.instrument_name, instrument_version=assessment.instrument_version,
+        language_locale=assessment.language_locale, localization_version=assessment.localization_version,
+        assessment_stage=assessment.assessment_stage, raw_item_results=assessment.raw_item_results,
+        subscale_results=assessment.subscale_results, total_result=assessment.total_result,
+        missing_items=assessment.missing_items, score_unit=assessment.score_unit,
+        administration_mode=assessment.administration_mode,
     )

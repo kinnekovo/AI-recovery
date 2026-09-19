@@ -12,6 +12,8 @@ from app.modules.files.model import FileType
 from app.modules.files.service import save_upload
 from app.modules.users.model import User
 from app.modules.users.service import require_patient
+from app.modules.users.service import require_therapist
+from app.modules.evaluation_runs.functional_communication_v3 import get_functional_run_for_professional
 
 router = APIRouter(prefix="/scenario-dialogues", tags=["scenario-dialogues"])
 
@@ -30,6 +32,10 @@ def get(dialogue_id: UUID, current_user: User = Depends(require_patient), db: Se
 @router.get("/{dialogue_id}/evaluation")
 def evaluation(dialogue_id: UUID, current_user: User = Depends(require_patient), db: Session = Depends(get_db)):
     return api_success(service.get_evaluation(db, current_user, dialogue_id).model_dump(mode="json"))
+
+@router.get("/{dialogue_id}/evaluation-v3")
+def evaluation_v3(dialogue_id: UUID, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    return api_success(get_functional_run_for_professional(db, current_user, dialogue_id).model_dump(mode="json"))
 
 @router.post("/{dialogue_id}/hint")
 def hint(dialogue_id: UUID, current_user: User = Depends(require_patient), db: Session = Depends(get_db)):

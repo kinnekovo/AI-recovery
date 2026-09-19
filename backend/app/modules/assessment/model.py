@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Text
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -44,7 +44,28 @@ class AssessmentSession(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     metrics: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     therapist_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    instrument_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    instrument_version: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    language_locale: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    localization_version: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    assessment_stage: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    administered_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    administrator_role: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    qualification_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_item_results: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    subscale_results: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    total_result: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    missing_items: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    score_unit: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    administration_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    device_and_environment: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    protocol_deviations: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    protocol_deviation_reasons: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    comparison_baseline_session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("assessment_sessions.id"), nullable=True)
+    comparability_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    non_comparable_reasons: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
 
     patient_profile = relationship("PatientProfile")
     source_attempt = relationship("Attempt")
-    reviewed_by_user = relationship("User")
+    reviewed_by_user = relationship("User", foreign_keys=[reviewed_by_user_id])

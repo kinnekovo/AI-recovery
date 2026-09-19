@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
-from app.database.base import Base, UUIDPrimaryKeyMixin, utc_now
+from app.database.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, utc_now
 
 
 JSONDocument = JSON().with_variant(JSONB, "postgresql")
@@ -166,8 +166,32 @@ class EvaluationReviewRevision(Base, UUIDPrimaryKeyMixin):
     recomputed_run_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("evaluation_runs.id", ondelete="RESTRICT"), nullable=True
     )
+    review_request_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
     evaluation_run: Mapped[EvaluationRun] = relationship(
         back_populates="review_revisions", foreign_keys=[evaluation_run_id]
     )
+
+
+class EvaluationWriteFailure(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """Retryable shadow-write audit state; never contains raw provider exceptions."""
+
+    __tablename__ = "evaluation_write_failures"
+    __table_args__ = (
+        UniqueConstraint("source_type", "source_id", "domain", "algorithm_version", "input_fingerprint", name="uq_evaluation_write_failure_input"),
+        Index("ix_evaluation_write_failures_retry", "retry_required", "last_failed_at"),
+    )
+
+    source_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    source_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    domain: Mapped[str] = mapped_column(String(40), nullable=False)
+    algorithm_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    input_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    failure_stage: Mapped[str] = mapped_column(String(80), nullable=False)
+    error_code: Mapped[str] = mapped_column(String(80), nullable=False)
+    retry_required: Mapped[bool] = mapped_column(nullable=False, default=True)
+    retry_count: Mapped[int] = mapped_column(nullable=False, default=1)
+    last_failed_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    last_retry_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("evaluation_runs.id", ondelete="RESTRICT"), nullable=True)

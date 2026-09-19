@@ -16,8 +16,10 @@ from app.modules.evaluation_runs.model import (
     EvaluationDimensionResult,
     EvaluationReviewRevision,
     EvaluationRun,
+    EvaluationWriteFailure,
     EvaluationSourceType,
 )
+from app.database.base import utc_now
 from app.modules.evaluation_runs.schema import EvaluationReviewRevisionCreate, EvaluationRunCreate, EvaluationRunRead
 from app.modules.scenario_dialogues.model import ScenarioDialogueSession
 from app.modules.training.model import SessionTask, TrainingSession
@@ -79,7 +81,7 @@ def _canonical_config_snapshot(snapshot: dict) -> dict:
     }
 
 
-def create_candidate_run(db: Session, payload: EvaluationRunCreate) -> EvaluationRun:
+def create_candidate_run(db: Session, payload: EvaluationRunCreate, *, commit: bool = True) -> EvaluationRun:
     if not db.get(PatientProfile, payload.patient_profile_id):
         raise _not_found("患者档案不存在")
     source_profile_id = source_patient_profile_id(db, payload.source_type, payload.source_id)
@@ -118,8 +120,11 @@ def create_candidate_run(db: Session, payload: EvaluationRunCreate) -> Evaluatio
                 limitations=item.limitations,
             )
         )
-    db.commit()
-    return _load_run(db, run.id)
+    if commit:
+        db.commit()
+        return _load_run(db, run.id)
+    db.flush()
+    return run
 
 
 def get_run(db: Session, run_id: UUID) -> EvaluationRun:
@@ -159,7 +164,7 @@ def _lock_adoption_scope(db: Session, run: EvaluationRun) -> None:
         db.execute(select(func.pg_advisory_xact_lock(func.hashtext(key))))
 
 
-def adopt_candidate_run(db: Session, run_id: UUID) -> EvaluationRun:
+def adopt_candidate_run(db: Session, run_id: UUID, *, commit: bool = True) -> EvaluationRun:
     """Atomically replace the adopted run for one source/domain, if any.
 
     Retrying adoption of the already-adopted same run is intentionally idempotent.
@@ -193,7 +198,8 @@ def adopt_candidate_run(db: Session, run_id: UUID) -> EvaluationRun:
                 run.supersedes_run_id = previous.id
             run.adoption_status = EvaluationAdoptionStatus.adopted.value
             db.flush()
-        db.commit()
+        if commit:
+            db.commit()
     except IntegrityError as exc:
         db.rollback()
         # Reload the requested run to make retry of the winning run idempotent.
@@ -201,7 +207,7 @@ def adopt_candidate_run(db: Session, run_id: UUID) -> EvaluationRun:
         if current.adoption_status == EvaluationAdoptionStatus.adopted.value:
             return current
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="同一来源已有并发采用的结果") from exc
-    return _load_run(db, run_id)
+    return _load_run(db, run_id) if commit else run
 
 
 def append_review_revision(db: Session, run_id: UUID, payload: EvaluationReviewRevisionCreate) -> EvaluationReviewRevision:
@@ -226,3 +232,48 @@ def get_run_for_professional(db: Session, current_user: User, run_id: UUID) -> E
 
     require_therapist_patient_access(db, current_user, profile.user_id)
     return EvaluationRunRead.model_validate(run)
+
+
+def _failure_fingerprint(source_type: str, source_id: UUID, domain: str, algorithm_version: str, input_fingerprint: str | None) -> str:
+    """Keep a queryable key even when payload construction itself failed."""
+    if input_fingerprint:
+        return input_fingerprint
+    import hashlib
+    return hashlib.sha256(f"{source_type}:{source_id}:{domain}:{algorithm_version}:input-unavailable".encode()).hexdigest()
+
+
+def record_evaluation_write_failure(
+    db: Session, *, source_type: str, source_id: UUID, domain: str, algorithm_version: str,
+    failure_stage: str, error_code: str = "evaluation_write_failed", input_fingerprint: str | None = None,
+) -> EvaluationWriteFailure:
+    key = _failure_fingerprint(source_type, source_id, domain, algorithm_version, input_fingerprint)
+    row = db.scalar(select(EvaluationWriteFailure).where(
+        EvaluationWriteFailure.source_type == source_type, EvaluationWriteFailure.source_id == source_id,
+        EvaluationWriteFailure.domain == domain, EvaluationWriteFailure.algorithm_version == algorithm_version,
+        EvaluationWriteFailure.input_fingerprint == key,
+    ))
+    now = utc_now()
+    if row:
+        row.failure_stage, row.error_code, row.retry_required = failure_stage, error_code, True
+        row.retry_count, row.last_failed_at, row.last_retry_at, row.resolved_run_id = row.retry_count + 1, now, now, None
+    else:
+        row = EvaluationWriteFailure(source_type=source_type, source_id=source_id, domain=domain, algorithm_version=algorithm_version,
+            input_fingerprint=key, failure_stage=failure_stage, error_code=error_code, retry_required=True, retry_count=1,
+            last_failed_at=now, last_retry_at=now)
+        db.add(row)
+    db.commit()
+    return row
+
+
+def resolve_evaluation_write_failure(db: Session, *, source_type: str, source_id: UUID, domain: str, algorithm_version: str, run: EvaluationRun) -> None:
+    rows = list(db.scalars(select(EvaluationWriteFailure).where(
+        EvaluationWriteFailure.source_type == source_type, EvaluationWriteFailure.source_id == source_id,
+        EvaluationWriteFailure.domain == domain, EvaluationWriteFailure.algorithm_version == algorithm_version,
+        EvaluationWriteFailure.retry_required.is_(True),
+    )))
+    if not rows:
+        return
+    now = utc_now()
+    for row in rows:
+        row.retry_required, row.resolved_run_id, row.last_retry_at = False, run.id, now
+    db.commit()

@@ -46,6 +46,21 @@ class AssessmentCreate(BaseModel):
     assessed_at: datetime | None = None
     metrics: AssessmentMetrics
     notes: str | None = Field(default=None, max_length=2000)
+    instrument_name: str | None = None
+    instrument_version: str | None = None
+    language_locale: str | None = None
+    localization_version: str | None = None
+    assessment_stage: str | None = None
+    raw_item_results: dict = Field(default_factory=dict)
+    subscale_results: dict = Field(default_factory=dict)
+    total_result: dict = Field(default_factory=dict)
+    missing_items: list[str] = Field(default_factory=list)
+    score_unit: str | None = None
+    administration_mode: str | None = None
+    device_and_environment: dict = Field(default_factory=dict)
+    duration_seconds: int | None = None
+    protocol_deviations: dict = Field(default_factory=dict)
+    protocol_deviation_reasons: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_source_and_metrics(self) -> "AssessmentCreate":
@@ -76,6 +91,17 @@ class AssessmentRead(BaseModel):
     source_target_text: str | None = None
     source_process_details: dict | None = None
     created_at: datetime
+    instrument_name: str | None = None
+    instrument_version: str | None = None
+    language_locale: str | None = None
+    localization_version: str | None = None
+    assessment_stage: str | None = None
+    raw_item_results: dict = Field(default_factory=dict)
+    subscale_results: dict = Field(default_factory=dict)
+    total_result: dict = Field(default_factory=dict)
+    missing_items: list = Field(default_factory=list)
+    score_unit: str | None = None
+    administration_mode: str | None = None
 
 
 class AssessmentReviewUpdate(BaseModel):
@@ -91,6 +117,24 @@ class AssessmentReviewUpdate(BaseModel):
         if self.review_status == AssessmentReviewStatus.adjusted and self.metrics is None and self.notes is None:
             raise ValueError("修正评估时至少需要调整指标或备注")
         return self
+
+
+class ClinicalSourceUpdate(BaseModel):
+    """Professional source fields only; canonical data is deliberately absent."""
+    instrument_name: str | None = None
+    instrument_version: str | None = None
+    language_locale: str | None = None
+    localization_version: str | None = None
+    raw_item_results: dict | None = None
+    subscale_results: dict | None = None
+    total_result: dict | None = None
+    missing_items: list[str] | None = None
+    score_unit: str | None = None
+    administration_mode: str | None = None
+    device_and_environment: dict | None = None
+    protocol_deviations: dict | None = None
+    protocol_deviation_reasons: list[str] | None = None
+    revision_reason: str | None = Field(default=None, max_length=1000)
 
 
 class MetricComparison(BaseModel):

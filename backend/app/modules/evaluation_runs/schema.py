@@ -87,6 +87,7 @@ class EvaluationReviewRevisionCreate(BaseModel):
     reason: str | None = None
     reviewer_user_id: UUID | None = None
     recomputed_run_id: UUID | None = None
+    review_request_key: str | None = Field(default=None, max_length=64)
 
 
 class EvaluationReviewRevisionRead(EvaluationReviewRevisionCreate):

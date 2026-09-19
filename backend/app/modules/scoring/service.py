@@ -255,6 +255,8 @@ def _write_repeat_v3_shadow_nonblocking(db: Session, attempt: Attempt) -> None:
         from app.modules.evaluation_runs.repeat_v3 import write_repeat_v3_run
 
         run = write_repeat_v3_run(db, attempt)
+        from app.modules.evaluation_runs.service import resolve_evaluation_write_failure
+        resolve_evaluation_write_failure(db, source_type="attempt", source_id=attempt.id, domain="repeat", algorithm_version=run.algorithm_version, run=run)
         analysis = db.scalar(select(AttemptAnalysisResult).where(AttemptAnalysisResult.attempt_id == attempt.id))
         if analysis:
             raw = dict(analysis.raw_model_output or {})
@@ -263,6 +265,10 @@ def _write_repeat_v3_shadow_nonblocking(db: Session, attempt: Attempt) -> None:
             db.commit()
     except Exception as exc:
         db.rollback()
+        from app.modules.evaluation_runs.repeat_v3 import REPEAT_V3_VERSION
+        from app.modules.evaluation_runs.service import record_evaluation_write_failure
+        record_evaluation_write_failure(db, source_type="attempt", source_id=attempt.id, domain="repeat", algorithm_version=REPEAT_V3_VERSION,
+            failure_stage="shadow_write")
         analysis = db.scalar(select(AttemptAnalysisResult).where(AttemptAnalysisResult.attempt_id == attempt.id))
         if analysis:
             raw = dict(analysis.raw_model_output or {})

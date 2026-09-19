@@ -100,6 +100,17 @@ def get_evaluation(db: Session, user: User, dialogue_id) -> ScenarioDialogueEval
         entity = _evaluate_dialogue(db, dialogue)
         db.add(entity)
         db.commit()
+    # Canonical V3.2 is shadow-only: legacy response is already durable and a
+    # storage failure cannot alter its score, trends, or training flow.
+    try:
+        from app.modules.evaluation_runs.functional_communication_v3 import write_functional_v3_run
+        write_functional_v3_run(db, dialogue.id)
+    except Exception:
+        db.rollback()
+        from app.modules.evaluation_runs.functional_communication_v3 import ALGORITHM_VERSION, DOMAIN
+        from app.modules.evaluation_runs.service import record_evaluation_write_failure
+        record_evaluation_write_failure(db, source_type="dialogue_session", source_id=dialogue.id, domain=DOMAIN,
+            algorithm_version=ALGORITHM_VERSION, failure_stage="shadow_write")
     return ScenarioDialogueEvaluationRead.model_validate(entity, from_attributes=True)
 
 

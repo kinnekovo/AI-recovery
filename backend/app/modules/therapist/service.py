@@ -18,6 +18,7 @@ from app.modules.assessment.schema import (
     PROCESS_METRIC_NAMES,
     MetricComparison,
 )
+from app.modules.assessment.schema import ClinicalSourceUpdate
 from app.modules.assessment.service import calculate_change, to_read
 from app.modules.attempts.model import AnalysisStatus, Attempt
 from app.modules.evaluations.model import (
@@ -712,11 +713,21 @@ def create_patient_assessment(
         metrics=payload.metrics.compact(),
         notes=payload.notes,
         therapist_notes="治疗师补录评估。",
+        instrument_name=payload.instrument_name, instrument_version=payload.instrument_version,
+        language_locale=payload.language_locale, localization_version=payload.localization_version,
+        assessment_stage=payload.assessment_stage, administered_by_user_id=therapist.id,
+        administrator_role="therapist", raw_item_results=payload.raw_item_results,
+        subscale_results=payload.subscale_results, total_result=payload.total_result,
+        missing_items=payload.missing_items, score_unit=payload.score_unit,
+        administration_mode=payload.administration_mode, device_and_environment=payload.device_and_environment,
+        duration_seconds=payload.duration_seconds, protocol_deviations=payload.protocol_deviations,
+        protocol_deviation_reasons=payload.protocol_deviation_reasons,
     )
     db.add(assessment)
     profile.assessment_status = "started"
     db.commit()
     db.refresh(assessment)
+    _write_clinical_stage_shadow(db, assessment)
     from app.modules.profiles.service import refresh_ability_profile
 
     refresh_ability_profile(db, profile.id)
@@ -765,7 +776,48 @@ def review_patient_assessment(
 
     refresh_ability_profile(db, assessment.patient_profile_id)
     db.refresh(assessment)
+    _write_clinical_stage_shadow(db, assessment)
     return to_read(assessment)
+
+
+def _write_clinical_stage_shadow(db: Session, assessment: AssessmentSession) -> None:
+    """Post-commit shadow only; legacy assessment/review remains durable on failure."""
+    try:
+        from app.modules.evaluation_runs.clinical_stage_v3 import write_clinical_stage_run
+        write_clinical_stage_run(db, assessment.id)
+    except Exception:
+        db.rollback()
+        from app.modules.evaluation_runs.clinical_stage_v3 import ALGORITHM_VERSION
+        from app.modules.evaluation_runs.service import record_evaluation_write_failure
+        record_evaluation_write_failure(db, source_type="assessment_session", source_id=assessment.id,
+            domain="clinical_stage", algorithm_version=ALGORITHM_VERSION, failure_stage="shadow_write")
+
+
+def update_clinical_source(db: Session, therapist: User, patient_user_id: UUID, assessment_id: UUID, payload: ClinicalSourceUpdate) -> AssessmentRead:
+    assessment = get_owned_assessment(db, patient_user_id, assessment_id)
+    if assessment.review_status in {AssessmentReviewStatus.confirmed.value, AssessmentReviewStatus.adjusted.value}:
+        raise HTTPException(status_code=409, detail="已确认评估只能通过正式复核修订")
+    for name, value in payload.model_dump(exclude_none=True, exclude={"revision_reason"}).items():
+        setattr(assessment, name, value)
+    if payload.revision_reason:
+        assessment.therapist_notes = (assessment.therapist_notes or "") + "\n[clinical-source-update] " + payload.revision_reason
+    db.commit(); db.refresh(assessment)
+    _write_clinical_stage_shadow(db, assessment)
+    return to_read(assessment)
+
+
+def clinical_stage_detail(db: Session, patient_user_id: UUID, assessment_id: UUID) -> dict:
+    assessment = get_owned_assessment(db, patient_user_id, assessment_id)
+    from app.modules.evaluation_runs.clinical_stage_v3 import ALGORITHM_VERSION, build_payload
+    from app.modules.evaluation_runs.model import EvaluationRun
+    run = db.scalar(select(EvaluationRun).where(EvaluationRun.source_type == "assessment_session", EvaluationRun.source_id == assessment.id, EvaluationRun.domain == "clinical_stage", EvaluationRun.adoption_status == "adopted"))
+    preview = build_payload(assessment)
+    return {"assessment": to_read(assessment).model_dump(mode="json"), "canonical_preview": preview.model_dump(mode="json"), "canonical_run_id": str(run.id) if run else None, "canonical_schema_version": ALGORITHM_VERSION, "status": preview.result_status, "warnings": preview.quality_gate.reasons}
+
+
+def compare_clinical_stage(db: Session, patient_user_id: UUID, assessment_id: UUID, other_id: UUID) -> dict:
+    from app.modules.assessment.comparability import compare
+    return {"assessment_a": str(assessment_id), "assessment_b": str(other_id), **compare(get_owned_assessment(db, patient_user_id, assessment_id), get_owned_assessment(db, patient_user_id, other_id))}
 
 
 def compare_patient_assessments(

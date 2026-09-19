@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.response import api_success
 from app.database.session import get_db
 from app.modules.assessment.model import AssessmentReviewStatus, AssessmentType
-from app.modules.assessment.schema import AssessmentCreate, AssessmentReviewUpdate
+from app.modules.assessment.schema import AssessmentCreate, AssessmentReviewUpdate, ClinicalSourceUpdate
 from app.modules.profiles.service import get_patient_ability_profile
 from app.modules.therapist import service
 from app.modules.therapist.report_export import render_stage_report_html
@@ -190,6 +190,30 @@ def review_assessment(
     service.require_therapist_patient_access(db, current_user, patient_user_id)
     result = service.review_patient_assessment(db, current_user, patient_user_id, assessment_id, payload)
     return api_success(result.model_dump(mode="json"))
+
+
+@router.patch("/patients/{patient_user_id}/assessments/{assessment_id}/clinical-source")
+def update_clinical_source(patient_user_id: UUID, assessment_id: UUID, payload: ClinicalSourceUpdate, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
+    return api_success(service.update_clinical_source(db, current_user, patient_user_id, assessment_id, payload).model_dump(mode="json"))
+
+
+@router.get("/patients/{patient_user_id}/assessments/{assessment_id}/clinical-stage")
+def clinical_stage_detail(patient_user_id: UUID, assessment_id: UUID, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
+    return api_success(service.clinical_stage_detail(db, patient_user_id, assessment_id))
+
+
+@router.get("/patients/{patient_user_id}/assessments/{assessment_id}/clinical-stage/preview")
+def clinical_stage_preview(patient_user_id: UUID, assessment_id: UUID, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
+    return api_success(service.clinical_stage_detail(db, patient_user_id, assessment_id)["canonical_preview"])
+
+
+@router.get("/patients/{patient_user_id}/assessments/{assessment_id}/clinical-stage/comparison/{other_id}")
+def clinical_stage_comparison(patient_user_id: UUID, assessment_id: UUID, other_id: UUID, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
+    return api_success(service.compare_clinical_stage(db, patient_user_id, assessment_id, other_id))
 
 
 @router.get("/patients/{patient_user_id}/ability-profile")
