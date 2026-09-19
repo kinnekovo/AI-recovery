@@ -1,6 +1,7 @@
 from difflib import SequenceMatcher
 from typing import Any
 
+from app.core.algorithm_config import config_value
 from app.integrations.acoustic_analysis.provider import AcousticAnalysisResult
 from app.modules.evaluations.model import EvaluationSource
 from app.modules.evaluations.process_metrics import PROCESS_REFERENCE_RANGES
@@ -117,17 +118,13 @@ def _final_corrected_segment(transcript: str, correction_events: list[dict]) -> 
 
 def _independence_score(prompt_level: int, requested_help: bool, start_latency_ms: int | None) -> tuple[int, dict]:
     normalized_prompt_level = max(0, min(int(prompt_level), 4))
-    prompt_penalty = (0, 10, 25, 40, 55)[normalized_prompt_level]
-    help_penalty = 15 if requested_help else 0
+    prompt_penalty = config_value("independence_prompt_penalties")[normalized_prompt_level]
+    help_penalty = config_value("independence_help_penalty") if requested_help else 0
     latency_seconds = max((start_latency_ms or 0) / 1000, 0)
-    if latency_seconds > 10:
-        latency_penalty = 15
-    elif latency_seconds > 5:
-        latency_penalty = 8
-    elif latency_seconds > 3:
-        latency_penalty = 3
-    else:
-        latency_penalty = 0
+    latency_penalty = next(
+        (rule["penalty"] for rule in config_value("independence_latency_penalties") if latency_seconds > rule["gt_seconds"]),
+        0,
+    )
     score = max(0, 100 - prompt_penalty - help_penalty - latency_penalty)
     return score, {
         "prompt_level": normalized_prompt_level,
@@ -192,14 +189,15 @@ def _scenario_information_evaluation(template: TaskTemplate, transcript: str) ->
     goal_requirements = [item for item in config.get("goal_requirements", []) if isinstance(item, str)]
     goal_matched = sum(1 for item in goal_requirements if item in matched_required_ids)
     required_completion = round(len(matched_required_ids) / len(required_units) * 100, 2) if required_units else 0.0
+    goal_scores = config_value("legacy_scenario_goal_scores")
     if goal_requirements and goal_matched == len(goal_requirements):
-        goal_status, goal_score = "achieved", 100.0
+        goal_status, goal_score = "achieved", goal_scores["achieved"]
     elif goal_matched:
-        goal_status, goal_score = "partly_achieved", 60.0
+        goal_status, goal_score = "partly_achieved", goal_scores["goal_partial"]
     elif matched_required_ids:
-        goal_status, goal_score = "partly_achieved", 35.0
+        goal_status, goal_score = "partly_achieved", goal_scores["information_partial"]
     else:
-        goal_status, goal_score = "not_achieved", 0.0
+        goal_status, goal_score = "not_achieved", goal_scores["not_achieved"]
     next_units = [unit["label"] for unit in required_units if not unit["matched"]]
     return {
         "version": config.get("version", "scenario-contract-v1"),
@@ -232,7 +230,7 @@ def _mock_process_evaluation(template: TaskTemplate, acoustic: AcousticAnalysisR
         script_accuracy=accuracy,
         error_count=1,
         speech_rate=target_rate,
-        loudness=round(acoustic.loudness_dba, 2),
+        loudness=round(acoustic.loudness_dbfs, 2),
         details={
             "correct_script_word_rate": accuracy,
             "correct_script_word_count": correct_chars,
@@ -245,6 +243,7 @@ def _mock_process_evaluation(template: TaskTemplate, acoustic: AcousticAnalysisR
             "evaluation_source": EvaluationSource.mock_ai.value,
             "provider_version": "mock-process-v1",
             "quality_status": "mock",
+            "loudness_unit": "dBFS",
             "limitations": ["当前 ASR 为 mock，结果仅用于流程联调。"],
         },
     )
@@ -347,7 +346,7 @@ def generate_process_evaluation(
             "too_noisy": acoustic.too_noisy,
             "clipped": acoustic.clipped,
         },
-        "loudness_unit": "dBFS" if acoustic_provider_name == "local" else "dBA",
+        "loudness_unit": "dBFS",
         "reference_ranges": PROCESS_REFERENCE_RANGES,
         "evaluation_source": EvaluationSource.system_rule.value,
         "provider_version": ALGORITHM_VERSION,
@@ -355,7 +354,7 @@ def generate_process_evaluation(
         "limitations": limitations,
     }
 
-    loudness = acoustic.loudness_dbfs if acoustic_provider_name == "local" else acoustic.loudness_dba
+    loudness = acoustic.loudness_dbfs
     return ProcessEvaluation(
         script_accuracy=correct_rate,
         error_count=sum(error_events.values()),

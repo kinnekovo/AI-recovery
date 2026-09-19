@@ -11,6 +11,7 @@ from app.modules.evaluations.model import (
     EvaluationMetricCategory,
     EvaluationSource,
 )
+from app.modules.evaluations.evidence_gate import process_evidence_gate
 from app.modules.evaluations.process_metrics import PROCESS_METRIC_DEFINITIONS, PROCESS_METRIC_NAMES
 from app.modules.evaluations.process_engine import generate_process_evaluation
 from app.modules.evaluations.schema import (
@@ -172,6 +173,19 @@ def save_process_evaluation(
         "speech_rate": process_evaluation.speech_rate,
         "loudness": process_evaluation.loudness,
     }
+    details = process_evaluation.details or {}
+    quality_status = details.get("quality_status")
+    algorithm_version = details.get("provider_version")
+    input_sources = details.get("input_sources") or {}
+    formal = (
+        source == EvaluationSource.system_rule
+        and quality_status == "pass"
+        and details.get("loudness_unit") == "dBFS"
+        and algorithm_version == "rehab-process-v2"
+        and input_sources.get("asr_provider") not in {None, "", "mock", "unknown"}
+        and input_sources.get("acoustic_provider") == "local"
+    )
+    units = {"script_accuracy": "%", "error_count": "count/task", "speech_rate": "char/min", "loudness": "dBFS"}
     saved: list[AttemptEvaluation] = []
     for metric_name, value in values.items():
         metric = metrics[metric_name]
@@ -184,12 +198,20 @@ def save_process_evaluation(
         )
         if evaluation:
             evaluation.value = float(value)
+            evaluation.unit = units[metric_name]
+            evaluation.algorithm_version = algorithm_version
+            evaluation.quality_status = quality_status
+            evaluation.decision_eligible = formal
         else:
             evaluation = AttemptEvaluation(
                 attempt_id=attempt_id,
                 metric_id=metric.id,
                 value=float(value),
                 evaluation_source=source,
+                unit=units[metric_name],
+                algorithm_version=algorithm_version,
+                quality_status=quality_status,
+                decision_eligible=formal,
             )
             db.add(evaluation)
         saved.append(evaluation)
@@ -222,6 +244,7 @@ def list_process_trend(db: Session, user: User, limit: int = 20) -> ProcessTrend
             EvaluationMetric.name,
             AttemptEvaluation.value,
             AttemptAnalysisResult,
+            AttemptAnalysisResult.provider_version,
             TaskTemplate.target_text,
         )
         .join(AttemptEvaluation, AttemptEvaluation.attempt_id == Attempt.id)
@@ -233,12 +256,13 @@ def list_process_trend(db: Session, user: User, limit: int = 20) -> ProcessTrend
         .where(
             TrainingSession.patient_profile_id == profile.id,
             AttemptEvaluation.evaluation_source == EvaluationSource.system_rule,
+            AttemptEvaluation.decision_eligible.is_(True),
             EvaluationMetric.name.in_(PROCESS_METRIC_NAMES),
         )
         .order_by(Attempt.created_at.desc())
     ).all()
     grouped: dict = {}
-    for attempt, created_at, metric_name, value, analysis, target_text in rows:
+    for attempt, created_at, metric_name, value, analysis, provider_version, target_text in rows:
         attempt_id = attempt.id
         if attempt_id not in grouped:
             grouped[attempt_id] = {
@@ -248,6 +272,11 @@ def list_process_trend(db: Session, user: User, limit: int = 20) -> ProcessTrend
                 "asr_text": analysis.asr_text if analysis else None,
                 "target_text": target_text,
                 "process_details": analysis.semantic_metrics.get("process_monitoring") if analysis else None,
+                "eligible": process_evidence_gate(
+                    attempt.audio_quality,
+                    analysis.semantic_metrics if analysis else None,
+                    provider_version,
+                ).eligible,
             }
         grouped[attempt_id]["metrics"][metric_name] = float(value)
 
@@ -262,7 +291,7 @@ def list_process_trend(db: Session, user: User, limit: int = 20) -> ProcessTrend
             process_details=data["process_details"],
         )
         for attempt_id, data in grouped.items()
-        if PROCESS_METRIC_NAMES.issubset(data["metrics"].keys())
+        if data["eligible"] and PROCESS_METRIC_NAMES.issubset(data["metrics"].keys())
     ]
     points = sorted(points, key=lambda item: item.created_at)[-limit:]
     return ProcessTrendRead(items=points)
@@ -294,6 +323,10 @@ def save_attempt_evaluations(
                 metric_id=metric.id,
                 value=item.value,
                 evaluation_source=item.evaluation_source,
+                unit=metric.unit,
+                algorithm_version="manual-v1" if item.evaluation_source in {EvaluationSource.human, EvaluationSource.clinician} else None,
+                quality_status="reviewed" if item.evaluation_source in {EvaluationSource.human, EvaluationSource.clinician} else None,
+                decision_eligible=False,
             )
             db.add(evaluation)
         saved.append(evaluation)
@@ -312,5 +345,9 @@ def to_read(evaluation: AttemptEvaluation) -> AttemptEvaluationRead:
         metric_category=evaluation.metric.category,
         value=evaluation.value,
         evaluation_source=evaluation.evaluation_source,
+        unit=evaluation.unit,
+        algorithm_version=evaluation.algorithm_version,
+        quality_status=evaluation.quality_status,
+        decision_eligible=evaluation.decision_eligible,
         created_at=evaluation.created_at,
     )

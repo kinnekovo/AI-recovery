@@ -434,6 +434,7 @@ export interface RecommendationEffect {
   recommendation_matched: boolean
   status: string
   metrics: Partial<ProcessMetrics>
+  metric_units?: Record<string, string>
   summary: string
 }
 

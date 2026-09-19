@@ -8,10 +8,15 @@ def semantic_metrics(asr_provider: str = "tencent", acoustic_provider: str = "lo
         "asr_provider": asr_provider,
         "asr_fallback_used": fallback,
         "process_monitoring": {
-            "evaluation_source": "system_rule",
-            "input_sources": {
-                "asr_provider": asr_provider,
-                "acoustic_provider": acoustic_provider,
+            "details": {
+                "evaluation_source": "system_rule",
+                "provider_version": "rehab-process-v2",
+                "quality_status": "pass",
+                "loudness_unit": "dBFS",
+                "input_sources": {
+                    "asr_provider": asr_provider,
+                    "acoustic_provider": acoustic_provider,
+                },
             },
         },
     }
@@ -33,7 +38,13 @@ class ProfileDataQualityTest(unittest.TestCase):
 
     def test_rejects_mock_process_evaluation(self) -> None:
         metrics = semantic_metrics()
-        metrics["process_monitoring"]["evaluation_source"] = "mock_ai"
+        metrics["process_monitoring"]["details"]["evaluation_source"] = "mock_ai"
+
+        self.assertFalse(is_profile_eligible_analysis("pass", metrics))
+
+    def test_rejects_unknown_loudness_unit(self) -> None:
+        metrics = semantic_metrics()
+        metrics["process_monitoring"]["details"].pop("loudness_unit")
 
         self.assertFalse(is_profile_eligible_analysis("pass", metrics))
 

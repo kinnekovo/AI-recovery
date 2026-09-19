@@ -3,6 +3,8 @@ from statistics import median
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.algorithm_config import range_bounds
+
 from app.modules.attempts.model import Attempt
 from app.modules.assessment.service import compare_assessments
 from app.modules.evaluations.model import (
@@ -240,7 +242,8 @@ def build_suggestion(
         return "建议先练短句，把一句话说完整，再慢慢增加难度。"
     if summary.avg_speech_rate is not None and summary.avg_speech_rate < 180:
         return "可以继续练熟悉短句，重点放在少停顿、连起来说。"
-    if summary.avg_loudness is not None and summary.avg_loudness < -35:
+    loudness_min, _ = range_bounds("repeat_loudness_reference")
+    if summary.avg_loudness is not None and summary.avg_loudness < loudness_min:
         return "可以试着把声音放清楚一点，不用着急，稳定开口最重要。"
     if effect.has_comparison:
         return "最近练习比较稳定，可以继续保持今天的训练节奏。"

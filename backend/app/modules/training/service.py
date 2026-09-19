@@ -7,6 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.algorithm_config import config_value, range_bounds
 from app.core.observability import log_event
 from app.integrations.tts.provider import TTSProviderError, get_tts_provider
 from app.modules.agents.model import Agent
@@ -31,6 +32,7 @@ from app.modules.training.recommendation_policy import (
 )
 from app.modules.attempts.model import Attempt
 from app.modules.evaluations.model import AttemptEvaluation, EvaluationMetric, EvaluationSource
+from app.modules.evaluations.evidence_gate import is_formal_process_evidence
 from app.modules.evaluations.service import PROCESS_METRIC_NAMES
 from app.modules.files.service import public_url
 from app.modules.files.model import FileAsset, FileStatus, FileType
@@ -872,13 +874,15 @@ def family_stability_percent(errors: float | None) -> int:
 def family_rhythm_percent(speech_rate: float | None) -> int:
     if speech_rate is None:
         return 0
-    return int(max(25, min(100, 100 - abs(speech_rate - 210) * 0.7)))
+    return int(max(25, min(100, 100 - abs(speech_rate - config_value("speech_rate_target")) * 0.7)))
 
 
 def family_voice_percent(loudness: float | None) -> int:
     if loudness is None:
         return 0
-    return int(max(25, min(100, 100 - abs(loudness - 69) * 3)))
+    minimum, maximum = range_bounds("repeat_loudness_reference")
+    distance = 0.0 if minimum <= loudness <= maximum else minimum - loudness if loudness < minimum else loudness - maximum
+    return int(max(25, min(100, 100 - distance * 3)))
 
 
 def family_rhythm_label(speech_rate: float | None) -> str:
@@ -894,9 +898,10 @@ def family_rhythm_label(speech_rate: float | None) -> str:
 def family_voice_label(loudness: float | None) -> str:
     if loudness is None:
         return "观察中"
-    if loudness < -35:
+    minimum, maximum = range_bounds("repeat_loudness_reference")
+    if loudness < minimum:
         return "偏轻"
-    if loudness > -12:
+    if loudness > maximum:
         return "偏响"
     return "清楚"
 
@@ -950,12 +955,19 @@ def family_recent_training_records(db: Session, patient_profile_id: UUID, limit:
 
 
 def attempt_process_metrics(db: Session, attempt_id: UUID) -> dict[str, float]:
+    attempt = db.get(Attempt, attempt_id)
+    analysis = db.scalar(select(AttemptAnalysisResult).where(AttemptAnalysisResult.attempt_id == attempt_id))
+    if not attempt or not analysis or not is_formal_process_evidence(
+        attempt.audio_quality, analysis.semantic_metrics, analysis.provider_version
+    ):
+        return {}
     rows = db.execute(
         select(EvaluationMetric.name, AttemptEvaluation.value)
         .join(AttemptEvaluation, AttemptEvaluation.metric_id == EvaluationMetric.id)
         .where(
             AttemptEvaluation.attempt_id == attempt_id,
             AttemptEvaluation.evaluation_source == EvaluationSource.system_rule,
+            AttemptEvaluation.decision_eligible.is_(True),
             EvaluationMetric.name.in_(PROCESS_METRIC_NAMES),
         )
     ).all()
@@ -1036,25 +1048,48 @@ def build_recommendation_effect(db: Session, session: TrainingSession) -> Recomm
         recommendation_matched=session.recommendation_matched,
         status=session.status.value,
         metrics=metrics,
+        metric_units={"script_accuracy": "%", "error_count": "count/task", "speech_rate": "char/min", "loudness": "dBFS"}
+        if metrics
+        else {},
         summary=effect_summary(metrics, session.status == TrainingStatus.completed),
     )
 
 
 def recommendation_session_metrics(db: Session, session_id: UUID) -> dict[str, float]:
     rows = db.execute(
-        select(EvaluationMetric.name, AttemptEvaluation.value)
+        select(
+            Attempt.id,
+            Attempt.audio_quality,
+            AttemptAnalysisResult.semantic_metrics,
+            AttemptAnalysisResult.provider_version,
+            EvaluationMetric.name,
+            AttemptEvaluation.value,
+            AttemptEvaluation.unit,
+        )
         .join(AttemptEvaluation, AttemptEvaluation.metric_id == EvaluationMetric.id)
         .join(Attempt, Attempt.id == AttemptEvaluation.attempt_id)
+        .join(AttemptAnalysisResult, AttemptAnalysisResult.attempt_id == Attempt.id)
         .join(SessionTask, SessionTask.id == Attempt.session_task_id)
         .where(
             SessionTask.training_session_id == session_id,
             AttemptEvaluation.evaluation_source == EvaluationSource.system_rule,
+            AttemptEvaluation.decision_eligible.is_(True),
             EvaluationMetric.name.in_(PROCESS_METRIC_NAMES),
         )
     ).all()
+    eligible_attempts: dict[UUID, dict] = {}
+    for attempt_id, audio_quality, semantic_metrics, provider_version, metric_name, value, unit in rows:
+        if not is_formal_process_evidence(audio_quality, semantic_metrics, provider_version):
+            continue
+        if metric_name == "loudness" and unit != "dBFS":
+            continue
+        eligible_attempts.setdefault(attempt_id, {})[metric_name] = float(value)
     grouped: dict[str, list[float]] = {}
-    for metric_name, value in rows:
-        grouped.setdefault(metric_name, []).append(float(value))
+    for metrics in eligible_attempts.values():
+        if not PROCESS_METRIC_NAMES.issubset(metrics):
+            continue
+        for metric_name, value in metrics.items():
+            grouped.setdefault(metric_name, []).append(value)
     return {name: round(sum(values) / len(values), 1) for name, values in grouped.items() if values}
 
 
@@ -1073,9 +1108,11 @@ def effect_summary(metrics: dict[str, float], completed: bool) -> str:
     if errors is not None:
         parts.append("错误较少" if errors <= 1 else "错误仍偏多")
     if speech_rate is not None:
-        parts.append("节奏稳定" if 180 <= speech_rate <= 240 else "节奏需要继续观察")
+        speech_min, speech_max = range_bounds("speech_rate_reference")
+        parts.append("节奏稳定" if speech_min <= speech_rate <= speech_max else "节奏需要继续观察")
     if loudness is not None:
-        parts.append("音量稳定" if -35 <= loudness <= -12 else "音量需要继续观察")
+        loudness_min, loudness_max = range_bounds("repeat_loudness_reference")
+        parts.append("音量稳定" if loudness_min <= loudness <= loudness_max else "音量需要继续观察")
     return "；".join(parts) + "。"
 
 
@@ -1121,13 +1158,20 @@ def build_trend_evidence(deltas: dict[str, float]) -> list[str]:
 def speech_rate_better(first: float | None, latest: float | None) -> bool:
     if first is None or latest is None:
         return False
-    return abs(latest - 210) + 8 < abs(first - 210)
+    target = config_value("speech_rate_target")
+    margin = config_value("phase43_speech_rate_margin")
+    return abs(latest - target) + margin < abs(first - target)
 
 
 def loudness_better(first: float | None, latest: float | None) -> bool:
     if first is None or latest is None:
         return False
-    return abs(latest - 69) + 3 < abs(first - 69)
+    minimum, maximum = range_bounds("repeat_loudness_reference")
+
+    def distance(value: float) -> float:
+        return 0.0 if minimum <= value <= maximum else minimum - value if value < minimum else value - maximum
+
+    return distance(latest) + config_value("phase43_loudness_margin") < distance(first)
 
 
 def latest_recommendation_review(db: Session, patient_profile_id: UUID) -> TrainingRecommendationReview | None:
@@ -1235,7 +1279,8 @@ def decide_recommendation(ability) -> tuple[TrainingType, str, str, list[str], i
             ["慢一点说完整", "重点减少漏字和错字", "每次只关注一个小目标"],
             10,
         )
-    if loudness is not None and loudness < -35:
+    loudness_min, _ = range_bounds("repeat_loudness_reference")
+    if loudness is not None and loudness < loudness_min:
         return (
             TrainingType.repeat,
             "先练声音稳定",

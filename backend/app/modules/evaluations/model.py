@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, Float, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -48,6 +48,10 @@ class AttemptEvaluation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     evaluation_source: Mapped[EvaluationSource] = mapped_column(
         Enum(EvaluationSource, name="evaluation_source"), default=EvaluationSource.mock_ai, nullable=False
     )
+    unit: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    algorithm_version: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    quality_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    decision_eligible: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     attempt = relationship("Attempt", back_populates="evaluations")
     metric: Mapped[EvaluationMetric] = relationship(back_populates="attempt_evaluations")

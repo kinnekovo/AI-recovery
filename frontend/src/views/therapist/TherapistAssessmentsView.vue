@@ -216,6 +216,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import AudioPlayback from '@/components/common/AudioPlayback.vue'
+import { loudnessBand } from '@/config/algorithmThresholds'
 import { therapistApi } from '@/api/therapist'
 import type {
   AssessmentCompare,
@@ -526,8 +527,8 @@ function summaryForSpeechRate(value?: number) {
 
 function summaryForLoudness(value?: number) {
   if (value == null) return ''
-  if (value < -35) return '声音偏轻'
-  if (value > -12) return '声音偏响'
+  if (loudnessBand(value) === 'low') return '声音偏轻'
+  if (loudnessBand(value) === 'high') return '声音偏响'
   return '声音状态稳定'
 }
 

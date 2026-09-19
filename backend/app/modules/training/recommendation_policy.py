@@ -1,28 +1,31 @@
 from dataclasses import dataclass
 from typing import Any
 
+from app.core.algorithm_config import config_entry, config_value, range_bounds
 from app.modules.training.model import TrainingType
 
 
 RECOMMENDATION_POLICY: dict[str, Any] = {
-    "version": "phase4.3",
-    "target_speech_rate": 210,
-    "target_loudness": 69,
+    "version": "phase4.3-historical-r0-frozen",
+    "mode": "historical_read_compatible",
+    "automatic_difficulty_adjustment": False,
+    "target_speech_rate": config_entry("speech_rate_target"),
+    "loudness_reference": config_entry("repeat_loudness_reference"),
     "decision_thresholds": {
-        "low_accuracy": 78,
-        "high_errors": 3,
-        "low_loudness": 60,
-        "slow_speech_rate": 180,
-        "scenario_content_min": 3,
-        "scenario_autonomy_min": 3,
+        "low_accuracy": config_entry("phase43_low_accuracy"),
+        "high_errors": config_entry("phase43_high_errors"),
+        "low_loudness": config_entry("profile_low_loudness"),
+        "slow_speech_rate": config_entry("phase43_slow_speech_rate"),
+        "scenario_content_min": config_entry("phase43_scenario_content_min"),
+        "scenario_autonomy_min": config_entry("phase43_scenario_autonomy_min"),
     },
     "adaptive_adjustment": {
-        "effective_min_positive_signals": 2,
-        "needs_adjustment_negative_signals": 2,
-        "accuracy_delta": 3,
-        "error_delta": 1,
-        "speech_rate_margin": 8,
-        "loudness_margin": 3,
+        "effective_min_positive_signals": config_entry("phase43_positive_signals"),
+        "needs_adjustment_negative_signals": config_entry("phase43_negative_signals"),
+        "accuracy_delta": config_entry("phase43_accuracy_delta"),
+        "error_delta": config_entry("phase43_error_delta"),
+        "speech_rate_margin": config_entry("phase43_speech_rate_margin"),
+        "loudness_margin": config_entry("phase43_loudness_margin"),
     },
     "sequence_steps": [
         {"label": "热身", "type": "repeat", "content_delta": -1, "autonomy_delta": -1},
@@ -67,6 +70,32 @@ def decide_recommendation_by_policy(ability, trend: TrendPolicyResult | None = N
     content_level = ability.current_content_level
     autonomy_level = ability.current_autonomy_level
 
+    has_measured_values = any(value is not None for value in (accuracy, errors, speech_rate, loudness))
+    if has_measured_values and (ability.evidence or {}).get("profile_eligibility") is not True:
+        return RecommendationDecision(
+            recommended_type=TrainingType.repeat,
+            headline="先保持当前训练",
+            reason="当前记录未通过正式证据准入，旧策略已停止正式调难；请完成一次通过质量检查的新训练。",
+            focus_points=["保持当前任务难度", "重新采集一段清楚录音", "等待治疗师复核"],
+            suggested_minutes=8,
+            content_level=content_level,
+            autonomy_level=autonomy_level,
+            adaptation_note="安全门控：证据不可用于画像或推荐，未执行正式难度决策。",
+        )
+
+    loudness_unit = (ability.evidence or {}).get("loudness_unit")
+    if loudness is not None and loudness_unit != "dBFS":
+        return RecommendationDecision(
+            recommended_type=TrainingType.repeat,
+            headline="先保持当前训练",
+            reason="当前历史响度记录缺少可验证单位，旧策略已停止正式调难；请完成一次通过质量检查的新训练。",
+            focus_points=["保持当前任务难度", "重新采集一段清楚录音", "等待治疗师复核"],
+            suggested_minutes=8,
+            content_level=content_level,
+            autonomy_level=autonomy_level,
+            adaptation_note="安全门控：响度单位不明，未执行正式难度决策。",
+        )
+
     if accuracy is None or errors is None:
         decision = RecommendationDecision(
             recommended_type=TrainingType.repeat,
@@ -77,7 +106,7 @@ def decide_recommendation_by_policy(ability, trend: TrendPolicyResult | None = N
             content_level=content_level,
             autonomy_level=autonomy_level,
         )
-    elif errors >= thresholds["high_errors"] or accuracy < thresholds["low_accuracy"]:
+    elif errors >= thresholds["high_errors"]["value"] or accuracy < thresholds["low_accuracy"]["value"]:
         decision = RecommendationDecision(
             recommended_type=TrainingType.repeat,
             headline="今天先稳住一句话",
@@ -87,7 +116,7 @@ def decide_recommendation_by_policy(ability, trend: TrendPolicyResult | None = N
             content_level=content_level,
             autonomy_level=autonomy_level,
         )
-    elif loudness is not None and loudness < thresholds["low_loudness"]:
+    elif loudness is not None and loudness < thresholds["low_loudness"]["value"]:
         decision = RecommendationDecision(
             recommended_type=TrainingType.repeat,
             headline="先练声音稳定",
@@ -97,7 +126,7 @@ def decide_recommendation_by_policy(ability, trend: TrendPolicyResult | None = N
             content_level=content_level,
             autonomy_level=autonomy_level,
         )
-    elif speech_rate is not None and speech_rate < thresholds["slow_speech_rate"]:
+    elif speech_rate is not None and speech_rate < thresholds["slow_speech_rate"]["value"]:
         decision = RecommendationDecision(
             recommended_type=TrainingType.repeat,
             headline="练一组连贯短句",
@@ -107,7 +136,7 @@ def decide_recommendation_by_policy(ability, trend: TrendPolicyResult | None = N
             content_level=content_level,
             autonomy_level=autonomy_level,
         )
-    elif level_number(content_level) >= thresholds["scenario_content_min"] and level_number(autonomy_level) >= thresholds["scenario_autonomy_min"]:
+    elif level_number(content_level) >= thresholds["scenario_content_min"]["value"] and level_number(autonomy_level) >= thresholds["scenario_autonomy_min"]["value"]:
         confidence_note = "治疗师复核已经纳入画像。" if reviewed_count else "当前建议来自系统画像，等待治疗师复核后会更稳。"
         decision = RecommendationDecision(
             recommended_type=TrainingType.scenario,
@@ -135,20 +164,11 @@ def apply_adaptive_adjustment(decision: RecommendationDecision, trend: TrendPoli
     if trend is None:
         return decision
     if trend.status == "effective":
-        decision.content_level = shift_level(decision.content_level, 1, max_level=5)
-        decision.autonomy_level = shift_level(decision.autonomy_level, 1, max_level=4)
-        decision.suggested_minutes = min(decision.suggested_minutes + 2, 16)
-        decision.adaptation_note = "近期推荐训练有效，系统自动小幅增加挑战。"
+        decision.adaptation_note = "近期观察到积极变化；phase4.3 已冻结，正式 L/S 保持不变。"
         decision.reason = f"{decision.reason}{decision.adaptation_note}"
-        decision.focus_points = [*decision.focus_points[:2], "完成后观察是否仍然轻松"]
     elif trend.status == "needs_adjustment":
-        decision.content_level = shift_level(decision.content_level, -1, max_level=5)
-        decision.autonomy_level = shift_level(decision.autonomy_level, -1, max_level=4)
-        decision.suggested_minutes = max(decision.suggested_minutes - 2, 8)
-        decision.recommended_type = TrainingType.repeat
-        decision.adaptation_note = "近期效果不稳定，系统自动降低难度，先把表达稳住。"
+        decision.adaptation_note = "近期观察到不稳定变化；phase4.3 已冻结，正式 L/S 保持不变并建议治疗师复核。"
         decision.reason = f"{decision.reason}{decision.adaptation_note}"
-        decision.focus_points = ["先说完整", "减少错误比增加难度更重要", "训练后留意疲劳感"]
     elif trend.status == "mixed":
         decision.adaptation_note = "近期表现有波动，系统暂时保持当前难度。"
         decision.reason = f"{decision.reason}{decision.adaptation_note}"
@@ -178,20 +198,22 @@ def analyze_trend_by_policy(completed_effects: list[Any]) -> TrendPolicyResult:
     positive = 0
     negative = 0
     config = RECOMMENDATION_POLICY["adaptive_adjustment"]
-    if deltas.get("script_accuracy", 0) >= config["accuracy_delta"]:
+    if deltas.get("script_accuracy", 0) >= config["accuracy_delta"]["value"]:
         positive += 1
-    elif deltas.get("script_accuracy", 0) <= -config["accuracy_delta"]:
+    elif deltas.get("script_accuracy", 0) <= -config["accuracy_delta"]["value"]:
         negative += 1
-    if deltas.get("error_count", 0) <= -config["error_delta"]:
+    if deltas.get("error_count", 0) <= -config["error_delta"]["value"]:
         positive += 1
-    elif deltas.get("error_count", 0) >= config["error_delta"]:
+    elif deltas.get("error_count", 0) >= config["error_delta"]["value"]:
         negative += 1
-    if "speech_rate" in deltas and metric_closer(latest.metrics.get("speech_rate"), first.metrics.get("speech_rate"), RECOMMENDATION_POLICY["target_speech_rate"], config["speech_rate_margin"]):
+    if "speech_rate" in deltas and metric_closer(latest.metrics.get("speech_rate"), first.metrics.get("speech_rate"), RECOMMENDATION_POLICY["target_speech_rate"]["value"], config["speech_rate_margin"]["value"]):
         positive += 1
-    if "loudness" in deltas and metric_closer(latest.metrics.get("loudness"), first.metrics.get("loudness"), RECOMMENDATION_POLICY["target_loudness"], config["loudness_margin"]):
+    if "loudness" in deltas and metric_closer_to_range(
+        latest.metrics.get("loudness"), first.metrics.get("loudness"), range_bounds("repeat_loudness_reference"), config["loudness_margin"]["value"]
+    ):
         positive += 1
 
-    if positive >= config["effective_min_positive_signals"] and negative == 0:
+    if positive >= config["effective_min_positive_signals"]["value"] and negative == 0:
         return TrendPolicyResult(
             status="effective",
             summary="推荐后的训练表现正在变好。",
@@ -203,7 +225,7 @@ def analyze_trend_by_policy(completed_effects: list[Any]) -> TrendPolicyResult:
             family_reminder="患者最近有进步，陪伴时可以肯定完成训练这件事。",
             therapist_reminder="推荐方向有效，可继续观察是否适合小幅提高难度。",
         )
-    if negative >= config["needs_adjustment_negative_signals"]:
+    if negative >= config["needs_adjustment_negative_signals"]["value"]:
         return TrendPolicyResult(
             status="needs_adjustment",
             summary="推荐后的表现没有稳定改善。",
@@ -257,17 +279,17 @@ def build_trend_evidence(deltas: dict[str, float]) -> list[str]:
 
 def build_attribution_points(deltas: dict[str, float], first: dict[str, float], latest: dict[str, float]) -> list[str]:
     points = []
-    if deltas.get("script_accuracy", 0) >= 3:
+    if deltas.get("script_accuracy", 0) >= config_value("phase43_accuracy_delta"):
         points.append("表达完整度提升，是主要积极信号。")
-    elif deltas.get("script_accuracy", 0) <= -3:
+    elif deltas.get("script_accuracy", 0) <= -config_value("phase43_accuracy_delta"):
         points.append("表达完整度下降，任务可能偏难或状态波动。")
-    if deltas.get("error_count", 0) <= -1:
+    if deltas.get("error_count", 0) <= -config_value("phase43_error_delta"):
         points.append("错误次数减少，说明当前练习有助于稳定表达。")
-    elif deltas.get("error_count", 0) >= 1:
+    elif deltas.get("error_count", 0) >= config_value("phase43_error_delta"):
         points.append("错误次数增加，需要关注句子长度和疲劳。")
-    if metric_closer(latest.get("speech_rate"), first.get("speech_rate"), RECOMMENDATION_POLICY["target_speech_rate"], 0):
+    if metric_closer(latest.get("speech_rate"), first.get("speech_rate"), RECOMMENDATION_POLICY["target_speech_rate"]["value"], 0):
         points.append("说话节奏更接近稳定区间。")
-    if metric_closer(latest.get("loudness"), first.get("loudness"), RECOMMENDATION_POLICY["target_loudness"], 0):
+    if metric_closer_to_range(latest.get("loudness"), first.get("loudness"), range_bounds("repeat_loudness_reference"), 0):
         points.append("声音状态更接近自然清楚的范围。")
     return points[:4]
 
@@ -276,6 +298,24 @@ def metric_closer(latest: float | None, first: float | None, target: float, marg
     if first is None or latest is None:
         return False
     return abs(latest - target) + margin < abs(first - target)
+
+
+def metric_closer_to_range(
+    latest: float | None,
+    first: float | None,
+    reference: tuple[float, float],
+    margin: float,
+) -> bool:
+    if first is None or latest is None:
+        return False
+    minimum, maximum = reference
+
+    def distance(value: float) -> float:
+        if minimum <= value <= maximum:
+            return 0.0
+        return minimum - value if value < minimum else value - maximum
+
+    return distance(latest) + margin < distance(first)
 
 
 def level_number(level: str) -> int:

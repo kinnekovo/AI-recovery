@@ -2,6 +2,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.algorithm_config import config_value
 from app.modules.scenario_dialogues.model import DialogueSpeaker, DialogueState, DialogueStatus, ScenarioDialogueEvaluation, ScenarioDialogueSession, ScenarioDialogueTurn
 from app.modules.scenario_dialogues.schema import ScenarioDialogueEvaluationRead, ScenarioDialogueRead, ScenarioDialogueReviewUpdate, TherapistScenarioDialogueListItem
 from app.database.base import utc_now
@@ -404,21 +405,37 @@ def _evaluate_dialogue(db: Session, dialogue: ScenarioDialogueSession) -> Scenar
     information = round(100 * len({item.get("id") for item in units if item.get("id") in collected}) / max(1, len(units)), 1)
     achieved = bool(required and required.issubset(collected))
     goal_status = "achieved" if achieved else ("partly_achieved" if collected else "not_achieved")
-    goal_score = {"achieved": 100.0, "partly_achieved": 60.0, "not_achieved": 0.0}[goal_status]
+    goal_score = config_value("scenario_dialogue_goal_scores")[goal_status]
     relevant_turns = [turn for turn in patient_turns if (turn.semantic_evidence or {}).get("information_units")]
     response = round(100 * len(relevant_turns) / max(1, len(patient_turns)), 1)
     relevance = response
-    independence = max(0.0, 100.0 - dialogue.maximum_prompt_level * 15.0 - dialogue.prompt_count * 5.0)
+    independence_penalties = config_value("scenario_dialogue_independence_penalties")
+    independence = max(
+        0.0,
+        100.0
+        - dialogue.maximum_prompt_level * independence_penalties["maximum_prompt_level"]
+        - dialogue.prompt_count * independence_penalties["prompt_count"],
+    )
     repair_score = _repair_score(turns)
     required_evidence = [item for item in evidence if item.get("id") in required]
-    low_confidence = any(not isinstance(item.get("confidence"), (int, float)) or item["confidence"] < .7 for item in required_evidence)
+    confidence_min = config_value("scenario_dialogue_evidence_confidence_min")
+    low_confidence = any(
+        not isinstance(item.get("confidence"), (int, float)) or item["confidence"] < confidence_min
+        for item in required_evidence
+    )
     fallback_used = any((turn.semantic_evidence or {}).get("source") != "llm_structured" for turn in patient_turns)
     mock_asr_used = any(turn.asr_provider == "mock" for turn in patient_turns)
     trusted = bool(required_evidence) and not fallback_used and not mock_asr_used and not low_confidence
     review_status = "pending_clinician_review" if trusted else "pending_semantic_review"
     confidence = min((float(item.get("confidence", 0)) for item in required_evidence), default=0.0) if trusted else 0.0
+    weights = config_value("scenario_dialogue_score_weights")
     overall = None if not trusted else round(
-        goal_score * .35 + information * .25 + response * .15 + relevance * .10 + independence * .10 + (repair_score or 0) * .05,
+        goal_score * weights["goal"]
+        + information * weights["information"]
+        + response * weights["response"]
+        + relevance * weights["relevance"]
+        + independence * weights["independence"]
+        + (repair_score or 0) * weights["repair"],
         1,
     )
     return ScenarioDialogueEvaluation(

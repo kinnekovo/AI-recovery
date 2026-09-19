@@ -2,6 +2,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.algorithm_config import config_entry, config_value, range_bounds
 from app.core.config import get_settings
 from app.core.observability import log_event
 from app.core.redaction import provider_error_summary
@@ -348,31 +349,42 @@ def to_score_read(score: AttemptScore, transcript: str | None) -> ScoreRead:
 
 def build_rule_score_dimensions(process_evaluation) -> dict[str, int]:
     details = getattr(process_evaluation, "details", None) or {}
+    loudness_unit = details.get("loudness_unit")
+    if loudness_unit != "dBFS":
+        raise ValueError("正式规则评分要求显式 dBFS 响度单位")
     content_score = round(_clamp(process_evaluation.script_accuracy))
     events = details.get("error_events") or {}
-    error_penalty = (
-        events.get("meaningless_repetition", 0) * 8
-        + events.get("self_correction", 0) * 4
-        + events.get("long_pause_over_3s", 0) * 10
-        + events.get("filler", 0) * 3
-    )
+    penalties = config_value("clarity_event_penalties")
+    error_penalty = sum(float(events.get(name, 0)) * penalty for name, penalty in penalties.items())
     clarity_score = round(_clamp(100 - error_penalty))
     expression_rate = float(details.get("expression_rate", process_evaluation.speech_rate))
     articulation_rate = float(details.get("articulation_rate", expression_rate))
-    expression_score = _clamp(100 - _distance_from_range(expression_rate, 180, 240) * 0.7)
-    articulation_score = _clamp(100 - _distance_from_range(articulation_rate, 180, 260) * 0.55)
+    expression_range = range_bounds("speech_rate_reference")
+    articulation_range = range_bounds("articulation_rate_reference")
+    rate_multipliers = config_value("score_rate_distance_multipliers")
+    expression_score = _clamp(100 - _distance_from_range(expression_rate, *expression_range) * rate_multipliers["expression"])
+    articulation_score = _clamp(100 - _distance_from_range(articulation_rate, *articulation_range) * rate_multipliers["articulation"])
     pause_ratio = float((details.get("pause_metrics") or {}).get("pause_ratio", 0))
-    fluency_score = round(_clamp(expression_score * 0.6 + articulation_score * 0.4 - pause_ratio * 35))
-    loudness_unit = details.get("loudness_unit", "dBA")
-    loudness_range = (-35, -12) if loudness_unit == "dBFS" else (60, 78)
-    loudness_score = round(_clamp(100 - _distance_from_range(process_evaluation.loudness, *loudness_range) * 3))
+    fluency_weights = config_value("fluency_component_weights")
+    fluency_score = round(
+        _clamp(
+            expression_score * fluency_weights["expression"]
+            + articulation_score * fluency_weights["articulation"]
+            - pause_ratio * config_value("score_pause_ratio_penalty")
+        )
+    )
+    loudness_range = range_bounds("repeat_loudness_reference")
+    loudness_score = round(
+        _clamp(
+            100
+            - _distance_from_range(process_evaluation.loudness, *loudness_range)
+            * config_value("score_loudness_distance_penalty")
+        )
+    )
     prompt_dependence_score = round(_clamp(float(details.get("independence_score", 100))))
     task_type = details.get("task_type", "repeat")
-    weights = (
-        {"content": 0.30, "error_control": 0.15, "fluency": 0.30, "loudness": 0.10, "independence": 0.15}
-        if task_type == "scenario"
-        else {"content": 0.45, "error_control": 0.15, "fluency": 0.25, "loudness": 0.10, "independence": 0.05}
-    )
+    weight_config_name = "scenario_score_weights" if task_type == "scenario" else "repeat_score_weights"
+    weights = config_value(weight_config_name)
     overall_score = round(
         content_score * weights["content"]
         + clarity_score * weights["error_control"]
@@ -381,11 +393,12 @@ def build_rule_score_dimensions(process_evaluation) -> dict[str, int]:
         + prompt_dependence_score * weights["independence"]
     )
     quality = details.get("acoustic_quality") or {}
+    quality_confidence = config_value("score_quality_confidence")
     confidence = round(
         _clamp(
             1.0
-            - (0.15 if quality.get("snr_db", 60) < 15 else 0)
-            - (0.15 if details.get("input_sources", {}).get("asr_provider") in {"mock", "unknown"} else 0),
+            - (quality_confidence["penalty"] if quality.get("snr_db", 60) < quality_confidence["snr_min"] else 0)
+            - (quality_confidence["penalty"] if details.get("input_sources", {}).get("asr_provider") in {"mock", "unknown"} else 0),
             0,
             1,
         ),
@@ -404,7 +417,10 @@ def build_rule_score_dimensions(process_evaluation) -> dict[str, int]:
             "weights": weights,
             "task_type": task_type,
             "loudness_unit": loudness_unit,
-            "speech_rate_reference": [180, 240],
+            "speech_rate_reference": list(expression_range),
+            "config_version": config_entry(weight_config_name)["version"],
+            "maturity": config_entry(weight_config_name)["maturity"],
+            "source": config_entry(weight_config_name)["source"],
         },
     }
 
@@ -509,20 +525,23 @@ def _pronunciation_shadow_score(process_evaluation, pronunciation) -> int | None
         return None
     prosody = pronunciation.prosody_metrics or {}
     prosody_score = 100 if prosody.get("status") == "completed" else 0
+    weights = config_value("pronunciation_shadow_composite_weights")
     score = (
-        process_evaluation.script_accuracy * 0.35
-        + pronunciation.overall_accuracy * 0.20
-        + (pronunciation.fluency or 0) * 100 * 0.20
-        + max(0, 100 - process_evaluation.error_count * 10) * 0.10
-        + prosody_score * 0.10
-        + float((process_evaluation.details or {}).get("independence_score", 100)) * 0.05
+        process_evaluation.script_accuracy * weights["process_accuracy"]
+        + pronunciation.overall_accuracy * weights["provider_accuracy"]
+        + (pronunciation.fluency or 0) * 100 * weights["provider_fluency"]
+        + max(0, 100 - process_evaluation.error_count * 10) * weights["event_control"]
+        + prosody_score * weights["prosody"]
+        + float((process_evaluation.details or {}).get("independence_score", 100)) * weights["independence"]
     )
     return round(max(0, min(100, score)))
 
 
 def build_feedback(metrics: ProcessMetricsRead, details: dict | None = None) -> list[TrainingFeedbackItem]:
     feedback: list[TrainingFeedbackItem] = []
-    scenario = (details or {}).get("scenario_evaluation") if details else None
+    details = details or {}
+    details = details.get("details") if isinstance(details.get("details"), dict) else details
+    scenario = details.get("scenario_evaluation")
 
     if isinstance(scenario, dict):
         status = scenario.get("goal_status")
@@ -571,7 +590,7 @@ def build_feedback(metrics: ProcessMetricsRead, details: dict | None = None) -> 
             )
         )
     else:
-        if metrics.script_accuracy >= 90:
+        if metrics.script_accuracy >= config_value("script_accuracy_reference"):
             feedback.append(
                 TrainingFeedbackItem(
                     metric="script_accuracy",
@@ -588,7 +607,8 @@ def build_feedback(metrics: ProcessMetricsRead, details: dict | None = None) -> 
                 )
             )
 
-    if metrics.error_count <= 1:
+    error_reference = config_value("error_count_reference")
+    if metrics.error_count <= error_reference["max"]:
         feedback.append(
             TrainingFeedbackItem(
                 metric="error_count",
@@ -605,7 +625,8 @@ def build_feedback(metrics: ProcessMetricsRead, details: dict | None = None) -> 
             )
         )
 
-    if metrics.speech_rate < 180:
+    speech_min, speech_max = range_bounds("speech_rate_reference")
+    if metrics.speech_rate < speech_min:
         feedback.append(
             TrainingFeedbackItem(
                 metric="speech_rate",
@@ -613,7 +634,7 @@ def build_feedback(metrics: ProcessMetricsRead, details: dict | None = None) -> 
                 suggestion="建议增加连续表达训练，先用熟悉短句做稳定输出。",
             )
         )
-    elif metrics.speech_rate > 240:
+    elif metrics.speech_rate > speech_max:
         feedback.append(
             TrainingFeedbackItem(
                 metric="speech_rate",
@@ -630,8 +651,17 @@ def build_feedback(metrics: ProcessMetricsRead, details: dict | None = None) -> 
             )
         )
 
-    loudness_unit = "dBFS" if metrics.loudness < 0 else "dBA"
-    loudness_min, loudness_max = (-35, -12) if loudness_unit == "dBFS" else (60, 78)
+    loudness_unit = details.get("loudness_unit")
+    if loudness_unit != "dBFS":
+        feedback.append(
+            TrainingFeedbackItem(
+                metric="loudness",
+                current_performance="本次响度单位未确认，未生成正式声音状态判断。",
+                suggestion="请重新完成一次通过录音质量检查的训练。",
+            )
+        )
+        return feedback
+    loudness_min, loudness_max = range_bounds("repeat_loudness_reference")
     if loudness_min <= metrics.loudness <= loudness_max:
         feedback.append(
             TrainingFeedbackItem(

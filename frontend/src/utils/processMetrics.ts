@@ -1,3 +1,5 @@
+import { algorithmThresholds, loudnessBand, speechRateBand } from '@/config/algorithmThresholds'
+
 export type ProcessMetricKey = 'script_accuracy' | 'error_count' | 'speech_rate' | 'loudness'
 export type MetricTone = 'good' | 'watch' | 'neutral'
 
@@ -33,7 +35,7 @@ export const processMetricCatalog: Record<
     patientLabel: '说话节奏',
     unit: '字/min',
     polarity: 'neutral',
-    reference: '参考 180-240 字/min',
+    reference: `工程参考 ${algorithmThresholds.speechRateReference.value.min}-${algorithmThresholds.speechRateReference.value.max} 字/min`,
     patientHint: '保持自然节奏'
   },
   loudness: {
@@ -41,7 +43,7 @@ export const processMetricCatalog: Record<
     patientLabel: '声音响度',
     unit: 'dBFS',
     polarity: 'neutral',
-    reference: '工程参考 -35 至 -12 dBFS',
+    reference: `工程参考 ${algorithmThresholds.loudnessReference.value.min} 至 ${algorithmThresholds.loudnessReference.value.max} dBFS`,
     patientHint: '声音清楚舒适'
   }
 }
@@ -53,8 +55,8 @@ export function isProcessMetricKey(key: string): key is ProcessMetricKey {
 export function processMetricTone(key: string, value: number): MetricTone {
   if (key === 'script_accuracy') return value >= 90 ? 'good' : 'watch'
   if (key === 'error_count') return value <= 1 ? 'good' : 'watch'
-  if (key === 'speech_rate') return value >= 180 && value <= 240 ? 'good' : 'watch'
-  if (key === 'loudness') return value >= 60 && value <= 78 ? 'good' : 'watch'
+  if (key === 'speech_rate') return speechRateBand(value) === 'reference' ? 'good' : 'watch'
+  if (key === 'loudness') return loudnessBand(value) === 'reference' ? 'good' : 'watch'
   return 'neutral'
 }
 
@@ -62,13 +64,13 @@ export function processMetricBrief(key: string, value: number) {
   if (key === 'script_accuracy') return value >= 90 ? '表达完整度较好' : '表达完整度需关注'
   if (key === 'error_count') return value <= 1 ? '错误较少' : '错误偏多'
   if (key === 'speech_rate') {
-    if (value < 180) return '节奏偏慢'
-    if (value > 240) return '节奏偏快'
+    if (speechRateBand(value) === 'low') return '节奏偏慢'
+    if (speechRateBand(value) === 'high') return '节奏偏快'
     return '节奏稳定'
   }
   if (key === 'loudness') {
-    if (value < -35) return '声音偏轻'
-    if (value > -12) return '声音偏响'
+    if (loudnessBand(value) === 'low') return '声音偏轻'
+    if (loudnessBand(value) === 'high') return '声音偏响'
     return '音量稳定'
   }
   return '可作为阶段参考'
@@ -87,13 +89,13 @@ export function formatPatientMetricValue(key: ProcessMetricKey, value: number) {
   if (key === 'script_accuracy') return `${formatMetricValue(value)}%`
   if (key === 'error_count') return `${formatMetricValue(value)}处`
   if (key === 'speech_rate') {
-    if (value < 180) return '偏慢'
-    if (value > 240) return '偏快'
+    if (speechRateBand(value) === 'low') return '偏慢'
+    if (speechRateBand(value) === 'high') return '偏快'
     return '合适'
   }
   if (key === 'loudness') {
-    if (value < -35) return '偏轻'
-    if (value > -12) return '偏响'
+    if (loudnessBand(value) === 'low') return '偏轻'
+    if (loudnessBand(value) === 'high') return '偏响'
     return '稳定'
   }
   return formatMetricValue(value)

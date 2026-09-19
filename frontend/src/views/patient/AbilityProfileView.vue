@@ -73,6 +73,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { profilesApi } from '@/api/profiles'
+import { loudnessBand } from '@/config/algorithmThresholds'
 import type { AbilityProfile } from '@/types/api'
 import { toUserMessage } from '@/utils/errors'
 
@@ -146,8 +147,8 @@ function paceLabel(value: number) {
 }
 
 function loudnessLabel(value: number) {
-  if (value < -35) return '偏轻'
-  if (value > -12) return '偏响'
+  if (loudnessBand(value) === 'low') return '偏轻'
+  if (loudnessBand(value) === 'high') return '偏响'
   return '稳定'
 }
 

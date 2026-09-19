@@ -46,6 +46,10 @@ class AttemptEvaluationRead(BaseModel):
     metric_category: EvaluationMetricCategory
     value: float
     evaluation_source: EvaluationSource
+    unit: str | None = None
+    algorithm_version: str | None = None
+    quality_status: str | None = None
+    decision_eligible: bool = False
     created_at: datetime
 
 

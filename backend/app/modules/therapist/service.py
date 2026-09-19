@@ -5,6 +5,8 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.algorithm_config import range_bounds
+
 from app.database.base import utc_now
 from app.modules.assessment.model import AssessmentReviewStatus, AssessmentSession, AssessmentType
 from app.modules.assessment.schema import (
@@ -679,7 +681,8 @@ def trend_bucket_summary(attempt_count: int, metrics: dict[str, float | None]) -
     if speech_rate is not None:
         parts.append("节奏稳定" if 180 <= speech_rate <= 240 else "节奏需观察")
     if loudness is not None:
-        parts.append("音量稳定" if -35 <= loudness <= -12 else "音量需观察")
+        loudness_min, loudness_max = range_bounds("repeat_loudness_reference")
+        parts.append("音量稳定" if loudness_min <= loudness <= loudness_max else "音量需观察")
     return "，".join(parts) + "。" if parts else "已有训练记录，暂缺完整指标。"
 
 

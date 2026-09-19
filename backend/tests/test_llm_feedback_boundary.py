@@ -31,7 +31,8 @@ class LLMFeedbackBoundaryTest(unittest.TestCase):
             script_accuracy=92.0,
             error_count=1,
             speech_rate=200.0,
-            loudness=66.0,
+            loudness=-24.0,
+            details={"loudness_unit": "dBFS"},
         )
 
         scores = build_rule_score_dimensions(process)
@@ -47,7 +48,7 @@ class LLMFeedbackBoundaryTest(unittest.TestCase):
             script_accuracy=65.0,
             error_count=3,
             speech_rate=160.0,
-            loudness=55.0,
+            loudness=-40.0,
         )
 
         feedback = safe_llm_feedback(FailingFeedbackProvider(), "目标句", "转写句", "repeat", process)

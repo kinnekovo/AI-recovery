@@ -2,6 +2,8 @@ from functools import lru_cache
 import os
 from pathlib import Path
 
+from app.core.algorithm_config import config_value
+
 
 def load_env_file(env_path: Path) -> None:
     if not env_path.exists():
@@ -41,6 +43,7 @@ class Settings:
     ffmpeg_bin: str | None
     acoustic_dba_calibration_offset: float
     acoustic_voice_threshold_dbfs: float
+    acoustic_min_loudness_dbfs: float
     pronunciation_provider: str
     tencent_soe_app_id: str | None
     tencent_soe_server_type: int
@@ -107,9 +110,21 @@ class Settings:
         self.acoustic_base_url = os.getenv("ACOUSTIC_BASE_URL")
         self.ffmpeg_bin = os.getenv("FFMPEG_BIN")
         self.acoustic_dba_calibration_offset = float(os.getenv("ACOUSTIC_DBA_CALIBRATION_OFFSET", "90"))
-        self.acoustic_voice_threshold_dbfs = float(os.getenv("ACOUSTIC_VOICE_THRESHOLD_DBFS", "-45"))
+        self.acoustic_voice_threshold_dbfs = float(
+            os.getenv("ACOUSTIC_VOICE_THRESHOLD_DBFS", str(config_value("acoustic_voice_threshold")))
+        )
         self.acoustic_min_speaking_seconds = float(os.getenv("ACOUSTIC_MIN_SPEAKING_SECONDS", "1.0"))
-        self.acoustic_min_loudness_dba = float(os.getenv("ACOUSTIC_MIN_LOUDNESS_DBA", "45"))
+        legacy_min_dba = os.getenv("ACOUSTIC_MIN_LOUDNESS_DBA")
+        configured_min_dbfs = os.getenv("ACOUSTIC_MIN_LOUDNESS_DBFS")
+        self.acoustic_min_loudness_dbfs = float(
+            configured_min_dbfs
+            if configured_min_dbfs is not None
+            else float(legacy_min_dba) - self.acoustic_dba_calibration_offset
+            if legacy_min_dba is not None
+            else config_value("acoustic_min_loudness")
+        )
+        # Deprecated compatibility field. Formal quality decisions use dBFS only.
+        self.acoustic_min_loudness_dba = self.acoustic_min_loudness_dbfs + self.acoustic_dba_calibration_offset
         self.acoustic_min_snr_db = float(os.getenv("ACOUSTIC_MIN_SNR_DB", "10"))
         self.acoustic_max_clipping_ratio = float(os.getenv("ACOUSTIC_MAX_CLIPPING_RATIO", "0.01"))
         self.pronunciation_provider = os.getenv("PRONUNCIATION_PROVIDER", "disabled").strip().lower() or "disabled"

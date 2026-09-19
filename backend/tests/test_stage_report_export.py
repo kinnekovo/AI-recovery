@@ -30,7 +30,7 @@ class StageReportExportTest(unittest.TestCase):
                 avg_script_accuracy=91.5,
                 avg_error_count=1.0,
                 avg_speech_rate=188.0,
-                avg_loudness=64.0,
+                avg_loudness=-24.0,
                 summary="表达较稳定。",
             ),
             assessments=[

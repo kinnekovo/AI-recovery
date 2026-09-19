@@ -121,7 +121,7 @@ class LocalAcousticAnalysisProvider(AcousticAnalysisProvider):
             longest_pause_seconds=pause_metrics["longest_pause_seconds"],
             clipping_ratio=clipping_ratio,
             snr_db=snr_db,
-            **self._quality_fields(speaking_duration, loudness_dba, snr_db, clipping_ratio),
+            **self._quality_fields(speaking_duration, loudness_dbfs, snr_db, clipping_ratio),
         )
 
     def _decode_audio(self, audio_path: str):
@@ -160,13 +160,13 @@ class LocalAcousticAnalysisProvider(AcousticAnalysisProvider):
             total_duration_seconds=duration,
             loudness_dbfs=loudness_dbfs,
             clipping_ratio=clipping_ratio,
-            **self._quality_fields(duration, loudness_dba, 0.0, clipping_ratio),
+            **self._quality_fields(duration, loudness_dbfs, 0.0, clipping_ratio),
         )
 
-    def _quality_fields(self, speaking_duration: float, loudness_dba: float, snr_db: float, clipping_ratio: float) -> dict:
+    def _quality_fields(self, speaking_duration: float, loudness_dbfs: float, snr_db: float, clipping_ratio: float) -> dict:
         settings = get_settings()
         too_short = speaking_duration < settings.acoustic_min_speaking_seconds
-        too_quiet = loudness_dba < settings.acoustic_min_loudness_dba
+        too_quiet = loudness_dbfs < settings.acoustic_min_loudness_dbfs
         too_noisy = 0 < snr_db < settings.acoustic_min_snr_db
         clipped = clipping_ratio > settings.acoustic_max_clipping_ratio
         reasons = []

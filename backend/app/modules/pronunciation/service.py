@@ -4,6 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.algorithm_config import config_value
 from app.integrations.pronunciation_assessment.provider import (
     PronunciationAssessmentResult,
     PronunciationProviderError,
@@ -237,15 +238,23 @@ def _intelligibility_proxy(process_accuracy: float, result: PronunciationAssessm
         return None
     quality = 100.0 if prosody.get("status") == "completed" else 70.0
     completion = (result.completion or 0) * 100
-    return round(process_accuracy * 0.4 + result.overall_accuracy * 0.35 + completion * 0.15 + quality * 0.1, 2)
+    weights = config_value("pronunciation_proxy_weights")
+    return round(
+        process_accuracy * weights["process_accuracy"]
+        + result.overall_accuracy * weights["provider_accuracy"]
+        + completion * weights["completion"]
+        + quality * weights["prosody_quality"],
+        2,
+    )
 
 
 def _coverage(process_accuracy: float, result: PronunciationAssessmentResult, prosody: dict) -> float:
-    value = 0.2 if process_accuracy >= 0 else 0.0
+    weights = config_value("pronunciation_coverage_weights")
+    value = weights["process"] if process_accuracy >= 0 else 0.0
     if result.status == "completed":
-        value += 0.55
+        value += weights["provider"]
     if prosody.get("status") == "completed":
-        value += 0.25
+        value += weights["prosody"]
     return round(value, 2)
 
 

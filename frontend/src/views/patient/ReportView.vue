@@ -104,6 +104,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { loudnessBand } from '@/config/algorithmThresholds'
 import { reportsApi } from '@/api/reports'
 import { scenarioDialoguesApi } from '@/api/scenarioDialogues'
 import type { LatestReport, ProcessMonitoringSummary, ScenarioCommunicationSummary } from '@/types/api'
@@ -146,7 +147,7 @@ const patientSuggestion = computed(() => {
   if (summary.avg_speech_rate !== null && summary.avg_speech_rate < 180) {
     return '可以继续练熟悉短句，重点放在少停顿、连起来说。'
   }
-  if (summary.avg_loudness !== null && summary.avg_loudness < -35) {
+  if (summary.avg_loudness !== null && loudnessBand(summary.avg_loudness) === 'low') {
     return '可以试着把声音放清楚一点，不用着急，稳定开口最重要。'
   }
   return '最近练习比较稳定，继续保持今天的训练节奏。'

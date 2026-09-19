@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.modules.training.model import TrainingType
 
@@ -149,6 +149,7 @@ class RecommendationEffectRead(BaseModel):
     recommendation_matched: bool
     status: str
     metrics: dict[str, float]
+    metric_units: dict[str, str] = Field(default_factory=dict)
     summary: str
 
 

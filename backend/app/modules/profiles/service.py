@@ -4,6 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.algorithm_config import config_value, range_bounds
 from app.modules.assessment.model import AssessmentReviewStatus, AssessmentSession
 from app.modules.attempts.model import Attempt
 from app.modules.evaluations.model import (
@@ -14,6 +15,7 @@ from app.modules.evaluations.model import (
     ScenarioReviewStatus,
 )
 from app.modules.evaluations.service import PROCESS_METRIC_NAMES
+from app.modules.evaluations.evidence_gate import is_formal_process_evidence
 from app.modules.profiles.model import AbilityProfile
 from app.modules.profiles.schema import AbilityProfileRead
 from app.modules.scoring.model import AttemptAnalysisResult
@@ -77,6 +79,9 @@ def refresh_ability_profile(db: Session, patient_profile_id: UUID) -> AbilityPro
         "scenario_adjusted_count": reviewed_scenarios["adjusted_count"],
         "scenario_goal_achieved_count": reviewed_scenarios["achieved_count"],
         "latest_scenario_review_notes": reviewed_scenarios["latest_notes"],
+        "loudness_unit": "dBFS" if process_metrics else None,
+        "algorithm_version": "rehab-process-v2" if process_metrics else None,
+        "profile_eligibility": bool(process_metrics),
     }
     db.commit()
     db.refresh(ability)
@@ -90,8 +95,10 @@ def recent_process_metrics(db: Session, patient_profile_id: UUID) -> list[dict[s
             Attempt.created_at,
             Attempt.audio_quality,
             AttemptAnalysisResult.semantic_metrics,
+            AttemptAnalysisResult.provider_version,
             EvaluationMetric.name,
             AttemptEvaluation.value,
+            AttemptEvaluation.unit,
         )
         .join(AttemptEvaluation, AttemptEvaluation.attempt_id == Attempt.id)
         .join(EvaluationMetric, EvaluationMetric.id == AttemptEvaluation.metric_id)
@@ -101,46 +108,41 @@ def recent_process_metrics(db: Session, patient_profile_id: UUID) -> list[dict[s
         .where(
             TrainingSession.patient_profile_id == patient_profile_id,
             AttemptEvaluation.evaluation_source == EvaluationSource.system_rule,
+            AttemptEvaluation.decision_eligible.is_(True),
             EvaluationMetric.name.in_(PROCESS_METRIC_NAMES),
             TrainingSession.training_type == TrainingType.repeat,
         )
         .order_by(Attempt.created_at.desc())
     ).all()
     grouped: dict[UUID, dict] = {}
-    for attempt_id, created_at, audio_quality, semantic_metrics, metric_name, value in rows:
+    for attempt_id, created_at, audio_quality, semantic_metrics, provider_version, metric_name, value, unit in rows:
         if attempt_id not in grouped:
             grouped[attempt_id] = {
                 "created_at": created_at,
                 "audio_quality": audio_quality,
                 "semantic_metrics": semantic_metrics or {},
+                "provider_version": provider_version,
+                "units": {},
                 "metrics": {},
             }
         grouped[attempt_id]["metrics"][metric_name] = float(value)
+        grouped[attempt_id]["units"][metric_name] = unit
     complete_points = [
         data["metrics"]
         for data in sorted(grouped.values(), key=lambda item: item["created_at"], reverse=True)
         if PROCESS_METRIC_NAMES.issubset(data["metrics"].keys())
-        and is_profile_eligible_analysis(data["audio_quality"], data["semantic_metrics"])
+        and data["units"].get("loudness") == "dBFS"
+        and is_profile_eligible_analysis(data["audio_quality"], data["semantic_metrics"], data["provider_version"])
     ]
     return complete_points[:RECENT_ATTEMPT_LIMIT]
 
 
-def is_profile_eligible_analysis(audio_quality: str | None, semantic_metrics: dict | None) -> bool:
-    if audio_quality != "pass":
-        return False
-    if not semantic_metrics:
-        return False
-    if semantic_metrics.get("asr_fallback_used"):
-        return False
-    if semantic_metrics.get("asr_provider") == "mock":
-        return False
-    process = semantic_metrics.get("process_monitoring") or {}
-    if process.get("evaluation_source") == EvaluationSource.mock_ai.value:
-        return False
-    sources = process.get("input_sources") or {}
-    if sources.get("asr_provider") == "mock" or sources.get("acoustic_provider") == "mock":
-        return False
-    return True
+def is_profile_eligible_analysis(
+    audio_quality: str | None,
+    semantic_metrics: dict | None,
+    provider_version: str | None = None,
+) -> bool:
+    return is_formal_process_evidence(audio_quality, semantic_metrics, provider_version)
 
 
 def reviewed_assessment_summary(db: Session, patient_profile_id: UUID) -> dict:
@@ -201,19 +203,18 @@ def decide_levels(averages: dict[str, float], reviewed_count: int) -> tuple[str,
     errors = averages.get("error_count")
     if accuracy is None or errors is None:
         return "L1", "S1"
-    if accuracy >= 92 and errors <= 1 and reviewed_count >= 2:
-        return "L4", "S3"
-    if accuracy >= 90 and errors <= 1:
-        return "L3", "S3"
-    if accuracy >= 78 and errors <= 2:
-        return "L2", "S2"
+    for rule in config_value("profile_level_rules"):
+        if accuracy >= rule["accuracy_min"] and errors <= rule["errors_max"] and reviewed_count >= rule["reviewed_min"]:
+            return tuple(rule["levels"])
     return "L1", "S1"
 
 
 def calculate_confidence(attempt_count: int, reviewed_count: int, scenario_review_count: int = 0) -> float:
-    process_part = min(attempt_count / 5, 1.0) * 0.55
-    review_part = min(reviewed_count / 2, 1.0) * 0.30
-    scenario_part = min(scenario_review_count / 2, 1.0) * 0.15
+    weights = config_value("profile_evidence_weights")
+    caps = config_value("profile_evidence_caps")
+    process_part = min(attempt_count / caps["process"], 1.0) * weights["process"]
+    review_part = min(reviewed_count / caps["assessment_review"], 1.0) * weights["assessment_review"]
+    scenario_part = min(scenario_review_count / caps["scenario_review"], 1.0) * weights["scenario_review"]
     return round(process_part + review_part + scenario_part, 2)
 
 
@@ -226,13 +227,14 @@ def build_summary(averages: dict[str, float], reviewed: dict, scenario_reviewed:
     speech_rate = averages.get("speech_rate")
     loudness = averages.get("loudness")
     if accuracy is not None:
-        parts.append("表达完整度较好" if accuracy >= 90 else "表达完整度仍需继续练习")
+        parts.append("表达完整度较好" if accuracy >= config_value("profile_high_accuracy") else "表达完整度仍需继续练习")
     if errors is not None:
         parts.append("错误较少" if errors <= 1 else "表达中仍有需要留意的错误")
     if speech_rate is not None:
-        parts.append("说话节奏偏慢" if speech_rate < 180 else "说话节奏较稳定")
+        parts.append("说话节奏偏慢" if speech_rate < config_value("phase43_slow_speech_rate") else "说话节奏较稳定")
     if loudness is not None:
-        parts.append("声音偏轻" if loudness < -35 else "声音状态较稳定")
+        loudness_min, _ = range_bounds("repeat_loudness_reference")
+        parts.append("声音偏轻" if loudness < loudness_min else "声音状态较稳定")
     if reviewed["latest_notes"]:
         parts.append(f"治疗师备注：{reviewed['latest_notes']}")
     if scenario_reviewed["count"]:
@@ -248,13 +250,15 @@ def build_summary(averages: dict[str, float], reviewed: dict, scenario_reviewed:
 def build_recommendation(averages: dict[str, float], confidence: float) -> str:
     if not averages:
         return "先完成几次基础训练，系统会逐步给出更贴合的建议。"
-    if confidence < 0.45:
+    gate = config_value("profile_recommendation_gate")
+    if confidence < gate["confidence_min"]:
         return "当前画像置信度还不高，建议继续保持每日训练并等待治疗师复核。"
-    if averages.get("script_accuracy", 100) < 75 or averages.get("error_count", 0) >= 4:
+    if averages.get("script_accuracy", 100) < gate["accuracy_low"] or averages.get("error_count", 0) >= gate["errors_high"]:
         return "建议先使用短句和高提示训练，把一句话说完整后再提高难度。"
-    if averages.get("speech_rate", 200) < 180:
+    if averages.get("speech_rate", 200) < config_value("phase43_slow_speech_rate"):
         return "建议增加熟悉短句的连续表达练习，重点减少停顿。"
-    if averages.get("loudness", -24) < -35:
+    loudness_min, _ = range_bounds("repeat_loudness_reference")
+    if averages.get("loudness", -24) < loudness_min:
         return "建议增加声音稳定练习，先坐直、慢吸气，再把句子清楚说完。"
     return "可以继续当前训练节奏，下一步逐步增加句子长度和自主表达比例。"
 
