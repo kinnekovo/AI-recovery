@@ -1,7 +1,7 @@
 """add R0 process-evidence safety metadata
 
 Revision ID: 0026_r0_algorithm_safety
-Revises: 0025_replace_sadtalker_with_aliyun_avatar
+Revises: 0025_aliyun_avatar
 Create Date: 2026-09-19
 """
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 revision = "0026_r0_algorithm_safety"
-down_revision = "0025_replace_sadtalker_with_aliyun_avatar"
+down_revision = "0025_aliyun_avatar"
 branch_labels = None
 depends_on = None
 

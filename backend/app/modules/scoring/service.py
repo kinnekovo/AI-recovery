@@ -45,6 +45,7 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
             refresh_ability_profile(db, task.session.patient_profile_id)
         else:
             db.commit()
+        _write_repeat_v3_shadow_nonblocking(db, attempt)
         return to_training_feedback_read(db, attempt.id, transcript=None)
     audio = db.get(FileAsset, attempt.audio_file_id)
     task = db.get(SessionTask, attempt.session_task_id)
@@ -74,6 +75,7 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
             error_code=exc.code,
             error_message=exc.message,
         )
+        _write_repeat_v3_shadow_nonblocking(db, attempt)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"语音识别失败：{exc.message}") from exc
     transcript = asr_result.text
     if asr_result.provider_name == "mock":
@@ -84,6 +86,7 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
         attempt.analysis_error_code = "asr:mock_provider"
         attempt.analysis_error_message = "正式评分需要可用的语音识别服务"
         db.commit()
+        _write_repeat_v3_shadow_nonblocking(db, attempt)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="语音识别服务暂不可用，未生成正式场景结论，请稍后重试。",
@@ -104,6 +107,7 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
             provider=getattr(acoustic_provider, "provider_name", "unknown"),
             error_message=provider_error_summary("声学分析失败", exc),
         )
+        _write_repeat_v3_shadow_nonblocking(db, attempt)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="声学分析失败，请稍后重试") from exc
     if acoustic_provider.provider_name == "mock":
         attempt.analysis_status = AnalysisStatus.failed
@@ -111,6 +115,7 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
         attempt.analysis_error_code = "acoustic:mock_provider"
         attempt.analysis_error_message = "正式评分需要启用本地声学分析"
         db.commit()
+        _write_repeat_v3_shadow_nonblocking(db, attempt)
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="正式评分需要启用本地声学分析。")
     if acoustic.quality_status != "pass":
         attempt.analysis_status = AnalysisStatus.failed
@@ -119,6 +124,7 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
         attempt.analysis_error_code = f"audio_quality:{acoustic.quality_reason}"[:80]
         attempt.analysis_error_message = reason[:255]
         db.commit()
+        _write_repeat_v3_shadow_nonblocking(db, attempt)
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"录音质量不合格，未生成分数：{reason}")
     process_evaluation = generate_process_evaluation(
         template,
@@ -237,8 +243,33 @@ def analyze_attempt(db: Session, attempt: Attempt) -> TrainingFeedbackRead:
     task.status = TrainingStatus.completed
     db.flush()
     complete_session_if_needed(db, task.session)
+    _write_repeat_v3_shadow_nonblocking(db, attempt)
     db.refresh(score)
     return to_training_feedback_read(db, attempt.id, transcript=transcript)
+
+
+def _write_repeat_v3_shadow_nonblocking(db: Session, attempt: Attempt) -> None:
+    """V3 is shadow-only: a failed write cannot retract completed V2 training."""
+
+    try:
+        from app.modules.evaluation_runs.repeat_v3 import write_repeat_v3_run
+
+        run = write_repeat_v3_run(db, attempt)
+        analysis = db.scalar(select(AttemptAnalysisResult).where(AttemptAnalysisResult.attempt_id == attempt.id))
+        if analysis:
+            raw = dict(analysis.raw_model_output or {})
+            raw["repeat_v3_write"] = {"status": "adopted", "run_id": str(run.id), "algorithm_version": run.algorithm_version}
+            analysis.raw_model_output = raw
+            db.commit()
+    except Exception as exc:
+        db.rollback()
+        analysis = db.scalar(select(AttemptAnalysisResult).where(AttemptAnalysisResult.attempt_id == attempt.id))
+        if analysis:
+            raw = dict(analysis.raw_model_output or {})
+            raw["repeat_v3_write"] = {"status": "retry_required", "attempt_id": str(attempt.id), "error": provider_error_summary("V3 写入失败", exc)}
+            analysis.raw_model_output = raw
+            db.commit()
+        log_event("error", "evaluation_v3", "repeat_v3_write_failed", attempt_id=str(attempt.id), retry_required=True, error_message=provider_error_summary("V3 写入失败", exc))
 
 
 def ensure_process_evaluation(db: Session, attempt: Attempt) -> None:

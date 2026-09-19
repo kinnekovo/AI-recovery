@@ -9,8 +9,10 @@ from app.modules.attempts import service
 from app.modules.attempts.schema import AttemptCreate, AttemptRead
 from app.modules.scoring.service import analyze_attempt
 from app.modules.pronunciation.service import get_patient_attempt_pronunciation
+from app.modules.evaluation_runs.repeat_v3 import get_adopted_repeat_run, require_repeat_professional_access
+from app.modules.evaluation_runs.service import get_run_for_professional
 from app.modules.users.model import User
-from app.modules.users.service import require_patient
+from app.modules.users.service import require_patient, require_therapist
 
 router = APIRouter(prefix="/attempts", tags=["attempts"])
 
@@ -66,3 +68,16 @@ def analyze(
     attempt = service.get_attempt(db, current_user, attempt_id)
     score = analyze_attempt(db, attempt)
     return api_success(score.model_dump(mode="json"))
+
+
+@router.get("/{attempt_id}/evaluation-v3")
+def evaluation_v3(
+    attempt_id: UUID,
+    current_user: User = Depends(require_therapist),
+    db: Session = Depends(get_db),
+):
+    require_repeat_professional_access(db, current_user, attempt_id)
+    run = get_adopted_repeat_run(db, attempt_id)
+    if not run:
+        return api_success({"status": "not_generated", "attempt_id": str(attempt_id)})
+    return api_success(get_run_for_professional(db, current_user, run.id).model_dump(mode="json"))

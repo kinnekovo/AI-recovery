@@ -1,6 +1,6 @@
 """replace SadTalker tasks with Alibaba Cloud avatar metadata
 
-Revision ID: 0025_replace_sadtalker_with_aliyun_avatar
+Revision ID: 0025_aliyun_avatar
 Revises: 0024_avatar_video_tasks
 """
 
@@ -9,13 +9,17 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 
-revision = "0025_replace_sadtalker_with_aliyun_avatar"
+revision = "0025_aliyun_avatar"
 down_revision = "0024_avatar_video_tasks"
 branch_labels = None
 depends_on = None
 
 
 def upgrade() -> None:
+    # Old MP4 tasks are retired by this migration. Delete dependent task rows
+    # before their generated files so an existing 0024 database satisfies the
+    # foreign-key constraint during an in-place upgrade.
+    op.execute("DELETE FROM avatar_video_tasks")
     # Old MP4s are deleted from storage by the deployment cleanup; remove their DB rows first.
     op.execute("DELETE FROM files WHERE file_type::text = 'generated_avatar_video'")
     op.drop_table("avatar_video_tasks")
@@ -35,7 +39,12 @@ def upgrade() -> None:
     op.add_column("agents", sa.Column("aliyun_avatar_error", sa.String(length=300), nullable=True))
     op.alter_column("agents", "aliyun_avatar_status", server_default=None)
 
-    session_status = postgresql.ENUM("opening", "active", "closed", "failed", name="avatar_session_status")
+    # Create once with checkfirst, then keep the table column from emitting a
+    # second CREATE TYPE on PostgreSQL (important when retrying an interrupted
+    # migration against an existing development database).
+    session_status = postgresql.ENUM(
+        "opening", "active", "closed", "failed", name="avatar_session_status", create_type=False
+    )
     session_status.create(op.get_bind(), checkfirst=True)
     op.create_table(
         "avatar_sessions",

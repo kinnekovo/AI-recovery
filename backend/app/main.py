@@ -10,6 +10,7 @@ from app.modules.attempts.router import router as attempts_router
 from app.modules.auth.router import router as auth_router
 from app.modules.consent.router import router as consent_router
 from app.modules.evaluations.router import router as evaluations_router
+from app.modules.evaluation_runs.router import router as evaluation_runs_router
 from app.modules.family.router import router as family_router
 from app.modules.files.router import router as files_router
 from app.modules.health.router import router as health_router
@@ -42,6 +43,7 @@ def create_app() -> FastAPI:
     app.include_router(scoring_router, prefix=settings.api_prefix)
     app.include_router(scenario_dialogues_router, prefix=settings.api_prefix)
     app.include_router(evaluations_router, prefix=settings.api_prefix)
+    app.include_router(evaluation_runs_router, prefix=settings.api_prefix)
     app.include_router(assessment_router, prefix=settings.api_prefix)
     app.include_router(reports_router, prefix=settings.api_prefix)
     app.include_router(profiles_router, prefix=settings.api_prefix)
