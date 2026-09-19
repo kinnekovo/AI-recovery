@@ -9,6 +9,7 @@ from app.modules.assessment.router import router as assessment_router
 from app.modules.attempts.router import router as attempts_router
 from app.modules.auth.router import router as auth_router
 from app.modules.consent.router import router as consent_router
+from app.modules.calibration.router import router as calibration_router
 from app.modules.evaluations.router import router as evaluations_router
 from app.modules.evaluation_runs.router import router as evaluation_runs_router
 from app.modules.family.router import router as family_router
@@ -51,6 +52,7 @@ def create_app() -> FastAPI:
     app.include_router(family_router, prefix=settings.api_prefix)
     app.include_router(files_router, prefix=settings.api_prefix)
     app.include_router(consent_router, prefix=settings.api_prefix)
+    app.include_router(calibration_router, prefix=settings.api_prefix)
     app.include_router(health_router, prefix=settings.api_prefix)
 
     @app.middleware("http")

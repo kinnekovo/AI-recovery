@@ -13,5 +13,6 @@ def compare(a: AssessmentSession,b: AssessmentSession)->dict:
   other=(b.subscale_results or {}).get(k); av=v.get("value") if isinstance(v,dict) else v; bv=other.get("value") if isinstance(other,dict) else other
   if isinstance(av,(int,float)) and isinstance(bv,(int,float)): dims.append({"dimension_code":"instrument.subscale."+str(k),"baseline":av,"current":bv,"change":round(bv-av,2)})
  if not dims: r.append("dimension_mismatch")
- status="comparable" if not r else ("partially_comparable" if dims else "not_comparable")
+ hard={"scale_mismatch","scale_version_mismatch","locale_mismatch","localization_version_mismatch","unit_mismatch","legacy_insufficient_metadata"}
+ status="comparable" if not r else ("not_comparable" if hard.intersection(r) else ("partially_comparable" if dims else "not_comparable"))
  return {"status":status,"reason_codes":sorted(set(r)),"compared_dimensions":dims,"excluded_dimensions":[],"fact":"values are recorded differences only; no clinical interpretation"}

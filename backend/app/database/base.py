@@ -31,6 +31,7 @@ def import_models() -> None:
     from app.modules.assessment import model as assessment_model  # noqa: F401
     from app.modules.attempts import model as attempts_model  # noqa: F401
     from app.modules.consent import model as consent_model  # noqa: F401
+    from app.modules.calibration import model as calibration_model  # noqa: F401
     from app.modules.evaluations import model as evaluations_model  # noqa: F401
     from app.modules.evaluation_runs import model as evaluation_runs_model  # noqa: F401
     from app.modules.files import model as files_model  # noqa: F401
