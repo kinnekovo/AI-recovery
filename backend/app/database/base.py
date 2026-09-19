@@ -36,6 +36,7 @@ def import_models() -> None:
     from app.modules.evaluation_runs import model as evaluation_runs_model  # noqa: F401
     from app.modules.files import model as files_model  # noqa: F401
     from app.modules.profiles import model as profiles_model  # noqa: F401
+    from app.modules.profile_v2 import model as profile_v2_model  # noqa: F401
     from app.modules.pronunciation import model as pronunciation_model  # noqa: F401
     from app.modules.scoring import model as scoring_model  # noqa: F401
     from app.modules.scenario_dialogues import model as scenario_dialogues_model  # noqa: F401

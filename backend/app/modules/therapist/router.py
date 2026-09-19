@@ -4,12 +4,15 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 
 from app.core.response import api_success
 from app.database.session import get_db
 from app.modules.assessment.model import AssessmentReviewStatus, AssessmentType
 from app.modules.assessment.schema import AssessmentCreate, AssessmentReviewUpdate, ClinicalSourceUpdate
 from app.modules.profiles.service import get_patient_ability_profile
+from app.modules.profile_v2 import service as profile_v2_service
+from app.modules.profile_v2.schema import ProfileSnapshotRead, ProfileEvidenceLinkRead
 from app.modules.therapist import service
 from app.modules.therapist.report_export import render_stage_report_html
 from app.modules.training.schema import TrainingRecommendationReviewUpdate
@@ -38,6 +41,43 @@ from app.modules.users.model import User
 from app.modules.users.service import require_therapist
 
 router = APIRouter(prefix="/therapist", tags=["therapist"])
+
+
+def _patient_profile_id(db: Session, patient_user_id: UUID) -> UUID:
+    profile = db.scalar(select(service.PatientProfile).where(service.PatientProfile.user_id == patient_user_id))
+    if not profile:
+        raise HTTPException(status_code=404, detail="患者档案不存在")
+    return profile.id
+
+
+@router.get("/patients/{patient_user_id}/profile")
+def profile_v2(patient_user_id: UUID, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
+    snapshot = profile_v2_service.get_latest_profile(db, _patient_profile_id(db, patient_user_id))
+    if not snapshot: raise HTTPException(status_code=404, detail="尚未生成 Profile V2 快照")
+    return api_success(ProfileSnapshotRead.model_validate(snapshot).model_dump(mode="json"))
+
+
+@router.get("/patients/{patient_user_id}/profile/history")
+def profile_v2_history(patient_user_id: UUID, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
+    rows = profile_v2_service.list_history(db, _patient_profile_id(db, patient_user_id))
+    return api_success([ProfileSnapshotRead.model_validate(row).model_dump(mode="json") for row in rows])
+
+
+@router.get("/patients/{patient_user_id}/profile/{snapshot_id}/evidence")
+def profile_v2_evidence(patient_user_id: UUID, snapshot_id: UUID, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
+    snapshot = db.get(profile_v2_service.PatientProfileSnapshot, snapshot_id)
+    if not snapshot or snapshot.patient_profile_id != _patient_profile_id(db, patient_user_id): raise HTTPException(status_code=404, detail="画像快照不存在")
+    return api_success([ProfileEvidenceLinkRead.model_validate(row).model_dump(mode="json") for row in profile_v2_service.evidence_for_snapshot(db, snapshot_id)])
+
+
+@router.post("/patients/{patient_user_id}/profile/rebuild")
+def rebuild_profile_v2(patient_user_id: UUID, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
+    snapshot = profile_v2_service.build_profile(db, _patient_profile_id(db, patient_user_id))
+    return api_success(ProfileSnapshotRead.model_validate(snapshot).model_dump(mode="json"))
 
 
 @router.patch("/scenario-dialogues/{dialogue_id}/review")
