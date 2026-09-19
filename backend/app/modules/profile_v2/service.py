@@ -150,9 +150,16 @@ def evidence_for_snapshot(db: Session, snapshot_id: UUID):
 
 def get_policy_profile(db: Session, patient_profile_id: UUID):
     snapshot = get_latest_profile(db, patient_profile_id)
-    if not snapshot: return None
-    return {"snapshot_id": str(snapshot.id), "profile_version": snapshot.profile_schema_version, "status": snapshot.status,
-            "dimensions": [d for d in snapshot.payload.get("dimensions", []) if d.get("evidence_sufficiency") == "sufficient"]}
+    if not snapshot:
+        failed = db.scalar(select(ProfileBuildFailure).where(ProfileBuildFailure.patient_profile_id == patient_profile_id, ProfileBuildFailure.retry_required.is_(True)))
+        return {"status": "failed", "dimensions": [], "profile_failure": True} if failed else None
+    dimensions = [d for d in snapshot.payload.get("dimensions", []) if d.get("evidence_sufficiency") == "sufficient"]
+    clinical_dates = [d.get("latest_observed_at") for d in dimensions if str(d.get("code", "")).startswith("clinical.") and d.get("latest_observed_at")]
+    return {"snapshot_id": str(snapshot.id), "profile_version": snapshot.profile_schema_version,
+            "mapping_version": snapshot.mapping_version, "evidence_policy_version": snapshot.evidence_policy_version,
+            "generated_at": snapshot.generated_at.isoformat(), "status": snapshot.status,
+            "latest_clinical_assessment_at": max(clinical_dates) if clinical_dates else None,
+            "dimensions": dimensions}
 
 def record_build_failure(db, patient_profile_id, input_fingerprint, failure_stage, error_code="profile_build_failed"):
     row = db.scalar(select(ProfileBuildFailure).where(ProfileBuildFailure.patient_profile_id == patient_profile_id, ProfileBuildFailure.input_fingerprint == input_fingerprint))

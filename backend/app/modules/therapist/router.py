@@ -13,6 +13,8 @@ from app.modules.assessment.schema import AssessmentCreate, AssessmentReviewUpda
 from app.modules.profiles.service import get_patient_ability_profile
 from app.modules.profile_v2 import service as profile_v2_service
 from app.modules.profile_v2.schema import ProfileSnapshotRead, ProfileEvidenceLinkRead
+from app.modules.policy_v2 import service as policy_v2_service
+from app.modules.policy_v2.schema import PolicyDecisionRead, PolicyFeedbackCreate, PolicyObservationCreate
 from app.modules.therapist import service
 from app.modules.therapist.report_export import render_stage_report_html
 from app.modules.training.schema import TrainingRecommendationReviewUpdate
@@ -78,6 +80,63 @@ def rebuild_profile_v2(patient_user_id: UUID, current_user: User = Depends(requi
     service.require_therapist_patient_access(db, current_user, patient_user_id)
     snapshot = profile_v2_service.build_profile(db, _patient_profile_id(db, patient_user_id))
     return api_success(ProfileSnapshotRead.model_validate(snapshot).model_dump(mode="json"))
+
+
+@router.post("/patients/{patient_user_id}/policy-v2/shadow")
+def generate_policy_v2_shadow(patient_user_id: UUID, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    service.require_therapist_patient_access(db, current_user, patient_user_id)
+    row=policy_v2_service.generate_shadow(db,_patient_profile_id(db,patient_user_id))
+    return api_success(PolicyDecisionRead.model_validate(row).model_dump(mode="json"))
+
+
+@router.get("/patients/{patient_user_id}/policy-v2/latest")
+def latest_policy_v2_shadow(patient_user_id: UUID, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    service.require_therapist_patient_access(db,current_user,patient_user_id); row=policy_v2_service.latest(db,_patient_profile_id(db,patient_user_id))
+    if not row: raise HTTPException(status_code=404,detail="尚未生成 Policy V2 shadow 决策")
+    return api_success(PolicyDecisionRead.model_validate(row).model_dump(mode="json"))
+
+
+@router.get("/patients/{patient_user_id}/policy-v2/history")
+def policy_v2_history(patient_user_id: UUID,current_user: User=Depends(require_therapist),db: Session=Depends(get_db)):
+    service.require_therapist_patient_access(db,current_user,patient_user_id)
+    return api_success([PolicyDecisionRead.model_validate(x).model_dump(mode="json") for x in policy_v2_service.history(db,_patient_profile_id(db,patient_user_id))])
+
+
+@router.get("/patients/{patient_user_id}/policy-v2/analytics")
+def policy_v2_analytics(patient_user_id: UUID,current_user: User=Depends(require_therapist),db: Session=Depends(get_db)):
+    service.require_therapist_patient_access(db,current_user,patient_user_id);return api_success(policy_v2_service.analytics(db,_patient_profile_id(db,patient_user_id)))
+
+
+@router.get("/patients/{patient_user_id}/policy-v2/{decision_id}")
+def policy_v2_detail(patient_user_id: UUID,decision_id: UUID,current_user: User=Depends(require_therapist),db: Session=Depends(get_db)):
+    service.require_therapist_patient_access(db,current_user,patient_user_id);row=policy_v2_service.detail(db,decision_id)
+    if not row or row.patient_profile_id!=_patient_profile_id(db,patient_user_id):raise HTTPException(status_code=404,detail="Policy 决策不存在")
+    return api_success(PolicyDecisionRead.model_validate(row).model_dump(mode="json"))
+
+
+@router.get("/patients/{patient_user_id}/policy-v2/{decision_id}/explanation")
+def policy_v2_explanation(patient_user_id: UUID,decision_id: UUID,current_user: User=Depends(require_therapist),db: Session=Depends(get_db)):
+    service.require_therapist_patient_access(db,current_user,patient_user_id);row=policy_v2_service.detail(db,decision_id)
+    if not row or row.patient_profile_id!=_patient_profile_id(db,patient_user_id):raise HTTPException(status_code=404,detail="Policy 决策不存在")
+    return api_success(policy_v2_service.explanation(db,decision_id))
+
+
+@router.post("/patients/{patient_user_id}/policy-v2/{decision_id}/feedback")
+def policy_v2_feedback(patient_user_id: UUID,decision_id: UUID,payload: PolicyFeedbackCreate,current_user: User=Depends(require_therapist),db: Session=Depends(get_db)):
+    service.require_therapist_patient_access(db,current_user,patient_user_id); row=policy_v2_service.detail(db,decision_id)
+    if not row or row.patient_profile_id!=_patient_profile_id(db,patient_user_id):raise HTTPException(status_code=404,detail="Policy 决策不存在")
+    feedback=policy_v2_service.add_feedback(db,decision_id,current_user.id,payload);return api_success({"id":str(feedback.id),"review_round":feedback.review_round,"agreement":feedback.agreement})
+
+
+@router.post("/patients/{patient_user_id}/policy-v2/{decision_id}/observe")
+def policy_v2_observe(patient_user_id: UUID,decision_id: UUID,payload: PolicyObservationCreate,current_user: User=Depends(require_therapist),db: Session=Depends(get_db)):
+    service.require_therapist_patient_access(db,current_user,patient_user_id);row=policy_v2_service.detail(db,decision_id)
+    if not row or row.patient_profile_id!=_patient_profile_id(db,patient_user_id):raise HTTPException(status_code=404,detail="Policy 决策不存在")
+    try: observation=policy_v2_service.observe_policy_outcome(db,decision_id,payload.training_session_id)
+    except ValueError as exc: raise HTTPException(status_code=409,detail=str(exc)) from exc
+    return api_success({"id":str(observation.id),"focus_match":observation.focus_match,"difficulty_match":observation.difficulty_match,"reassessment_match":observation.reassessment_match})
+
+
 
 
 @router.patch("/scenario-dialogues/{dialogue_id}/review")
