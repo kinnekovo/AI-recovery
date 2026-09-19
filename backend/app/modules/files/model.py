@@ -13,7 +13,6 @@ class FileType(str, enum.Enum):
     voice_sample = "voice_sample"
     training_audio = "training_audio"
     generated_audio = "generated_audio"
-    generated_avatar_video = "generated_avatar_video"
 
 
 class FileStatus(str, enum.Enum):

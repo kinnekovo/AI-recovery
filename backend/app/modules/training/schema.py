@@ -3,7 +3,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from app.modules.avatar_videos.schema import AvatarVideoTaskBrief
 from app.modules.training.model import TrainingType
 
 
@@ -30,7 +29,6 @@ class AvatarSpeechRead(BaseModel):
     provider: str
     fallback: bool = False
     cached: bool = False
-    video_task: AvatarVideoTaskBrief | None = None
 
 
 class TaskTemplateRead(BaseModel):

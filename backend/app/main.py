@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.core.observability import configure_logging, log_event
 from app.modules.agents.router import router as agents_router
-from app.modules.avatar_videos.router import router as avatar_videos_router
+from app.modules.avatar_sessions.router import router as avatar_sessions_router
 from app.modules.assessment.router import router as assessment_router
 from app.modules.attempts.router import router as attempts_router
 from app.modules.auth.router import router as auth_router
@@ -36,7 +36,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix=settings.api_prefix)
     app.include_router(users_router, prefix=settings.api_prefix)
     app.include_router(agents_router, prefix=settings.api_prefix)
-    app.include_router(avatar_videos_router, prefix=settings.api_prefix)
+    app.include_router(avatar_sessions_router, prefix=settings.api_prefix)
     app.include_router(training_router, prefix=settings.api_prefix)
     app.include_router(attempts_router, prefix=settings.api_prefix)
     app.include_router(scoring_router, prefix=settings.api_prefix)

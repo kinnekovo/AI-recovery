@@ -74,10 +74,10 @@ def provider_statuses(settings) -> dict[str, dict[str, str | list[str] | bool]]:
             getattr(settings, "vcl_provider", "mock"),
             tencent_vcl_missing_env(settings) if getattr(settings, "vcl_provider", "mock") == "tencent" else [],
         ),
-        "avatar_video": provider_status(
-            "avatar_video",
-            getattr(settings, "avatar_video_provider", "mock"),
-            sadtalker_missing_env(settings) if getattr(settings, "avatar_video_provider", "mock") == "sadtalker" else [],
+        "aliyun_avatar": provider_status(
+            "aliyun_avatar",
+            "aliyun" if getattr(settings, "aliyun_avatar_enabled", False) else "disabled",
+            aliyun_avatar_missing_env(settings) if getattr(settings, "aliyun_avatar_enabled", False) else [],
         ),
         "llm_feedback": provider_status(
             "llm_feedback",
@@ -179,13 +179,11 @@ def tencent_vcl_missing_env(settings) -> list[str]:
     )
 
 
-def sadtalker_missing_env(settings) -> list[str]:
-    values = {
-        "SADTALKER_HOME": getattr(settings, "sadtalker_home", None),
-        "SADTALKER_PYTHON": getattr(settings, "sadtalker_python", None),
-        "FFMPEG_BIN": getattr(settings, "ffmpeg_bin", None) or which("ffmpeg"),
-    }
-    return required_missing(settings, values)
+def aliyun_avatar_missing_env(settings) -> list[str]:
+    # CredentialClient uses Alibaba Cloud's default credential chain, which can
+    # be environment variables, a local profile, or a RAM role. Only the paid
+    # RTC instance is an application-level mandatory setting.
+    return required_missing(settings, {"ALIYUN_AVATAR_INSTANCE_ID": getattr(settings, "aliyun_avatar_instance_id", None)})
 
 
 def acoustic_missing_env(settings) -> list[str]:

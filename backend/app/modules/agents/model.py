@@ -16,6 +16,14 @@ class AgentGenerationStatus(str, enum.Enum):
     failed = "failed"
 
 
+class AliyunAvatarStatus(str, enum.Enum):
+    pending = "pending"
+    provisioning = "provisioning"
+    ready = "ready"
+    failed = "failed"
+    manual_review = "manual_review"
+
+
 class Agent(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "agents"
 
@@ -27,6 +35,14 @@ class Agent(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     personality_style: Mapped[str] = mapped_column(String(120), default="gentle", nullable=False)
     avatar_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("files.id"), nullable=True)
     avatar_animation_config: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=True)
+    avatar_gender: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    aliyun_avatar_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    aliyun_chat_config_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    aliyun_avatar_source_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    aliyun_avatar_status: Mapped[AliyunAvatarStatus] = mapped_column(
+        Enum(AliyunAvatarStatus, name="aliyun_avatar_status"), default=AliyunAvatarStatus.pending, nullable=False
+    )
+    aliyun_avatar_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
     voice_sample_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("files.id"), nullable=True)
     welcome_audio_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("files.id"), nullable=True)
     voice_external_id: Mapped[str | None] = mapped_column(String(160), nullable=True)

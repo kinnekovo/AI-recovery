@@ -2,13 +2,13 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.modules.agents.model import Agent
+from app.modules.agents.model import Agent, AliyunAvatarStatus
 from app.modules.consent.model import ConsentRecord, ConsentStatus
 from app.modules.users.model import User
 from app.modules.users.service import get_patient_profile
 
 
-CONSENT_VERSION = "mvp-v1"
+CONSENT_VERSION = "aliyun-avatar-v1"
 
 
 def record_consent(db: Session, user: User, agent_id, consent_type: str, version: str = CONSENT_VERSION) -> ConsentRecord:
@@ -37,9 +37,8 @@ def revoke_consent(db: Session, user: User, agent_id, consent_type: str) -> Cons
     db.add(consent)
     if consent_type == "image":
         agent.image_consent_confirmed = False
-        from app.modules.avatar_videos.service import invalidate_agent_video_tasks
-
-        invalidate_agent_video_tasks(db, agent.id, user.id)
+        agent.aliyun_avatar_status = AliyunAvatarStatus.pending
+        agent.aliyun_avatar_error = "已撤回形象授权，不会再提交至阿里云。"
     if consent_type == "voice":
         agent.voice_consent_confirmed = False
         agent.voice_external_id = None

@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "vite --host localhost",
     "build": "vue-tsc --noEmit && vite build",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host localhost"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.0.1",
@@ -14,6 +14,7 @@
     "axios": "^1.11.0",
     "echarts": "^5.6.0",
     "lucide-vue-next": "^0.468.0",
+    "lm-avatar-chat-sdk": "1.1.0",
     "pinia": "^2.3.1",
     "vite": "^6.0.7",
     "vue": "^3.5.13",

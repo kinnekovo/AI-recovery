@@ -11,7 +11,7 @@
         }}
       </p>
     </div>
-    <AvatarCoachPanel immersive :snapshot="avatar.snapshot" :avatar-url="currentAgent?.avatar_url" :avatar-animation-config="currentAgent?.avatar_animation_config" title="今天由数字人陪你练">
+    <AvatarCoachPanel immersive cloud-container-id="training-avatar-cloud" :snapshot="avatar.snapshot" :avatar-url="currentAgent?.avatar_url" :avatar-animation-config="currentAgent?.avatar_animation_config" title="今天由数字人陪你练">
       <template #actions>
         <button class="app-button secondary avatar-action-button" type="button" :disabled="avatar.isBusy.value" @click="playCoachIntro">
           {{ avatar.isBusy.value ? '正在说明' : '听数字人说明' }}
@@ -74,7 +74,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { AliyunCloudAvatarProvider } from '@/avatar/providers/aliyunCloud'
 import AvatarCoachPanel from '@/components/avatar/AvatarCoachPanel.vue'
 import { trainingApi } from '@/api/training'
 import { useAvatarRuntime } from '@/composables/useAvatarRuntime'
@@ -88,12 +89,15 @@ const auth = useAuthStore()
 const today = ref<TodayTraining | null>(null)
 const recommendation = ref<TrainingRecommendation | null>(null)
 const error = ref('')
-const avatar = useAvatarRuntime()
 const recommendedTasks = computed(() => recommendation.value?.task_sequence?.length ? recommendation.value.task_sequence : [])
 const isTodayRecommendationCompleted = computed(() => Boolean(today.value?.recommended_completed))
 const currentAgent = computed(() =>
   agentStore.agents.find((agent) => agent.id === auth.me?.patient_profile?.current_agent_id) || agentStore.agents[0]
 )
+const cloudProvider = new AliyunCloudAvatarProvider('training-avatar-cloud')
+const avatar = useAvatarRuntime(cloudProvider)
+
+watch(currentAgent, (agent) => cloudProvider.setAgent(agent?.id || null), { immediate: true })
 
 onMounted(async () => {
   await agentStore.loadAgents()
@@ -159,11 +163,11 @@ async function speakWithGeneratedAudio(scene: string, text: string) {
   error.value = ''
   try {
     const speech = await trainingApi.createAvatarSpeech({ scene, text })
-    await avatar.speak(speech.text, speech.audio_url, speech.video_task?.id)
+    await avatar.speak(speech.text, speech.audio_url)
   } catch (err) {
     const message = toUserMessage(err, '数字人语音未能生成。')
     error.value = message
-    avatar.fail(`${message} 未创建动态形象任务，请检查后重试。`)
+    avatar.fail(`${message} 当前已保留本地形象与语音回退。`)
   }
 }
 </script>

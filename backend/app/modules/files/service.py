@@ -18,7 +18,6 @@ FILE_TYPE_DIRS = {
     FileType.voice_sample: "voice-samples",
     FileType.training_audio: "training-audio",
     FileType.generated_audio: "generated-audio",
-    FileType.generated_avatar_video: "generated-avatar-videos",
 }
 
 

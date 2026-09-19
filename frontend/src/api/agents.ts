@@ -7,6 +7,7 @@ export const agentsApi = {
     name: string
     relationship: string
     personality_style: string
+    avatar_gender: 'MALE' | 'FEMALE'
     image_consent_confirmed: boolean
     voice_consent_confirmed: boolean
   }) {
@@ -29,6 +30,9 @@ export const agentsApi = {
   },
   getVoiceTrainingText(agentId: string, refresh = false) {
     return request<Agent>(http.post(`/agents/${agentId}/voice-training-text`, null, { params: { refresh } }))
+  },
+  syncAliyunAvatar(agentId: string) {
+    return request<Agent>(http.post(`/agents/${agentId}/aliyun-avatar/sync`))
   },
   uploadVoice(agentId: string, file: File, voiceGender: 1 | 2) {
     const form = new FormData()

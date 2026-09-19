@@ -18,3 +18,7 @@ tencentcloud-sdk-python-vrs>=3.0.0
 websocket-client>=1.8.0
 numpy>=2.0.0
 imageio-ffmpeg>=0.5.1
+Pillow>=11.0.0
+alibabacloud-lingmou20250527==1.7.0
+alibabacloud-credentials>=1.0.0
+alibabacloud-tea-openapi>=0.4.4

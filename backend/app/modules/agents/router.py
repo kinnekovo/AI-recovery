@@ -68,6 +68,15 @@ def upload_avatar(
     return api_success(agent_payload(agent))
 
 
+@router.post("/{agent_id}/aliyun-avatar/sync")
+def sync_aliyun_avatar(
+    agent_id: UUID,
+    current_user: User = Depends(require_patient),
+    db: Session = Depends(get_db),
+):
+    return api_success(agent_payload(service.sync_aliyun_avatar(db, current_user, agent_id)))
+
+
 @router.post("/{agent_id}/voice")
 def upload_voice(
     agent_id: UUID,

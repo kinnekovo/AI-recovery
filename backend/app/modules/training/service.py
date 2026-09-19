@@ -1611,7 +1611,7 @@ def create_avatar_speech(db: Session, user: User, payload: AvatarSpeechCreate) -
     try:
         provider = get_tts_provider()
     except TTSProviderError as exc:
-        log_event("warning", "avatar_video", "speech_provider_unavailable", error_code=exc.code)
+        log_event("warning", "avatar_speech", "speech_provider_unavailable", error_code=exc.code)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.message) from exc
     fallback = agent.voice_external_id is None
     if agent.voice_external_id:
@@ -1626,9 +1626,6 @@ def create_avatar_speech(db: Session, user: User, payload: AvatarSpeechCreate) -
         )
     )
     if cached_asset and Path(cached_asset.storage_path).is_file() and Path(cached_asset.storage_path).stat().st_size > 0:
-        from app.modules.avatar_videos.service import enqueue_for_audio
-
-        video_task = enqueue_for_audio(db, user, agent, cached_asset)
         return AvatarSpeechRead(
             text=text,
             audio_file_id=cached_asset.id,
@@ -1636,12 +1633,11 @@ def create_avatar_speech(db: Session, user: User, payload: AvatarSpeechCreate) -
             provider=provider.name,
             fallback=fallback,
             cached=True,
-            video_task={"id": video_task.id, "status": video_task.status.value} if video_task else None,
         )
     try:
         audio_path = provider.synthesize(text, agent.voice_external_id or "default")
     except TTSProviderError as exc:
-        log_event("warning", "avatar_video", "speech_generation_failed", error_code=exc.code)
+        log_event("warning", "avatar_speech", "speech_generation_failed", error_code=exc.code)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.message) from exc
     path = Path(audio_path)
     if not path.exists():
@@ -1661,9 +1657,6 @@ def create_avatar_speech(db: Session, user: User, payload: AvatarSpeechCreate) -
     db.add(asset)
     db.commit()
     db.refresh(asset)
-    from app.modules.avatar_videos.service import enqueue_for_audio
-
-    video_task = enqueue_for_audio(db, user, agent, asset)
     return AvatarSpeechRead(
         text=text,
         audio_file_id=asset.id,
@@ -1671,7 +1664,6 @@ def create_avatar_speech(db: Session, user: User, payload: AvatarSpeechCreate) -
         provider=provider.name,
         fallback=fallback,
         cached=False,
-        video_task={"id": video_task.id, "status": video_task.status.value} if video_task else None,
     )
 
 

@@ -5,7 +5,7 @@
       <h1>{{ task?.task_template.title || '准备训练' }}</h1>
       <p>{{ task?.task_template.instruction || '正在生成训练会话。' }}</p>
     </div>
-    <AvatarCoachPanel v-if="task" :snapshot="avatar.snapshot" :avatar-url="currentAgent?.avatar_url" :avatar-animation-config="currentAgent?.avatar_animation_config" title="数字人陪练中" compact>
+    <AvatarCoachPanel v-if="task" cloud-container-id="training-session-avatar-cloud" :snapshot="avatar.snapshot" :avatar-url="currentAgent?.avatar_url" :avatar-animation-config="currentAgent?.avatar_animation_config" title="数字人陪练中" compact>
       <template #actions>
         <button class="app-button secondary avatar-action-button" type="button" :disabled="avatar.isBusy.value" @click="() => speakCurrentTask()">
           {{ avatar.isBusy.value ? '正在示范' : '听数字人示范' }}
@@ -79,7 +79,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AvatarCoachPanel from '@/components/avatar/AvatarCoachPanel.vue'
 import AppButton from '@/components/common/AppButton.vue'
@@ -89,6 +89,7 @@ import { scenarioDialoguesApi } from '@/api/scenarioDialogues'
 import { trainingApi } from '@/api/training'
 import type { ScenarioDialogue } from '@/types/api'
 import { useAvatarRuntime } from '@/composables/useAvatarRuntime'
+import { AliyunCloudAvatarProvider } from '@/avatar/providers/aliyunCloud'
 import { useAgentStore } from '@/stores/agent'
 import { useTrainingStore } from '@/stores/training'
 import { toUserMessage } from '@/utils/errors'
@@ -97,7 +98,6 @@ const route = useRoute()
 const router = useRouter()
 const store = useTrainingStore()
 const agentStore = useAgentStore()
-const avatar = useAvatarRuntime()
 const type = computed(() => route.params.type as 'repeat' | 'scenario')
 const tasks = computed(() => store.currentSession?.session_tasks || [])
 const currentTaskIndex = ref(0)
@@ -118,6 +118,10 @@ const requestedHelp = ref(false)
 const currentAgent = computed(() =>
   agentStore.agents.find((agent) => agent.id === store.currentSession?.agent_id) || agentStore.agents[0]
 )
+const cloudProvider = new AliyunCloudAvatarProvider('training-session-avatar-cloud')
+const avatar = useAvatarRuntime(cloudProvider)
+
+watch(currentAgent, (agent) => cloudProvider.setAgent(agent?.id || null), { immediate: true })
 const isScenario = computed(() => task.value?.task_template.task_type === 'scenario')
 const sceneConfig = computed(() => (task.value?.task_template.scoring_config || {}) as Record<string, unknown>)
 const isGeneralizationProbe = computed(() => sceneConfig.value.evaluation_role === 'generalization_probe')
@@ -282,11 +286,11 @@ async function speakWithGeneratedAudio(scene: string, text: string, sessionTaskI
       session_task_id: sessionTaskId ?? null,
       text
     })
-    await avatar.speak(speech.text, speech.audio_url, speech.video_task?.id)
+    await avatar.speak(speech.text, speech.audio_url)
   } catch (err) {
     const message = toUserMessage(err, '数字人语音未能生成。')
     error.value = message
-    avatar.fail(`${message} 未创建动态形象任务，请检查后重试。`)
+    avatar.fail(`${message} 当前已保留本地形象与语音回退。`)
   }
 }
 </script>

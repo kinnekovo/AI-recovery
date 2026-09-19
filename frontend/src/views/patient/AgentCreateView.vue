@@ -3,12 +3,19 @@
     <div class="page-heading">
       <span class="kicker">创建陪伴者</span>
       <h1>上传熟悉的人物形象</h1>
-      <p>当前仅创建 2.5D 动态形象；声音复刻功能已暂时隐藏，便于先验收形象效果。</p>
+      <p>默认使用本地 2.5D 陪练。阿里云服务启用后，已授权照片可同步为实时数字人形象。</p>
     </div>
     <form v-if="!createdAgent" class="form-panel" @submit.prevent="createPortraitAgent">
       <label>名称<input v-model="form.name" placeholder="妈妈" /></label>
       <label>关系<input v-model="form.relationship" placeholder="母亲" /></label>
       <label>陪伴风格<input v-model="form.personality_style" placeholder="温柔鼓励" /></label>
+      <label>
+        形象性别
+        <select v-model="form.avatar_gender">
+          <option value="FEMALE">女性</option>
+          <option value="MALE">男性</option>
+        </select>
+      </label>
       <label>
         陪伴者正面照
         <input type="file" accept="image/jpeg,image/png,image/webp" @change="pickAvatar" />
@@ -22,10 +29,10 @@
       </figure>
       <label class="check-line">
         <input v-model="consent" type="checkbox" />
-        已确认该形象获得本人授权，仅用于康复训练
+        已确认该形象获得本人授权，仅用于康复训练；启用阿里云数字人后，照片会提交至阿里云生成实时形象
       </label>
       <p v-if="error" class="error-text">{{ error }}</p>
-      <AppButton variant="primary" :loading="loading">创建 2.5D 形象</AppButton>
+        <AppButton variant="primary" :loading="loading">创建陪伴者形象</AppButton>
     </form>
     <section v-else-if="voiceCloneEnabled" class="form-panel voice-clone-panel" aria-live="polite">
       <span class="kicker">第二步：专属声音</span>
@@ -93,7 +100,9 @@ import type { Agent } from '@/types/api'
 const router = useRouter()
 // 声音复刻已保留实现，但在 2.5D 形象验收阶段不展示、不调用。
 const voiceCloneEnabled = false
-const form = ref({ name: '', relationship: '', personality_style: '温柔鼓励' })
+const form = ref<{ name: string; relationship: string; personality_style: string; avatar_gender: 'MALE' | 'FEMALE' }>({
+  name: '', relationship: '', personality_style: '温柔鼓励', avatar_gender: 'FEMALE'
+})
 const avatar = ref<File | null>(null)
 const avatarConfig = ref<PortraitAnimationConfig | null>(null)
 const avatarPreview = ref('')

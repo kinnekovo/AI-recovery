@@ -27,7 +27,7 @@ class TimestampMixin:
 
 def import_models() -> None:
     from app.modules.agents import model as agents_model  # noqa: F401
-    from app.modules.avatar_videos import model as avatar_videos_model  # noqa: F401
+    from app.modules.avatar_sessions import model as avatar_sessions_model  # noqa: F401
     from app.modules.assessment import model as assessment_model  # noqa: F401
     from app.modules.attempts import model as attempts_model  # noqa: F401
     from app.modules.consent import model as consent_model  # noqa: F401

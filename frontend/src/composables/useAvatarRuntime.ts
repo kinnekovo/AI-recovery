@@ -106,7 +106,10 @@ export function useAvatarRuntime(provider: AvatarProvider = new Static2DAvatarPr
     snapshot.videoElapsedSeconds = 0
   }
 
-  onBeforeUnmount(stop)
+  onBeforeUnmount(() => {
+    stop()
+    provider.dispose?.()
+  })
 
   return {
     snapshot,

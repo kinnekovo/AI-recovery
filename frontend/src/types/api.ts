@@ -55,6 +55,9 @@ export interface Agent {
   avatar_file_id: string | null
   avatar_url: string | null
   avatar_animation_config: Record<string, unknown> | null
+  avatar_gender: 'MALE' | 'FEMALE' | null
+  aliyun_avatar_status: 'pending' | 'provisioning' | 'ready' | 'failed' | 'manual_review'
+  aliyun_avatar_error: string | null
   voice_sample_file_id: string | null
   welcome_audio_file_id: string | null
   voice_external_id: string | null
@@ -411,21 +414,6 @@ export interface AvatarSpeech {
   provider: string
   fallback: boolean
   cached: boolean
-  video_task: AvatarVideoTaskBrief | null
-}
-
-export interface AvatarVideoTaskBrief {
-  id: string
-  status: 'queued' | 'running' | 'succeeded' | 'failed'
-}
-
-export interface AvatarVideoTask {
-  id: string
-  status: 'queued' | 'running' | 'succeeded' | 'failed'
-  video_url: string | null
-  error_message: string | null
-  generation_ms: number | null
-  created_at: string
 }
 
 export interface TodayTraining {

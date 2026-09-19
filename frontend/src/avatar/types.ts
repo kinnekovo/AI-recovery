@@ -26,6 +26,7 @@ export interface AvatarSpeakInput {
 }
 
 export interface AvatarProviderUpdate {
+  provider?: AvatarProviderKind
   state?: AvatarRuntimeState
   line?: string
   mouthOpen?: boolean
@@ -53,4 +54,5 @@ export interface AvatarProvider {
   speak(input: AvatarSpeakInput, context: AvatarProviderContext): Promise<void>
   setState(state: AvatarRuntimeState, context: AvatarProviderContext): void
   stop(): void
+  dispose?(): void
 }

@@ -20,6 +20,9 @@ importers:
       echarts:
         specifier: ^5.6.0
         version: 5.6.0
+      lm-avatar-chat-sdk:
+        specifier: 1.1.0
+        version: 1.1.0
       lucide-vue-next:
         specifier: ^0.468.0
         version: 0.468.0(vue@3.5.40(typescript@5.9.3))
@@ -576,6 +579,9 @@ packages:
   https-proxy-agent@5.0.1:
     resolution: {integrity: sha512-dFcAjpTQFgoLMzC2VwU+C/CbS7uRL0lWmxDITmqm7C+7F0Odmj6s9l6alZc6AELXhrnggM2CeWSXHGOdX2YtwA==}
     engines: {node: '>= 6'}
+
+  lm-avatar-chat-sdk@1.1.0:
+    resolution: {integrity: sha512-0JKCQgMRHj1WJKtP2fo3UJUwNAfzOotARIdsNVl/Bvkbte0VB3IthGiHYG5WlSaz56GE252z1tpWA7AF5sS6/g==}
 
   lucide-vue-next@0.468.0:
     resolution: {integrity: sha512-quV/6T8YB1XK0VOEnebg3Byd8Rsan5/m95cvjnuHV4vcS3qEnLAybkrSh0hk3ppavx+V7R1PjNW+mGDvcBdz4A==}
@@ -1170,6 +1176,8 @@ snapshots:
       debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
+
+  lm-avatar-chat-sdk@1.1.0: {}
 
   lucide-vue-next@0.468.0(vue@3.5.40(typescript@5.9.3)):
     dependencies:

@@ -3,7 +3,15 @@
     <div class="avatar-stage" aria-hidden="true">
       <div class="avatar-presence-ring"></div>
       <video
-        v-if="snapshot.videoUrl"
+        v-show="snapshot.provider === 'external_streaming'"
+        :id="cloudContainerId"
+        class="avatar-video avatar-cloud-video"
+        autoplay
+        muted
+        playsinline
+      ></video>
+      <video
+        v-if="snapshot.videoUrl && snapshot.provider !== 'external_streaming'"
         class="avatar-video"
         :src="snapshot.videoUrl"
         autoplay
@@ -65,6 +73,7 @@ const props = defineProps<{
   immersive?: boolean
   avatarUrl?: string | null
   avatarAnimationConfig?: Record<string, unknown> | null
+  cloudContainerId?: string
 }>()
 
 const avatarObjectUrl = ref('')
@@ -105,7 +114,12 @@ function validAnchor(anchor: PortraitAnimationConfig['mouth'] | undefined): anch
     Number.isFinite(anchor.width) && Number.isFinite(anchor.height) && anchor.width > 0 && anchor.height > 0
   )
 }
-const providerLabel = computed(() => (props.snapshot.provider === 'static_2d' ? '2.5D 动态陪练' : props.snapshot.provider))
+const providerLabel = computed(() => ({
+  static_2d: '2.5D 动态陪练',
+  external_streaming: '阿里云实时数字人',
+  live2d: 'Live2D 陪练',
+  three_d: '3D 陪练'
+}[props.snapshot.provider]))
 const capabilityLabel = computed(() => {
   if (!props.snapshot.canSpeak) return '文字引导'
   const labels = {

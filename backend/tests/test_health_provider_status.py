@@ -17,11 +17,11 @@ class HealthProviderStatusTest(unittest.TestCase):
 
         statuses = provider_statuses(settings)
 
-        self.assertTrue(all(item["ready"] for key, item in statuses.items() if key != "pronunciation"))
+        self.assertTrue(all(item["ready"] for key, item in statuses.items() if key not in {"pronunciation", "aliyun_avatar"}))
         self.assertEqual(statuses["asr"]["mode"], "mock")
         self.assertEqual(statuses["tts"]["status"], "ok")
         self.assertEqual(statuses["pronunciation"]["status"], "disabled")
-        self.assertEqual(statuses["avatar_video"]["status"], "ok")
+        self.assertEqual(statuses["aliyun_avatar"]["status"], "disabled")
 
     def test_external_provider_reports_missing_env_names_only(self) -> None:
         settings = SimpleNamespace(

@@ -11,7 +11,7 @@
 - 文件存储：本地 `storage/`
 - AI 能力：通过后端 `backend/app/integrations/` Provider 适配层接入
 
-数字人异步视频方案、环境门槛和前五天执行清单见：[SadTalker异步数字人实施方案](doc/SadTalker异步数字人实施方案.md)。
+数字人采用本地 2.5D 回退与可选的阿里云实时云渲染方案；未启用阿里云凭据时不会产生外部调用。
 
 数字人当前采用“可靠的头像陪练”路线：优先使用用户上传头像作为 Static 2D Avatar，不在当前阶段引入 Live2D、3D 或外部真人视频数字人。
 
@@ -197,7 +197,6 @@ python -m pytest tests
 
 ```powershell
 cd backend
-python scripts/run_avatar_video_worker.py
 ```
 
 患者主闭环烟测：

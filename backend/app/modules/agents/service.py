@@ -5,9 +5,10 @@ from fastapi import HTTPException, UploadFile, status
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.integrations.tts.provider import get_tts_provider
 from app.integrations.voice_clone.provider import VoiceCloneProviderError, VoiceCloneTaskStatus, get_voice_clone_provider
-from app.modules.agents.model import Agent, AgentGenerationStatus
+from app.modules.agents.model import Agent, AgentGenerationStatus, AliyunAvatarStatus
 from app.modules.agents.schema import AgentCreate
 from app.modules.consent.service import record_consent, require_active_consent
 from app.modules.files.model import FileAsset, FileStatus, FileType
@@ -23,6 +24,7 @@ def create_agent(db: Session, user: User, payload: AgentCreate) -> Agent:
         name=payload.name,
         relationship=payload.relationship,
         personality_style=payload.personality_style,
+        avatar_gender=payload.avatar_gender,
         image_consent_confirmed=payload.image_consent_confirmed,
         voice_consent_confirmed=payload.voice_consent_confirmed,
     )
@@ -60,8 +62,23 @@ def upload_avatar(db: Session, user: User, agent_id: UUID, upload: UploadFile, a
     agent.avatar_file_id = asset.id
     agent.avatar_animation_config = animation_config
     agent.image_consent_confirmed = True
+    agent.aliyun_avatar_id = None
+    agent.aliyun_chat_config_id = None
+    agent.aliyun_avatar_source_file_id = None
+    agent.aliyun_avatar_status = AliyunAvatarStatus.pending
+    agent.aliyun_avatar_error = None
     db.commit()
     db.refresh(agent)
+    settings = get_settings()
+    if settings.aliyun_avatar_enabled and settings.aliyun_avatar_auto_provision:
+        # Provisioning is deliberately best-effort: a provider failure must not
+        # discard the patient's local 2.5D avatar upload.
+        try:
+            from app.modules.avatar_sessions.service import ensure_agent_provisioned
+
+            return ensure_agent_provisioned(db, user, agent)
+        except HTTPException:
+            db.refresh(agent)
     return agent
 
 
@@ -100,14 +117,12 @@ def delete_owned_agent(db: Session, user: User, agent_id: UUID) -> UUID | None:
         profile.onboarding_status = OnboardingStatus.ready if replacement_id else OnboardingStatus.pending_agent
 
     from app.modules.consent.model import ConsentRecord
-    from app.modules.avatar_videos.service import invalidate_agent_video_tasks
     from app.modules.training.model import TrainingSession
 
     db.execute(update(TrainingSession).where(TrainingSession.agent_id == agent.id).values(agent_id=None))
     db.execute(delete(ConsentRecord).where(ConsentRecord.agent_id == agent.id))
-    invalidate_agent_video_tasks(db, agent.id, user.id)
-    from app.modules.avatar_videos.model import AvatarVideoTask
-    db.execute(delete(AvatarVideoTask).where(AvatarVideoTask.agent_id == agent.id))
+    from app.modules.avatar_sessions.model import AvatarSession
+    db.execute(delete(AvatarSession).where(AvatarSession.agent_id == agent.id))
     for file_id in (agent.avatar_file_id, agent.voice_sample_file_id, agent.welcome_audio_file_id):
         if file_id:
             asset = db.get(FileAsset, file_id)
@@ -197,3 +212,9 @@ def generate_welcome_audio(db: Session, user: User, agent_id: UUID) -> tuple[Age
     db.commit()
     db.refresh(agent)
     return agent, public_url(asset)
+
+
+def sync_aliyun_avatar(db: Session, user: User, agent_id: UUID) -> Agent:
+    from app.modules.avatar_sessions.service import sync_agent
+
+    return sync_agent(db, user, get_owned_agent(db, user, agent_id))

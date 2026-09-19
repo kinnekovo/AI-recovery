@@ -62,15 +62,10 @@ class Settings:
     vcl_provider: str
     tencent_vcl_region: str
     vcl_timeout_seconds: int
-    avatar_video_provider: str
-    sadtalker_home: str | None
-    sadtalker_python: str | None
-    sadtalker_timeout_seconds: int
-    sadtalker_preprocess: str
-    sadtalker_face_size: int
-    sadtalker_use_enhancer: bool
-    avatar_video_frontend_fallback_seconds: int
-    avatar_video_worker_poll_seconds: float
+    aliyun_avatar_enabled: bool
+    aliyun_avatar_auto_provision: bool
+    aliyun_avatar_instance_id: str | None
+    aliyun_avatar_endpoint: str
     llm_feedback_provider: str
     llm_feedback_api_key: str | None
     llm_feedback_base_url: str | None
@@ -138,25 +133,10 @@ class Settings:
         self.vcl_provider = os.getenv("VCL_PROVIDER", "mock").strip().lower() or "mock"
         self.tencent_vcl_region = os.getenv("TENCENT_VCL_REGION", "ap-guangzhou").strip() or "ap-guangzhou"
         self.vcl_timeout_seconds = int(os.getenv("VCL_TIMEOUT_SECONDS", "20"))
-        self.avatar_video_provider = os.getenv("AVATAR_VIDEO_PROVIDER", "mock").strip().lower() or "mock"
-        sadtalker_home = os.getenv("SADTALKER_HOME") or None
-        self.sadtalker_home = (
-            str((backend_dir / sadtalker_home).resolve())
-            if sadtalker_home and not Path(sadtalker_home).is_absolute()
-            else sadtalker_home
-        )
-        sadtalker_python = os.getenv("SADTALKER_PYTHON") or None
-        self.sadtalker_python = (
-            str((backend_dir / sadtalker_python).resolve())
-            if sadtalker_python and not Path(sadtalker_python).is_absolute()
-            else sadtalker_python
-        )
-        self.sadtalker_timeout_seconds = int(os.getenv("SADTALKER_TIMEOUT_SECONDS", "180"))
-        self.sadtalker_preprocess = os.getenv("SADTALKER_PREPROCESS", "crop").strip() or "crop"
-        self.sadtalker_face_size = int(os.getenv("SADTALKER_FACE_SIZE", "512"))
-        self.sadtalker_use_enhancer = os.getenv("SADTALKER_USE_ENHANCER", "false").strip().lower() in {"1", "true", "yes"}
-        self.avatar_video_frontend_fallback_seconds = int(os.getenv("AVATAR_VIDEO_FRONTEND_FALLBACK_SECONDS", "60"))
-        self.avatar_video_worker_poll_seconds = float(os.getenv("AVATAR_VIDEO_WORKER_POLL_SECONDS", "1"))
+        self.aliyun_avatar_enabled = os.getenv("ALIYUN_AVATAR_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+        self.aliyun_avatar_auto_provision = os.getenv("ALIYUN_AVATAR_AUTO_PROVISION", "false").strip().lower() in {"1", "true", "yes"}
+        self.aliyun_avatar_instance_id = os.getenv("ALIYUN_AVATAR_INSTANCE_ID") or None
+        self.aliyun_avatar_endpoint = os.getenv("ALIYUN_AVATAR_ENDPOINT", "lingmou.cn-beijing.aliyuncs.com").strip()
         self.llm_feedback_provider = os.getenv("LLM_FEEDBACK_PROVIDER", "mock").strip().lower() or "mock"
         self.llm_feedback_api_key = os.getenv("LLM_FEEDBACK_API_KEY")
         self.llm_feedback_base_url = os.getenv("LLM_FEEDBACK_BASE_URL")
