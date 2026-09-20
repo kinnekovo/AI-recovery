@@ -1,14 +1,14 @@
-# 言语康复智能体代码库导览（Phase 0）
+# 言语康复智能体代码库导览（Product Reset v1）
 
-> 审计日期：2026-09-20  
+> 审计日期：2026-09-20；Product Reset 更新：2026-09-20
 > 范围：当前工作区（含未提交文件）  
 > 新产品基准：`Speech_Rehab_Product_Design_v1.md`、`Speech_Rehab_UI_Interaction_Spec_v1.md`
 
 ## 0. 阅读说明与可信度边界
 
-本导览来自源码、Alembic migration、前后端测试和实际测试运行，不以旧阶段总结替代代码事实。审计时用户附件与仓库根目录的两份同名规格 SHA-256 完全一致；规格要求的 `docs/product/` 目录尚不存在。本阶段没有移动规格文件。
+本导览来自源码、Alembic migration、前后端测试和实际测试运行，不以旧阶段总结替代代码事实。两份 v1 规格已按原始 SHA-256 原样复制到 `docs/product/`，该目录现为 canonical product specification。
 
-仓库在审计开始前已有大量未提交修改和新增文件，尤其包括 `controlled_governance`、迁移 `0039`、治疗师工作区和前端测试。本导览把工作区现状作为审计对象，不判断这些改动是否已准备提交。
+本文保留 Phase 0 的旧系统说明，同时在第 17 节加入 Product Reset v1 的现行入口。遇到冲突时，以第 17 节、`docs/product/` 和实际源码为准。
 
 标记约定：
 
@@ -56,9 +56,9 @@ flowchart TD
 │   │   ├── integrations/      # 外部/本地 provider adapter
 │   │   ├── modules/           # 业务与应用模块
 │   │   └── main.py            # FastAPI composition root
-│   ├── migrations/            # Alembic env 与 0001..0039
+│   ├── migrations/            # Alembic env 与 0001..0040
 │   ├── scripts/               # 初始化、连通性、烟测、备份
-│   └── tests/                 # 208 个后端测试
+│   └── tests/                 # 221 个后端测试（含 Product v2 生命周期）
 ├── frontend/
 │   ├── src/
 │   │   ├── api/               # Axios endpoint wrappers
@@ -66,9 +66,11 @@ flowchart TD
 │   │   ├── layouts/           # patient/family/therapist shells
 │   │   ├── router/            # URL 与角色守卫
 │   │   ├── stores/            # auth、agent、training Pinia store
-│   │   ├── views/             # 当前页面
+│   │   ├── features/          # Product v2 患者/治疗师功能切片
+│   │   ├── domain-ui/         # AttentionCard、MetricPanel
+│   │   ├── views/             # legacy / internal 页面
 │   │   └── main.ts            # 前端入口
-│   └── tests/                 # 6 个文件、10 个前端测试
+│   └── tests/                 # 7 个文件、12 个前端测试
 ├── storage/                   # 本地大文件，Git 中仅占位文件
 ├── docs/                      # 版本实施说明；本次新增 refactor/
 ├── doc/                       # 旧 PRD、设计和阶段记录
@@ -429,7 +431,7 @@ POST/GET `/scenario-dialogues`，GET evaluation/evaluation-v3，POST hint/finish
 
 - 后端：`208 passed in 6.44s`（Python 3.13.9，pytest 9.1.1）。仓库未声明 pytest 且无 venv，本次从临时目录运行；没有改 `requirements.txt`。
 - 前端：`6 passed test files / 10 passed tests in 21.58s`。
-- Alembic：单一 head `0039_controlled_governance`，连接的当前数据库也标记在该 head。
+- Alembic：单一 head `0040_product_reset_v1`；连接的当前数据库已升级到该 head。
 
 长期保留：provider边界、错误脱敏、文件权限、治疗师访问、evidence gate、v3 append-only/retry、comparability、clinical assessment、scenario contract/state、policy safety 等测试。未来替换：绑定旧页面导航、旧 dashboard、旧 combined result、旧 TrainingPlan“today”语义的测试。当前测试没有失败，不得通过改测试制造新版语义。
 
@@ -505,3 +507,108 @@ POST/GET `/scenario-dialogues`，GET evaluation/evaluation-v3，POST hint/finish
 13. Alembic 0001、0003、0005、0012、0027-0039 和对应测试。
 
 读完上述顺序后，再把 `doc/` 和旧 `docs/V*.md` 当历史解释材料；若与新版两份规格冲突，以新版规格为准。
+
+## 17. Product Reset v1 现行地图
+
+### 17.1 新主链与边界
+
+```mermaid
+flowchart LR
+  T[Therapist] --> G[RehabilitationGoal]
+  G --> P[Versioned TrainingPlan]
+  P --> S[TrainingSession]
+  S --> X[Exercise / SessionTask snapshot]
+  X --> A[ExerciseAttempt / Attempt]
+  A --> E[Evidence]
+  E --> M[Metric]
+  M --> C[Comparability]
+  C --> R[Trend]
+  R --> O[Observation]
+  O --> Q[Recommendation / AttentionItem]
+  Q --> SR[StageReview]
+  SR --> D[TherapistDecision]
+  D --> NP[New TrainingPlan draft]
+```
+
+新 application/domain 入口集中在 `backend/app/modules/product_v2/`：
+
+- `model.py`：正式 goal、版本化 plan、Evidence、Metric、Observation、Recommendation、Milestone、AttentionItem、StageReview、TherapistDecision 与持久化 session summary。
+- `schema.py`：v2 command/input contract；重复 order、正式 assessment metadata 等在这里验证。
+- `comparability.py`：统一训练测量可比性与趋势事实；mock/demo、不可决策、context key 不同的记录不会进入正式趋势。
+- `service.py`：页面级 aggregate DTO、计划发布、daily session、Evidence/Metric projection、工作台、阶段复核与治疗师决策。
+- `router.py`：所有新版 application API，统一前缀 `/api/v2`。
+
+`TrainingSession`、`SessionTask`、`Attempt` 仍是稳定底座，只做 additive 扩展；ScenarioDialogue、ASR、Acoustic、SOE、TTS、VCL、Avatar、EvaluationRun、clinical_stage 没有被复制或替换。正式 `AssessmentSession` 只从治疗师 formal-assessment 入口产生，日常训练不会暗中创建 Assessment。
+
+### 17.2 新版前端入口
+
+`frontend/src/api/v2.ts` 是新版 typed client。`VITE_PRODUCT_V2_ENABLED` 默认启用，显式设为 `false` 时 `/home`、`/training`、`/therapist`、患者列表/工作区回到旧实现；`/legacy/*` 深链继续保留。
+
+患者四个一级入口：
+
+| 路由 | 组件 | 职责 |
+|---|---|---|
+| `/home` | `features/patient-home/PatientHomeV2.vue` | 今日计划、原因、状态与唯一主行动 |
+| `/training` | `features/training-session/TrainingHubV2.vue` | 正式训练/额外练习入口 |
+| `/progress` | `features/patient-progress/PatientProgressV2.vue` | 可比趋势、依从性与里程碑 |
+| `/me` | `features/patient-settings/PatientSettingsV2.vue` | 康复计划入口、易用性与陪伴设置 |
+
+执行页 `TrainingSessionV2.vue` 使用 focus mode 隐藏主导航；`SessionSummaryV2.vue` 展示事实、患者友好 observation 与下次重点。刷新后通过 session id 从服务端重建状态。
+
+治疗师三个一级入口：
+
+| 路由 | 组件 | 职责 |
+|---|---|---|
+| `/therapist` | `features/therapist-workbench/TherapistWorkbenchV2.vue` | Attention-first 工作台 |
+| `/therapist/patients` | `features/patient-workspace/TherapistPatientsV2.vue` | 患者入口；患者详情是 aggregate workspace |
+| `/therapist/plans` | `features/training-plan/TrainingPlansV2.vue` | Goal、可含 repeat + scenario 的 draft、发布和版本历史 |
+
+患者工作区、单次训练 Evidence/Metric 分层、StageReview、Decision 和 formal Assessment 分别在 `features/patient-workspace/`、`features/stage-review/`、`features/formal-assessment/`。Facts / Observation / Recommendation / Decision 在 UI 中为四个独立语义层。
+
+### 17.3 新请求调用链
+
+```mermaid
+sequenceDiagram
+  participant P as Patient V2 page
+  participant API as /api/v2
+  participant V2 as product_v2.service
+  participant Core as existing scoring/scenario services
+  participant Prov as configured providers
+  participant DB as PostgreSQL
+  P->>API: start-or-resume
+  API->>V2: active plan + patient timezone
+  V2->>DB: idempotent formal session + immutable exercises
+  P->>API: attempt audio + analyze
+  API->>Core: durable Attempt then analyze_attempt
+  Core->>Prov: ASR + acoustic (+ SOE shadow)
+  Core->>DB: existing analysis/evaluation records
+  V2->>DB: project Evidence + Metric with provenance
+  V2->>DB: comparability/trend; eligible real data only
+  P->>API: complete
+  V2->>DB: persisted deterministic summary + real milestone
+```
+
+Scenario exercise 保留 `scenario_dialogues` 的多轮状态机和语义 provider；`product_v2.service.project_scenario()` 只把已完成结果投影到同一 Evidence/Metric contract。LLM 不写 Metric value，也不能发布 plan。
+
+### 17.4 新表与 migration
+
+`backend/migrations/versions/0040_product_reset_v1_foundation.py` 是从 `0039_controlled_governance` 出发的纯 additive migration。新增 12 张表，并为旧 PatientProfile/TrainingSession/SessionTask/Attempt 增加 nullable 或有安全默认值的字段；upgrade 不 DROP 表、列或历史数据。partial unique index 保证一个 active primary goal、一个 active formal plan、同一自然日/plan 一个 formal session、同一 dedup key 一个开放 AttentionItem。
+
+### 17.5 Provider 运行路径
+
+新版 repeat 的分析入口仍调用 `modules/scoring/service.py:analyze_attempt()`，因此沿用当前 ASR、Acoustic 和已有 shadow pipeline；scenario 仍调用 `scenario_dialogues` 与 `integrations/llm/scenario_semantics.py`。通用 `integrations/llm/provider.py` 仍返回 mock，v2 不把它伪装成真实能力，session summary 使用 deterministic template 降级。运行时实测矩阵见 `docs/refactor/05_implementation_result.md`。
+
+### 17.6 当前验证命令
+
+```powershell
+cd backend
+python -m pytest -q
+python -m alembic heads
+python -m alembic upgrade head
+
+cd ../frontend
+npm test -- --run
+npm run build
+```
+
+2026-09-20 最新绿色结果：后端 `221 passed`；前端 `7 files / 13 tests`；production build/typecheck 通过。migration source/offline SQL、单 head 与连接数据库的 `0040_product_reset_v1` 当前版本均已验证；演示数据已写入并完成患者、治疗师主要路径的浏览器验收。

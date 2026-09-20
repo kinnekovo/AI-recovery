@@ -10,6 +10,7 @@ import TrainingView from '@/views/patient/TrainingView.vue'
 import TrainingSessionView from '@/views/patient/TrainingSessionView.vue'
 import TrainingResultView from '@/views/patient/TrainingResultView.vue'
 import ReportView from '@/views/patient/ReportView.vue'
+import { productV2Enabled } from '@/api/v2'
 import { useAuthStore } from '@/stores/auth'
 import type { UserRole } from '@/types/api'
 
@@ -35,17 +36,26 @@ const router = createRouter({
       component: PatientLayout,
       meta: { role: 'patient' },
       children: [
-        { path: 'home', component: HomeView, meta: { role: 'patient' } },
+        { path: 'home', component: productV2Enabled ? () => import('@/features/patient-home/PatientHomeV2.vue') : HomeView, meta: { role: 'patient' } },
         { path: 'agent/create', component: AgentCreateView, meta: { role: 'patient' } },
         { path: 'agent/list', component: AgentListView, meta: { role: 'patient' } },
-        { path: 'training', component: TrainingView, meta: { role: 'patient' } },
+        { path: 'training', component: productV2Enabled ? () => import('@/features/training-session/TrainingHubV2.vue') : TrainingView, meta: { role: 'patient' } },
+        { path: 'training/session/:sessionId', component: () => import('@/features/training-session/TrainingSessionV2.vue'), meta: { role: 'patient', focusMode: true, v2Only: true, legacyFallback: '/legacy/training' } },
+        { path: 'training/session/:sessionId/summary', component: () => import('@/features/training-session/SessionSummaryV2.vue'), meta: { role: 'patient', v2Only: true, legacyFallback: '/legacy/training' } },
         { path: 'training/:type(repeat|scenario)', component: TrainingSessionView, meta: { role: 'patient' } },
         { path: 'training/scenario/result/:dialogueId', component: () => import('@/views/patient/ScenarioDialogueResultView.vue'), meta: { role: 'patient' } },
         { path: 'training/result', component: TrainingResultView, meta: { role: 'patient' } },
+        { path: 'progress', component: () => import('@/features/patient-progress/PatientProgressV2.vue'), meta: { role: 'patient', v2Only: true, legacyFallback: '/evaluation' } },
+        { path: 'me', component: () => import('@/features/patient-settings/PatientSettingsV2.vue'), meta: { role: 'patient', v2Only: true, legacyFallback: '/patient/profile' } },
         { path: 'evaluation', component: () => import('@/views/patient/EvaluationView.vue'), meta: { role: 'patient' } },
         { path: 'ability', component: () => import('@/views/patient/AbilityProfileView.vue'), meta: { role: 'patient' } },
         { path: '/patient/profile', component: () => import('@/views/patient/PatientProfileView.vue'), meta: { role: 'patient' } },
-        { path: 'report', component: ReportView, meta: { role: 'patient' } }
+        { path: 'report', component: ReportView, meta: { role: 'patient' } },
+        { path: 'legacy/agent/create', component: AgentCreateView, meta: { role: 'patient' } },
+        { path: 'legacy/agent/list', component: AgentListView, meta: { role: 'patient' } },
+        { path: 'legacy/home', component: HomeView, meta: { role: 'patient' } },
+        { path: 'legacy/training', component: TrainingView, meta: { role: 'patient' } },
+        { path: 'legacy/report', component: ReportView, meta: { role: 'patient' } }
       ]
     },
     {
@@ -61,7 +71,7 @@ const router = createRouter({
       component: TherapistLayout,
       meta: { role: 'therapist' },
       children: [
-        { path: '', component: () => import('@/views/therapist/TherapistDashboardView.vue'), meta: { role: 'therapist' } },
+        { path: '', component: productV2Enabled ? () => import('@/features/therapist-workbench/TherapistWorkbenchV2.vue') : () => import('@/views/therapist/TherapistDashboardView.vue'), meta: { role: 'therapist' } },
         {
           path: 'assessments',
           component: () => import('@/views/therapist/TherapistAssessmentsView.vue'),
@@ -72,8 +82,13 @@ const router = createRouter({
           component: () => import('@/views/therapist/TherapistProfilesView.vue'),
           meta: { role: 'therapist' }
         },
-        { path: 'patients', component: () => import('@/views/therapist/PatientsView.vue'), meta: { role: 'therapist' } },
-        { path: 'patients/:patientId/:tab(overview|training|assessment|clinical-stage|profile|policy|controlled-actions)?', component: () => import('@/views/therapist/PatientWorkspaceView.vue'), meta: { role: 'therapist' } },
+        { path: 'patients', component: productV2Enabled ? () => import('@/features/patient-workspace/TherapistPatientsV2.vue') : () => import('@/views/therapist/PatientsView.vue'), meta: { role: 'therapist' } },
+        { path: 'patients/:patientId', component: productV2Enabled ? () => import('@/features/patient-workspace/PatientWorkspaceV2.vue') : () => import('@/views/therapist/PatientWorkspaceView.vue'), meta: { role: 'therapist' } },
+        { path: 'patients/:patientId/assessments/new', component: () => import('@/features/formal-assessment/FormalAssessmentV2.vue'), meta: { role: 'therapist', v2Only: true, legacyFallback: '/therapist/assessments' } },
+        { path: 'patients/:patientId/:tab(overview|training|assessment|clinical-stage|profile|policy|controlled-actions)', component: () => import('@/views/therapist/PatientWorkspaceView.vue'), meta: { role: 'therapist' } },
+        { path: 'training-sessions/:sessionId', component: () => import('@/features/patient-workspace/TrainingSessionDetailV2.vue'), meta: { role: 'therapist', v2Only: true, legacyFallback: '/therapist/patients' } },
+        { path: 'plans', component: () => import('@/features/training-plan/TrainingPlansV2.vue'), meta: { role: 'therapist', v2Only: true, legacyFallback: '/therapist/patients' } },
+        { path: 'stage-reviews/:reviewId', component: () => import('@/features/stage-review/StageReviewV2.vue'), meta: { role: 'therapist', v2Only: true, legacyFallback: '/therapist/patients' } },
         // Internal calibration/governance routes are deliberately not exposed in
         // the therapist product shell. Keep legacy deep links harmless.
         { path: 'calibration', redirect: '/therapist' },
@@ -91,6 +106,7 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  if (!productV2Enabled && to.matched.some(item => item.meta.v2Only)) return String(to.meta.legacyFallback || '/home')
   const auth = useAuthStore()
   if (to.path !== '/login' && !auth.isAuthenticated) return '/login'
   if (auth.isAuthenticated && !auth.me) {

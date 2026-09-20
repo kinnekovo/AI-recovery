@@ -48,6 +48,7 @@ class PatientProfile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     assessment_status: Mapped[str] = mapped_column(String(40), default="not_started", nullable=False)
     training_status: Mapped[str] = mapped_column(String(40), default="not_started", nullable=False)
+    timezone: Mapped[str] = mapped_column(String(64), default="Asia/Shanghai", nullable=False)
 
     user: Mapped[User] = relationship(back_populates="patient_profile")
     current_agent: Mapped["Agent | None"] = relationship("Agent", foreign_keys=[current_agent_id], post_update=True)

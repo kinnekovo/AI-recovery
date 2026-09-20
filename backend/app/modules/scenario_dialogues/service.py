@@ -95,11 +95,8 @@ def get_evaluation(db: Session, user: User, dialogue_id) -> ScenarioDialogueEval
     _owned_task(db, user, dialogue.session_task_id)
     if dialogue.status == DialogueStatus.active:
         raise HTTPException(status_code=409, detail="请在对话结束后查看整段评价")
-    entity = db.scalar(select(ScenarioDialogueEvaluation).where(ScenarioDialogueEvaluation.dialogue_session_id == dialogue.id))
-    if not entity:
-        entity = _evaluate_dialogue(db, dialogue)
-        db.add(entity)
-        db.commit()
+    entity = ensure_evaluation(db, dialogue.id)
+    db.commit()
     # Canonical V3.2 is shadow-only: legacy response is already durable and a
     # storage failure cannot alter its score, trends, or training flow.
     try:
@@ -112,6 +109,32 @@ def get_evaluation(db: Session, user: User, dialogue_id) -> ScenarioDialogueEval
         record_evaluation_write_failure(db, source_type="dialogue_session", source_id=dialogue.id, domain=DOMAIN,
             algorithm_version=ALGORITHM_VERSION, failure_stage="shadow_write")
     return ScenarioDialogueEvaluationRead.model_validate(entity, from_attributes=True)
+
+
+def ensure_evaluation(db: Session, dialogue_id) -> ScenarioDialogueEvaluation:
+    """Materialize the legacy scenario evaluation for downstream projections.
+
+    Product v2 completes a scenario from the dialogue lifecycle itself, so it
+    cannot rely on a later read of the legacy evaluation endpoint to create the
+    durable evaluation row.  This helper is intentionally idempotent and leaves
+    transaction ownership to its caller.
+    """
+    dialogue = db.get(ScenarioDialogueSession, dialogue_id)
+    if not dialogue:
+        raise HTTPException(status_code=404, detail="场景对话不存在")
+    if dialogue.status == DialogueStatus.active:
+        raise HTTPException(status_code=409, detail="场景对话尚未结束")
+    entity = db.scalar(
+        select(ScenarioDialogueEvaluation).where(
+            ScenarioDialogueEvaluation.dialogue_session_id == dialogue.id
+        )
+    )
+    if entity:
+        return entity
+    entity = _evaluate_dialogue(db, dialogue)
+    db.add(entity)
+    db.flush()
+    return entity
 
 
 def review_evaluation(db: Session, therapist: User, dialogue_id, payload: ScenarioDialogueReviewUpdate) -> ScenarioDialogueEvaluationRead:

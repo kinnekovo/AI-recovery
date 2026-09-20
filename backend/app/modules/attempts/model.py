@@ -1,7 +1,9 @@
 import enum
 import uuid
 
-from sqlalchemy import Boolean, Enum, ForeignKey, Integer, String
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,6 +27,10 @@ class Attempt(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     skipped: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     requested_help: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    terminal_state: Mapped[str] = mapped_column(String(24), default="pending", nullable=False)
+    technical_validity: Mapped[str] = mapped_column(String(32), default="unknown", nullable=False)
+    measurement_eligibility: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     audio_quality: Mapped[str | None] = mapped_column(nullable=True)
     analysis_error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     analysis_error_message: Mapped[str | None] = mapped_column(String(255), nullable=True)

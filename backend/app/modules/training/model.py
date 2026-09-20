@@ -1,7 +1,9 @@
 import enum
 import uuid
 
-from sqlalchemy import Boolean, Enum, Float, ForeignKey, Integer, String, Text
+from datetime import date, datetime
+
+from sqlalchemy import Boolean, Date, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -117,10 +119,34 @@ class RecommendationStrategyFeedback(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
 class TrainingSession(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "training_sessions"
+    __table_args__ = (
+        Index(
+            "uq_formal_daily_session",
+            "patient_profile_id",
+            "formal_training_plan_version_id",
+            "local_session_date",
+            unique=True,
+            postgresql_where=text("session_kind = 'formal'"),
+            sqlite_where=text("session_kind = 'formal'"),
+        ),
+    )
 
     patient_profile_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patient_profiles.id"), index=True)
     agent_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=True)
     training_plan_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("training_plans.id"), nullable=True)
+    formal_training_plan_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("training_plan_versions.id"), nullable=True, index=True
+    )
+    session_kind: Mapped[str] = mapped_column(String(24), default="legacy", nullable=False)
+    v2_status: Mapped[str] = mapped_column(String(24), default="in_progress", nullable=False)
+    local_session_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    aborted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    summary_status: Mapped[str] = mapped_column(String(24), default="pending", nullable=False)
+    technical_status: Mapped[str] = mapped_column(String(32), default="ready", nullable=False)
     recommendation_review_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("training_recommendation_reviews.id"),
@@ -154,6 +180,15 @@ class SessionTask(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     task_template_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("task_templates.id"))
     order_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     prompt_level: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    v2_status: Mapped[str] = mapped_column(String(24), default="in_progress", nullable=False)
+    content_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    instruction_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    exercise_type_snapshot: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    difficulty_snapshot: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    max_information_units_snapshot: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    prompt_policy_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    contract_version_snapshot: Mapped[str | None] = mapped_column(String(80), nullable=True)
     status: Mapped[TrainingStatus] = mapped_column(
         Enum(TrainingStatus, name="session_task_status"), default=TrainingStatus.in_progress, nullable=False
     )
