@@ -44,6 +44,7 @@ const router = createRouter({
         { path: 'training/result', component: TrainingResultView, meta: { role: 'patient' } },
         { path: 'evaluation', component: () => import('@/views/patient/EvaluationView.vue'), meta: { role: 'patient' } },
         { path: 'ability', component: () => import('@/views/patient/AbilityProfileView.vue'), meta: { role: 'patient' } },
+        { path: '/patient/profile', component: () => import('@/views/patient/PatientProfileView.vue'), meta: { role: 'patient' } },
         { path: 'report', component: ReportView, meta: { role: 'patient' } }
       ]
     },
@@ -71,6 +72,13 @@ const router = createRouter({
           component: () => import('@/views/therapist/TherapistProfilesView.vue'),
           meta: { role: 'therapist' }
         },
+        { path: 'patients', component: () => import('@/views/therapist/PatientsView.vue'), meta: { role: 'therapist' } },
+        { path: 'patients/:patientId/:tab(overview|training|assessment|clinical-stage|profile|policy|controlled-actions)?', component: () => import('@/views/therapist/PatientWorkspaceView.vue'), meta: { role: 'therapist' } },
+        // Internal calibration/governance routes are deliberately not exposed in
+        // the therapist product shell. Keep legacy deep links harmless.
+        { path: 'calibration', redirect: '/therapist' },
+        { path: 'policy-validation', redirect: '/therapist' },
+        { path: 'governance', redirect: '/therapist' },
         { path: 'scenario-dialogues/:dialogueId', component: () => import('@/views/therapist/TherapistScenarioDialogueReviewView.vue'), meta: { role: 'therapist' } },
         {
           path: 'status',

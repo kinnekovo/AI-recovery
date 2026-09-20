@@ -71,7 +71,7 @@
       <p v-if="status" class="success-text">{{ status }}</p>
       <p v-if="error" class="error-text">{{ error }}</p>
       <AppButton variant="primary" :disabled="!recordedBlob" :loading="loading" @click="submitAttempt">
-        {{ currentTaskIndex + 1 < tasks.length ? '上传并进入下一项' : '上传录音并生成反馈' }}
+        {{ pendingAttemptId ? '重试分析' : currentTaskIndex + 1 < tasks.length ? '上传并进入下一项' : '上传录音并生成反馈' }}
       </AppButton>
       </template>
     </section>
@@ -93,6 +93,7 @@ import { AliyunCloudAvatarProvider } from '@/avatar/providers/aliyunCloud'
 import { useAgentStore } from '@/stores/agent'
 import { useTrainingStore } from '@/stores/training'
 import { toUserMessage } from '@/utils/errors'
+import { ApiError } from '@/api/http'
 
 const route = useRoute()
 const router = useRouter()
@@ -115,6 +116,7 @@ const dialogue = ref<ScenarioDialogue | null>(null)
 const pendingDialogueTurnId = ref('')
 const promptLevel = ref(0)
 const requestedHelp = ref(false)
+const pendingAttemptId = ref('')
 const currentAgent = computed(() =>
   agentStore.agents.find((agent) => agent.id === store.currentSession?.agent_id) || agentStore.agents[0]
 )
@@ -162,6 +164,7 @@ onMounted(async () => {
 
 function handleRecorded(blob: Blob) {
   recordedBlob.value = blob
+  pendingAttemptId.value = ''
   status.value = '录音已完成，可以上传评分。'
   avatar.encourage('录音已经保存好了。你可以先试听一下，确认后上传评分。')
 }
@@ -184,13 +187,17 @@ async function submitAttempt() {
   error.value = ''
   avatar.think('我正在分析这次表达，稍等一下。')
   try {
-    const attempt = await attemptsApi.create(task.value.id, {
-      prompt_level: promptLevel.value,
-      requested_help: requestedHelp.value
-    })
-    await attemptsApi.uploadAudio(attempt.id, recordedBlob.value)
-    const feedback = await attemptsApi.analyze(attempt.id)
+    if (!pendingAttemptId.value) {
+      const attempt = await attemptsApi.create(task.value.id, {
+        prompt_level: promptLevel.value,
+        requested_help: requestedHelp.value
+      })
+      await attemptsApi.uploadAudio(attempt.id, recordedBlob.value)
+      pendingAttemptId.value = attempt.id
+    }
+    const feedback = await attemptsApi.analyze(pendingAttemptId.value)
     store.setFeedback(feedback)
+    pendingAttemptId.value = ''
     if (currentTaskIndex.value + 1 < tasks.value.length) {
       currentTaskIndex.value += 1
       recordedBlob.value = null
@@ -203,8 +210,8 @@ async function submitAttempt() {
     await speakWithGeneratedAudio('result_encouragement', '这一组训练完成了。接下来可以看本次反馈。')
     router.push('/training/result')
   } catch (err) {
-    error.value = toUserMessage(err, '评分失败')
-    avatar.fail('这次分析没有成功。你可以稍后重试，或者重新录一遍。')
+    error.value = analysisErrorMessage(err)
+    avatar.fail(pendingAttemptId.value ? '录音已保留，但分析服务暂时没有完成。你可以直接重试分析。' : '这次分析没有成功。你可以稍后重试，或者重新录一遍。')
   } finally {
     loading.value = false
   }
@@ -218,6 +225,13 @@ async function speakCurrentTask(prefix = '', sceneName = 'task_demo') {
     ? `${prefix}${scene}${sceneDisplayPrompt.value}。${isGeneralizationProbe.value ? '这是一个新场景小测，用自己的话说清楚就可以。' : '你可以用自己的话说，不用重复示范句。'}`
     : `${prefix}${scene}这次请练习：${template.target_text}`
   await speakWithGeneratedAudio(sceneName, text, task.value.id)
+}
+
+function analysisErrorMessage(err: unknown) {
+  if (err instanceof ApiError && err.status === 502) {
+    return '录音已上传，但语音分析服务暂时不可用。可直接再次点击上传按钮重试；如果试听没有声音，请重新录音并检查麦克风权限。'
+  }
+  return toUserMessage(err, '评分失败')
 }
 
 async function submitDialogueTurn() {

@@ -46,6 +46,18 @@ def _eligibility(db, decision, session=None):
     if not registry: _fail("activation_not_eligible")
     if registry.validation_status == "suspended": _fail("activation_suspended")
     if registry.validation_status not in ELIGIBLE_VALIDATION_STATUSES: _fail("activation_not_eligible")
+    # Governance can only restrict V3.8; it can never grant runtime permission.
+    if session:
+        from app.modules.controlled_governance.model import ControlledActionGovernanceRegistry
+        from app.modules.controlled_governance.model import ControlledActivationEvaluationRun
+        from app.modules.controlled_policy.adapter import VERSION as adapter_version
+        action_type = getattr(session, "_controlled_action_type", None)
+        if action_type:
+            governance = db.scalar(select(ControlledActionGovernanceRegistry).where(ControlledActionGovernanceRegistry.policy_version == decision.policy_version, ControlledActionGovernanceRegistry.rules_version == decision.rules_version, ControlledActionGovernanceRegistry.action_type == action_type))
+            if governance and governance.governance_status == "suspended": _fail("governance_suspended")
+            if governance and governance.latest_evaluation_run_id:
+                run = db.get(ControlledActivationEvaluationRun, governance.latest_evaluation_run_id)
+                if run and run.adapter_version != adapter_version: _fail("revalidation_required")
     latest = db.scalar(select(PatientProfileSnapshot).where(PatientProfileSnapshot.patient_profile_id == decision.patient_profile_id)
         .order_by(PatientProfileSnapshot.generated_at.desc()))
     if not decision.profile_snapshot_id or not latest or latest.id != decision.profile_snapshot_id or latest.status in {"failed", "insufficient"}:
@@ -69,6 +81,7 @@ def _action_from_decision(decision, action_type):
 def create_proposal(db: Session, decision_id: UUID, action_type: str, target_session_id: UUID, actor=None):
     decision = db.get(PolicyDecision, decision_id); session = _session(db, target_session_id)
     try:
+        if session: session._controlled_action_type = action_type
         registry = _eligibility(db, decision, session)
         if not session: _fail("training_session_missing")
         value, reasons = _action_from_decision(decision, action_type)
@@ -113,7 +126,9 @@ def approve(db, proposal_id, patient_profile_id, therapist, comment=None):
     if _expire_if_needed(db, proposal): _fail("proposal_expired")
     if proposal.status != "pending_review": _fail("invalid_status_transition")
     decision = db.get(PolicyDecision, proposal.policy_decision_id)
-    try: _eligibility(db, decision)
+    try:
+        session = _session(db, proposal.target_training_session_id); session._controlled_action_type = proposal.action_type
+        _eligibility(db, decision, session)
     except ValueError as exc: _safety(db, proposal.patient_profile_id, str(exc), proposal); db.commit(); raise
     approval_until = utc_now() + APPROVAL_VALIDITY
     if getattr(proposal.expires_at, "tzinfo", None) is None: approval_until = approval_until.replace(tzinfo=None)
@@ -146,6 +161,7 @@ def apply(db, proposal_id, patient_profile_id, therapist, target_session_id=None
     if not approval or approval.approval_valid_until <= approval_now: _fail("approval_required")
     decision = db.get(PolicyDecision, proposal.policy_decision_id); session = _session(db, proposal.target_training_session_id)
     try:
+        session._controlled_action_type = proposal.action_type
         _eligibility(db, decision, session)
         if not _same_state(proposal, session): _fail("state_conflict")
         before, after, changed = adapter.apply_to_session(session, proposal.action_type, proposal.proposed_value)

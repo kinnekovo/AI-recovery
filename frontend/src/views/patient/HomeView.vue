@@ -45,6 +45,10 @@
         </div>
       </div>
     </section>
+    <section class="surface-card patient-profile-preview">
+      <div class="section-heading"><div><h2>长期能力记录</h2><p>{{ profileSummary }}</p></div><RouterLink class="secondary-button" to="/patient/profile">查看能力画像</RouterLink></div>
+      <div v-if="profile?.dimensions.length" class="dimension-grid"><div v-for="item in profile.dimensions.slice(0,3)" :key="item.code" class="dimension-card"><strong>{{ patientDimensionLabel(item.code) }}</strong><span>{{ patientTrendLabel(item.trend) }}</span></div></div>
+    </section>
   </section>
 </template>
 
@@ -55,12 +59,15 @@ import { trainingApi } from '@/api/training'
 import { useAgentStore } from '@/stores/agent'
 import { useAuthStore } from '@/stores/auth'
 import type { TodayTraining, TrainingRecommendation } from '@/types/api'
+import type { PatientProfileProjection } from '@/types/professional'
+import { profileV2Api } from '@/api/profileV2'
 
 const agentStore = useAgentStore()
 const auth = useAuthStore()
 const today = ref<TodayTraining | null>(null)
 const recommendation = ref<TrainingRecommendation | null>(null)
 const recommendationError = ref('')
+const profile = ref<PatientProfileProjection | null>(null)
 
 const currentAgent = computed(() =>
   agentStore.agents.find((agent) => agent.id === auth.me?.patient_profile?.current_agent_id) || agentStore.agents[0]
@@ -69,7 +76,7 @@ const isTodayRecommendationCompleted = computed(() => Boolean(today.value?.recom
 
 onMounted(async () => {
   await agentStore.loadAgents()
-  const [todayResult, recommendationResult] = await Promise.allSettled([trainingApi.today(), trainingApi.recommendation()])
+  const [todayResult, recommendationResult, profileResult] = await Promise.allSettled([trainingApi.today(), trainingApi.recommendation(), profileV2Api.patientProfile()])
   if (todayResult.status === 'fulfilled') {
     today.value = todayResult.value
   }
@@ -78,7 +85,12 @@ onMounted(async () => {
   } else {
     recommendationError.value = '暂时无法读取训练建议，可以进入训练页手动选择。'
   }
+  if (profileResult.status === 'fulfilled') profile.value = profileResult.value
 })
+
+const profileSummary = computed(() => profile.value?.dimensions.length ? `已有 ${profile.value.dimensions.length} 个维度的长期记录。` : '完成更多训练或评估后，这里会逐步形成长期能力记录。')
+function patientDimensionLabel(code:string){return ({content_reproduction:'内容表达',fluency_efficiency:'表达流畅',independence:'独立完成',functional_communication:'情境沟通'} as Record<string,string>)[code]||'训练表现'}
+function patientTrendLabel(trend:string){return ({improving:'近期上升',stable:'近期稳定',declining:'建议继续观察'} as Record<string,string>)[trend]||'数据逐步积累中'}
 
 function recommendedTrainingLink(item: TrainingRecommendation) {
   return {

@@ -6,6 +6,13 @@ export const http = axios.create({
   timeout: 20000
 })
 
+export class ApiError extends Error {
+  constructor(message: string, public readonly status?: number, public readonly detail?: unknown) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
 http.interceptors.request.use((config) => {
   const token = localStorage.getItem('access_token')
   if (token) {
@@ -23,7 +30,13 @@ export async function request<T>(promise: Promise<{ data: ApiEnvelope<T> }>): Pr
     return response.data.data
   } catch (err) {
     if (axios.isAxiosError(err)) {
-      throw new Error(readApiError(err.response?.data) || httpStatusMessage(err.response?.status) || err.message)
+      const status = err.response?.status
+      const message = readApiError(err.response?.data) || httpStatusMessage(status) || err.message
+      if (status === 401 && window.location.pathname !== '/login') {
+        localStorage.removeItem('access_token')
+        window.location.assign('/login')
+      }
+      throw new ApiError(message, status, err.response?.data)
     }
     throw err
   }
@@ -53,6 +66,7 @@ function httpStatusMessage(status?: number): string {
   if (status === 401) return '登录已过期，请重新登录。'
   if (status === 403) return '当前账号没有权限执行这个操作。'
   if (status === 404) return '请求的数据不存在或已被移除。'
+  if (status === 409) return '当前状态与操作要求不一致，请刷新数据后重试。'
   if (status === 422) return '提交内容未通过校验，请检查表单。'
   if (status && status >= 500) return '服务器暂时无法完成请求，请稍后再试。'
   return ''

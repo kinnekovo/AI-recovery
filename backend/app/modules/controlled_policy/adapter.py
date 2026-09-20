@@ -2,6 +2,7 @@
 from __future__ import annotations
 from app.modules.controlled_policy.policy import MAX_DIFFICULTY_DELTA, MAX_PROMPT_LEVEL, MIN_PROMPT_LEVEL, SCOPE
 from app.modules.training.model import TrainingType
+VERSION = "controlled-action-adapter-v1"
 
 def _dimension_training_type(dimension_code: str) -> TrainingType | None:
     prefix = (dimension_code or "").split(".", 1)[0]

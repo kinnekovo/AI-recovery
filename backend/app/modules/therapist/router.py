@@ -18,6 +18,7 @@ from app.modules.policy_v2.schema import PolicyDecisionRead, PolicyFeedbackCreat
 from app.modules.policy_validation import service as validation_service
 from app.modules.controlled_policy import service as controlled_policy_service
 from app.modules.controlled_policy.schema import ApprovalCreate, ObservationCreate, ProposalCreate, ProposalRead, RejectionCreate, RollbackCreate
+from app.modules.controlled_governance import service as governance_service
 from app.modules.therapist import service
 from app.modules.therapist.report_export import render_stage_report_html
 from app.modules.training.schema import TrainingRecommendationReviewUpdate
@@ -231,6 +232,38 @@ def observe_controlled_policy_execution(patient_user_id: UUID, execution_id: UUI
 def controlled_policy_history(patient_user_id: UUID, current_user: User=Depends(require_therapist), db: Session=Depends(get_db)):
     profile = service.require_therapist_patient_access(db, current_user, patient_user_id)
     return api_success({"proposals": [ProposalRead.model_validate(row).model_dump(mode="json") for row in controlled_policy_service.list_history(db, profile.id)], "analytics": controlled_policy_service.analytics(db, profile.id)})
+
+@router.post("/policy-v2/controlled-governance/datasets")
+def create_controlled_governance_dataset(name: str, version: str, current_user: User=Depends(require_therapist), db: Session=Depends(get_db)):
+    row=governance_service.create_dataset(db,current_user,name,version);return api_success({"id":str(row.id),"status":row.status,"version":row.version})
+@router.post("/policy-v2/controlled-governance/datasets/{dataset_id}/items/{proposal_id}")
+def add_controlled_governance_item(dataset_id: UUID,proposal_id: UUID,current_user: User=Depends(require_therapist),db: Session=Depends(get_db)):
+    try:row=governance_service.add_item(db,dataset_id,proposal_id)
+    except ValueError as e:_controlled_error(e)
+    return api_success({"id":str(row.id),"proposal_id":str(row.proposal_id)})
+@router.delete("/policy-v2/controlled-governance/datasets/{dataset_id}/items/{item_id}")
+def remove_controlled_governance_item(dataset_id: UUID,item_id: UUID,current_user: User=Depends(require_therapist),db: Session=Depends(get_db)):
+    try:governance_service.remove_item(db,dataset_id,item_id)
+    except ValueError as e:_controlled_error(e)
+    return api_success({"removed":True})
+@router.post("/policy-v2/controlled-governance/datasets/{dataset_id}/freeze")
+def freeze_controlled_governance_dataset(dataset_id: UUID,current_user: User=Depends(require_therapist),db: Session=Depends(get_db)):
+    try:row=governance_service.freeze(db,dataset_id)
+    except ValueError as e:_controlled_error(e)
+    return api_success({"id":str(row.id),"status":row.status})
+@router.post("/policy-v2/controlled-governance/runs")
+def run_controlled_governance(dataset_id: UUID,action_type: str|None=None,current_user: User=Depends(require_therapist),db: Session=Depends(get_db)):
+    try:rows=governance_service.run(db,dataset_id,current_user,action_type)
+    except ValueError as e:_controlled_error(e)
+    return api_success([{"id":str(x.id),"status":x.governance_status,"reason_codes":x.reason_codes,"report":x.report} for x in rows])
+@router.get("/policy-v2/controlled-governance/registry")
+def controlled_governance_registry(current_user: User=Depends(require_therapist),db: Session=Depends(get_db)):
+    return api_success([{"policy_version":x.policy_version,"rules_version":x.rules_version,"action_type":x.action_type,"governance_status":x.governance_status,"reason_codes":x.reason_codes} for x in governance_service.registry(db)])
+@router.get("/policy-v2/controlled-governance/registry/{policy_version}/{rules_version}/{action_type}")
+def controlled_governance_registry_detail(policy_version: str,rules_version: str,action_type: str,current_user: User=Depends(require_therapist),db: Session=Depends(get_db)):
+    rows=governance_service.registry(db,policy_version,rules_version,action_type)
+    if not rows:raise HTTPException(status_code=404,detail="治理注册表不存在")
+    row=rows[0];return api_success({"policy_version":row.policy_version,"rules_version":row.rules_version,"action_type":row.action_type,"governance_status":row.governance_status,"reason_codes":row.reason_codes,"history":[{"from_status":x.from_status,"to_status":x.to_status,"reason_codes":x.reason_codes,"created_at":x.created_at} for x in governance_service.registry_history(db,row.id)]})
 
 
 

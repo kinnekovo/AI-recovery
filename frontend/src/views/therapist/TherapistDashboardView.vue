@@ -24,11 +24,15 @@
         </div>
       </div>
     </section>
+    <section class="workspace-panel">
+      <div class="section-heading"><div><h2>待办概览</h2><p>基于当前已分配患者与真实复核状态聚合。</p></div><RouterLink class="secondary-button" to="/therapist/patients">查看患者</RouterLink></div>
+      <div class="summary-strip"><div><small>已分配患者</small><strong>{{ patients.length }}</strong></div><div><small>待复核评估</small><strong>{{ pendingReviews }}</strong></div><div><small>训练中</small><strong>{{ activePatients }}</strong></div></div>
+    </section>
 
     <section class="role-boundary-panel">
       <h2>治疗师端职责</h2>
       <div class="boundary-list">
-        <RouterLink to="/therapist/profiles">查看患者训练记录</RouterLink>
+        <RouterLink to="/therapist/patients">查看患者工作区</RouterLink>
         <RouterLink to="/therapist/assessments">复核阶段评估</RouterLink>
         <span>维护训练建议</span>
       </div>
@@ -41,11 +45,15 @@
 import { computed, onMounted, ref } from 'vue'
 import { therapistApi } from '@/api/therapist'
 import type { TherapistTrialQuality } from '@/types/api'
+import type { TherapistPatient } from '@/types/api'
 import { toUserMessage } from '@/utils/errors'
 
 const quality = ref<TherapistTrialQuality | null>(null)
 const loading = ref(true)
 const error = ref('')
+const patients = ref<TherapistPatient[]>([])
+const pendingReviews = computed(() => patients.value.reduce((sum, item) => sum + item.pending_review_count, 0))
+const activePatients = computed(() => patients.value.filter((item) => item.training_status === 'active').length)
 
 const qualitySummary = computed(() => {
   if (!quality.value) return ''
@@ -99,7 +107,9 @@ const qualityCards = computed(() => {
 
 onMounted(async () => {
   try {
-    quality.value = await therapistApi.trialQuality()
+    const [qualityResult, patientsResult] = await Promise.all([therapistApi.trialQuality(), therapistApi.patients()])
+    quality.value = qualityResult
+    patients.value = patientsResult
   } catch (err) {
     error.value = toUserMessage(err, '试用质控数据加载失败')
   } finally {

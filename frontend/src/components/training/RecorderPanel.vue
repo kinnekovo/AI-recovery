@@ -88,5 +88,6 @@ function clearTimer() {
 onBeforeUnmount(() => {
   clearTimer()
   revokeAudioUrl()
+  recorder.dispose()
 })
 </script>

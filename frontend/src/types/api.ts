@@ -758,6 +758,17 @@ export interface AssessmentSession {
   source_target_text: string | null
   source_process_details: ProcessDetails | null
   created_at: string
+  instrument_name?: string | null
+  instrument_version?: string | null
+  language_locale?: string | null
+  localization_version?: string | null
+  assessment_stage?: string | null
+  raw_item_results?: Record<string, unknown>
+  subscale_results?: Record<string, unknown>
+  total_result?: Record<string, unknown>
+  missing_items?: string[]
+  score_unit?: string | null
+  administration_mode?: string | null
 }
 
 export interface AssessmentReviewPayload {

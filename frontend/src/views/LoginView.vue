@@ -1,19 +1,19 @@
 <template>
   <main class="login-page">
     <section class="login-copy">
-      <span class="kicker">MVP 第一阶段</span>
-      <h1>用熟悉的声音，陪患者完成每天的言语训练。</h1>
-      <p>先跑通注册、智能体创建、录音、Mock评分和记录保存闭环。</p>
+      <span class="kicker">言语康复支持平台</span>
+      <h1>让每天的训练更清楚，让长期记录更连贯。</h1>
+      <p>患者可完成日常训练并查看自己的长期能力记录；专业人员可在授权范围内复核证据与管理受控流程。</p>
     </section>
     <form class="auth-panel" @submit.prevent="submit">
       <h2>{{ mode === 'login' ? '登录' : '注册患者账号' }}</h2>
       <label>
         用户名
-        <input v-model="username" autocomplete="username" placeholder="patient_demo" />
+        <input v-model="username" autocomplete="username" placeholder="请输入用户名" required />
       </label>
       <label>
         密码
-        <input v-model="password" type="password" autocomplete="current-password" placeholder="至少 6 位" />
+        <input v-model="password" type="password" :autocomplete="mode === 'login' ? 'current-password' : 'new-password'" placeholder="至少 6 位" minlength="6" required />
       </label>
       <p v-if="error" class="error-text">{{ error }}</p>
       <AppButton variant="primary" :loading="loading">{{ mode === 'login' ? '登录' : '注册并登录' }}</AppButton>

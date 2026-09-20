@@ -7,7 +7,7 @@
         :id="cloudContainerId"
         class="avatar-video avatar-cloud-video"
         autoplay
-        muted
+        :muted="false"
         playsinline
       ></video>
       <video

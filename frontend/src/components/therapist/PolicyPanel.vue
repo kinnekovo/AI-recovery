@@ -1,0 +1,20 @@
+<template>
+  <section class="workspace-panel">
+    <div class="warning-banner info"><strong>SHADOW · 后台建议，仅供专业人员查看</strong><p>当前决策不会自动修改患者训练，也不会展示给患者或家属。</p></div>
+    <AsyncState :loading="loading" :error="error" :empty="!decision" empty-title="尚无 Policy V2 影子决策" empty-text="本页面只读取已有决策，不会在打开时自动生成。" @retry="load">
+      <div v-if="decision" class="summary-strip"><div><small>Policy</small><strong>{{ decision.policy_version }}</strong></div><div><small>Rules</small><strong>{{ decision.rules_version }}</strong></div><div><small>模式</small><StatusBadge :status="decision.mode" /></div><div><small>生成时间</small><strong>{{ formatDateTime(decision.generated_at) }}</strong></div></div>
+      <article v-if="decision" class="surface-card"><h3>决策内容</h3><JsonDetails :value="decision.decision_payload" /><div class="reason-list"><span v-for="code in decision.reason_codes" :key="code"><strong>{{ explainReasonCode(code) }}</strong><code>{{ code }}</code></span></div></article>
+      <article v-if="explanation" class="surface-card"><h3>确定性解释</h3><JsonDetails :value="explanation" /></article>
+      <div v-if="decision" class="panel-grid two"><form class="form-panel compact-form" @submit.prevent="submitFeedback"><h3>追加治疗师反馈</h3><label>判断<select v-model="agreement"><option value="agree">同意</option><option value="partially_agree">部分同意</option><option value="disagree">不同意</option><option value="not_applicable">不适用</option></select></label><label>备注<textarea v-model="comment" /></label><button class="primary-button" :disabled="saving">提交追加记录</button></form><form class="form-panel compact-form" @submit.prevent="observe"><h3>关联实际训练观察</h3><label>TrainingSession ID<input v-model="sessionId" required /></label><button class="secondary-button" :disabled="saving">关联并观察</button></form></div>
+      <article class="surface-card"><h3>Policy 历史</h3><div class="timeline"><article v-for="item in history" :key="item.id"><span></span><div><strong>{{ item.policy_version }} · {{ item.status }}</strong><p>{{ formatDateTime(item.generated_at) }}</p><small>{{ item.rules_version }} / Profile {{ item.profile_snapshot_id||'未关联' }}</small></div></article></div></article>
+    </AsyncState>
+    <p v-if="notice" class="inline-notice" role="status">{{ notice }}</p>
+  </section>
+</template>
+<script setup lang="ts">
+import { onMounted,ref } from 'vue'; import { policyV2Api } from '@/api/policyV2'; import AsyncState from '@/components/common/AsyncState.vue'; import JsonDetails from '@/components/common/JsonDetails.vue'; import StatusBadge from '@/components/common/StatusBadge.vue'; import { formatDateTime } from '@/utils/date'; import { explainReasonCode } from '@/utils/reasonCodes'; import type { PolicyDecision,PolicyExplanation } from '@/types/professional'
+const props=defineProps<{patientId:string}>(); const decision=ref<PolicyDecision|null>(null),history=ref<PolicyDecision[]>([]),explanation=ref<PolicyExplanation|null>(null),loading=ref(true),saving=ref(false),error=ref(''),notice=ref(''),agreement=ref('agree'),comment=ref(''),sessionId=ref('')
+async function load(){loading.value=true;error.value='';try{decision.value=await policyV2Api.latest(props.patientId);[history.value,explanation.value]=await Promise.all([policyV2Api.history(props.patientId),policyV2Api.explanation(props.patientId,decision.value.id)])}catch(e){error.value=e instanceof Error?e.message:'加载失败'}finally{loading.value=false}}
+async function submitFeedback(){if(!decision.value)return;saving.value=true;try{await policyV2Api.feedback(props.patientId,decision.value.id,{agreement:agreement.value,reason_codes:[],comment:comment.value});notice.value='反馈已作为新记录保存，历史反馈未被修改。';comment.value=''}catch(e){error.value=e instanceof Error?e.message:'提交失败'}finally{saving.value=false}}
+async function observe(){if(!decision.value)return;saving.value=true;try{await policyV2Api.observe(props.patientId,decision.value.id,sessionId.value);notice.value='实际训练观察已关联。'}catch(e){error.value=e instanceof Error?e.message:'关联失败'}finally{saving.value=false}} onMounted(load)
+</script>
