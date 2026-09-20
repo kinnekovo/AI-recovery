@@ -4,3 +4,6 @@ RULES_VERSION="policy-rules-v1"
 PROFILE_INPUT_POLICY_VERSION="policy-profile-input-policy-v1"
 PROFILE_INPUT_POLICY={"fresh_max_hours":24,"review_max_hours":168,"minimum_sufficient_dimensions":1,"long_assessment_interval_days":180,"source":"engineering_observation_policy","maturity":"E1"}
 PRIORITY_ORDER={"high":0,"medium":1,"low":2,"not_eligible":3}
+# Historical validation resolves this registry by persisted rules_version; unknown
+# versions are deliberately unreplayable rather than silently using current rules.
+RULESETS={RULES_VERSION:{"policy_version":POLICY_VERSION,"profile_input_policy":PROFILE_INPUT_POLICY}}

@@ -15,6 +15,7 @@ from app.modules.profile_v2 import service as profile_v2_service
 from app.modules.profile_v2.schema import ProfileSnapshotRead, ProfileEvidenceLinkRead
 from app.modules.policy_v2 import service as policy_v2_service
 from app.modules.policy_v2.schema import PolicyDecisionRead, PolicyFeedbackCreate, PolicyObservationCreate
+from app.modules.policy_validation import service as validation_service
 from app.modules.therapist import service
 from app.modules.therapist.report_export import render_stage_report_html
 from app.modules.training.schema import TrainingRecommendationReviewUpdate
@@ -43,6 +44,28 @@ from app.modules.users.model import User
 from app.modules.users.service import require_therapist
 
 router = APIRouter(prefix="/therapist", tags=["therapist"])
+
+@router.post("/policy-v2/validation/datasets")
+def create_policy_validation_dataset(name: str, version: str, current_user: User=Depends(require_therapist), db: Session=Depends(get_db)):
+    row=validation_service.create_dataset(db,current_user,name,version);return api_success({"id":str(row.id),"status":row.status,"version":row.version})
+@router.post("/policy-v2/validation/datasets/{dataset_id}/decisions/{decision_id}")
+def add_policy_validation_decision(dataset_id: UUID,decision_id: UUID,current_user: User=Depends(require_therapist),db: Session=Depends(get_db)):
+    try:validation_service.add_decision(db,dataset_id,decision_id)
+    except ValueError as e:raise HTTPException(status_code=409,detail=str(e)) from e
+    return api_success({"dataset_id":str(dataset_id),"decision_id":str(decision_id)})
+@router.post("/policy-v2/validation/datasets/{dataset_id}/freeze")
+def freeze_policy_validation_dataset(dataset_id: UUID,current_user: User=Depends(require_therapist),db: Session=Depends(get_db)):
+    try:r=validation_service.freeze(db,dataset_id)
+    except ValueError as e:raise HTTPException(status_code=409,detail=str(e)) from e
+    return api_success({"id":str(r.id),"status":r.status})
+@router.post("/policy-v2/validation/datasets/{dataset_id}/runs")
+def run_policy_validation(dataset_id: UUID,current_user: User=Depends(require_therapist),db: Session=Depends(get_db)):
+    try:r=validation_service.run_validation(db,dataset_id)
+    except ValueError as e:raise HTTPException(status_code=409,detail=str(e)) from e
+    return api_success({"id":str(r.id),"promotion_status":r.promotion_status,"reason_codes":r.reason_codes,"report":r.report})
+@router.get("/policy-v2/validation/registry")
+def policy_validation_registry(policy_version: str|None=None,rules_version: str|None=None,current_user: User=Depends(require_therapist),db: Session=Depends(get_db)):
+    rows=validation_service.registry(db,policy_version,rules_version);return api_success([{"policy_version":x.policy_version,"rules_version":x.rules_version,"validation_status":x.validation_status,"latest_validation_run_id":str(x.latest_validation_run_id) if x.latest_validation_run_id else None,"reason_codes":x.status_reason_codes} for x in rows])
 
 
 def _patient_profile_id(db: Session, patient_user_id: UUID) -> UUID:
