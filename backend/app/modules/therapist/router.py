@@ -16,6 +16,8 @@ from app.modules.profile_v2.schema import ProfileSnapshotRead, ProfileEvidenceLi
 from app.modules.policy_v2 import service as policy_v2_service
 from app.modules.policy_v2.schema import PolicyDecisionRead, PolicyFeedbackCreate, PolicyObservationCreate
 from app.modules.policy_validation import service as validation_service
+from app.modules.controlled_policy import service as controlled_policy_service
+from app.modules.controlled_policy.schema import ApprovalCreate, ObservationCreate, ProposalCreate, ProposalRead, RejectionCreate, RollbackCreate
 from app.modules.therapist import service
 from app.modules.therapist.report_export import render_stage_report_html
 from app.modules.training.schema import TrainingRecommendationReviewUpdate
@@ -40,7 +42,7 @@ from app.modules.scenario_dialogues import service as scenario_dialogue_service
 from app.modules.scenario_dialogues.schema import ScenarioDialogueReviewUpdate
 from app.modules.training.model import TrainingType
 from app.modules.training.schema import StrategyFeedbackCreate, TaskTemplateCreate, TaskTemplateUpdate
-from app.modules.users.model import User
+from app.modules.users.model import User, UserRole
 from app.modules.users.service import require_therapist
 
 router = APIRouter(prefix="/therapist", tags=["therapist"])
@@ -158,6 +160,77 @@ def policy_v2_observe(patient_user_id: UUID,decision_id: UUID,payload: PolicyObs
     try: observation=policy_v2_service.observe_policy_outcome(db,decision_id,payload.training_session_id)
     except ValueError as exc: raise HTTPException(status_code=409,detail=str(exc)) from exc
     return api_success({"id":str(observation.id),"focus_match":observation.focus_match,"difficulty_match":observation.difficulty_match,"reassessment_match":observation.reassessment_match})
+
+
+def _controlled_error(exc: ValueError):
+    raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+def _controlled_actor(db, current_user, patient_user_id):
+    # Admins retain read-only oversight; only the assigned therapist can mutate controlled actions.
+    if current_user.role != UserRole.therapist:
+        raise HTTPException(status_code=403, detail="仅已分配治疗师可执行受控策略操作")
+    return service.require_therapist_patient_access(db, current_user, patient_user_id)
+
+@router.post("/patients/{patient_user_id}/policy-v2/{decision_id}/proposals")
+def create_controlled_policy_proposal(patient_user_id: UUID, decision_id: UUID, payload: ProposalCreate, current_user: User=Depends(require_therapist), db: Session=Depends(get_db)):
+    profile = _controlled_actor(db, current_user, patient_user_id)
+    decision = policy_v2_service.detail(db, decision_id)
+    if not decision or decision.patient_profile_id != profile.id: raise HTTPException(status_code=404, detail="Policy 决策不存在")
+    try: row = controlled_policy_service.create_proposal(db, decision_id, payload.action_type, payload.target_training_session_id, current_user)
+    except ValueError as exc: _controlled_error(exc)
+    return api_success(ProposalRead.model_validate(row).model_dump(mode="json"))
+
+@router.get("/patients/{patient_user_id}/policy-v2/proposals")
+def list_controlled_policy_proposals(patient_user_id: UUID, current_user: User=Depends(require_therapist), db: Session=Depends(get_db)):
+    profile = service.require_therapist_patient_access(db, current_user, patient_user_id)
+    return api_success([ProposalRead.model_validate(row).model_dump(mode="json") for row in controlled_policy_service.list_history(db, profile.id)])
+
+@router.get("/patients/{patient_user_id}/policy-v2/proposals/{proposal_id}")
+def controlled_policy_proposal_detail(patient_user_id: UUID, proposal_id: UUID, current_user: User=Depends(require_therapist), db: Session=Depends(get_db)):
+    profile = service.require_therapist_patient_access(db, current_user, patient_user_id)
+    try: row = controlled_policy_service._owned(db, proposal_id, profile.id)
+    except ValueError: raise HTTPException(status_code=404, detail="Controlled proposal 不存在")
+    return api_success(ProposalRead.model_validate(row).model_dump(mode="json"))
+
+@router.post("/patients/{patient_user_id}/policy-v2/proposals/{proposal_id}/approve")
+def approve_controlled_policy_proposal(patient_user_id: UUID, proposal_id: UUID, payload: ApprovalCreate, current_user: User=Depends(require_therapist), db: Session=Depends(get_db)):
+    profile = _controlled_actor(db, current_user, patient_user_id)
+    try: row = controlled_policy_service.approve(db, proposal_id, profile.id, current_user, payload.comment)
+    except ValueError as exc: _controlled_error(exc)
+    return api_success(ProposalRead.model_validate(row).model_dump(mode="json"))
+
+@router.post("/patients/{patient_user_id}/policy-v2/proposals/{proposal_id}/reject")
+def reject_controlled_policy_proposal(patient_user_id: UUID, proposal_id: UUID, payload: RejectionCreate, current_user: User=Depends(require_therapist), db: Session=Depends(get_db)):
+    profile = _controlled_actor(db, current_user, patient_user_id)
+    try: row = controlled_policy_service.reject(db, proposal_id, profile.id, current_user, payload.reason_code, payload.comment)
+    except ValueError as exc: _controlled_error(exc)
+    return api_success(ProposalRead.model_validate(row).model_dump(mode="json"))
+
+@router.post("/patients/{patient_user_id}/policy-v2/proposals/{proposal_id}/apply")
+def apply_controlled_policy_proposal(patient_user_id: UUID, proposal_id: UUID, target_training_session_id: UUID|None=None, current_user: User=Depends(require_therapist), db: Session=Depends(get_db)):
+    profile = _controlled_actor(db, current_user, patient_user_id)
+    try: row = controlled_policy_service.apply(db, proposal_id, profile.id, current_user, target_training_session_id)
+    except ValueError as exc: _controlled_error(exc)
+    return api_success({"execution_id": str(row.id), "status": row.status, "before_state": row.before_state, "after_state": row.after_state})
+
+@router.post("/patients/{patient_user_id}/policy-v2/executions/{execution_id}/rollback")
+def rollback_controlled_policy_execution(patient_user_id: UUID, execution_id: UUID, payload: RollbackCreate, current_user: User=Depends(require_therapist), db: Session=Depends(get_db)):
+    profile = _controlled_actor(db, current_user, patient_user_id)
+    try: row = controlled_policy_service.rollback(db, execution_id, profile.id, current_user, payload.reason_code, payload.comment)
+    except ValueError as exc: _controlled_error(exc)
+    return api_success({"execution_id": str(row.id), "status": row.status})
+
+@router.post("/patients/{patient_user_id}/policy-v2/executions/{execution_id}/observe")
+def observe_controlled_policy_execution(patient_user_id: UUID, execution_id: UUID, payload: ObservationCreate, current_user: User=Depends(require_therapist), db: Session=Depends(get_db)):
+    profile = _controlled_actor(db, current_user, patient_user_id)
+    try: row = controlled_policy_service.observe(db, execution_id, profile.id, current_user, payload.outcome, payload.therapist_feedback)
+    except ValueError as exc: _controlled_error(exc)
+    return api_success({"observation_id": str(row.id), "outcome": row.outcome})
+
+@router.get("/patients/{patient_user_id}/policy-v2/controlled-actions/history")
+def controlled_policy_history(patient_user_id: UUID, current_user: User=Depends(require_therapist), db: Session=Depends(get_db)):
+    profile = service.require_therapist_patient_access(db, current_user, patient_user_id)
+    return api_success({"proposals": [ProposalRead.model_validate(row).model_dump(mode="json") for row in controlled_policy_service.list_history(db, profile.id)], "analytics": controlled_policy_service.analytics(db, profile.id)})
 
 
 
