@@ -66,6 +66,15 @@ METRIC_LABELS = {
     "tone_accuracy": "声调准确度",
     "pronunciation_mismatch_count": "发音匹配问题",
 }
+SCENARIO_METRIC_LABELS = {
+    "functional_goal": "场景目标完成度",
+    "information_units": "信息完整度",
+    "response_effectiveness": "回应能力",
+    "relevance_and_organization": "相关性与组织性",
+    "independence": "场景独立完成度",
+    "repair_ability": "沟通修复能力",
+}
+ALL_METRIC_LABELS = {**METRIC_LABELS, **{key: value for key, value in SCENARIO_METRIC_LABELS.items() if key != "independence"}}
 TRAINING_METRICS = {
     "error_count",
     "loudness",
@@ -996,7 +1005,9 @@ def project_scenario(db: Session, dialogue_id: UUID):
         "functional_goal": (evaluation.goal_score, "%"),
         "information_units": (evaluation.information_score, "%"),
         "response_effectiveness": (evaluation.response_score, "%"),
+        "relevance_and_organization": (evaluation.relevance_score, "%"),
         "independence": (evaluation.independence_score, "%"),
+        "repair_ability": (evaluation.repair_score, "%"),
     }
     for code, (value, unit) in values.items():
         if db.scalar(select(MetricRecord).where(MetricRecord.source_type == "scenario_dialogue", MetricRecord.source_id == dialogue.id, MetricRecord.code == code)):
@@ -1009,13 +1020,14 @@ def project_scenario(db: Session, dialogue_id: UUID):
             "evaluation_role": dialogue.evaluation_role,
         }
         key = hashlib.sha256(json.dumps({"code": code, "context": context, "version": evaluation.scoring_version}, sort_keys=True).encode()).hexdigest()
+        metric_status = "invalid" if source_status == "mock" else ("measured" if value is not None else "not_observed")
         db.add(
             MetricRecord(
                 patient_profile_id=session.patient_profile_id,
                 training_session_id=session.id,
                 code=code,
                 value=value,
-                status="invalid" if source_status == "mock" else "measured",
+                status=metric_status,
                 unit=unit,
                 measured_at=evaluation.created_at,
                 measurement_context=context,
@@ -1027,7 +1039,11 @@ def project_scenario(db: Session, dialogue_id: UUID):
                 quality={"review_status": evaluation.review_status, "source_status": source_status},
                 evidence_ids=[str(evidence.id)],
                 comparison_key=key,
-                decision_eligible=source_status != "mock" and evaluation.review_status in {"confirmed", "adjusted"},
+                decision_eligible=bool(
+                    value is not None
+                    and source_status != "mock"
+                    and evaluation.review_status in {"confirmed", "adjusted"}
+                ),
             )
         )
     db.commit()
@@ -1431,12 +1447,101 @@ def therapist_session_detail(db: Session, actor: User, session_id: UUID):
     }
 
 
+def therapist_exercise_detail(db: Session, actor: User, session_id: UUID, task_id: UUID):
+    """Return a product-facing detail view for one exercise only.
+
+    A TrainingSession may contain both repeat and scenario exercises.  Their
+    evidence and metric contracts are deliberately filtered here so the UI
+    never has to infer a clinical grouping from the whole-session payload.
+    """
+    session = db.scalar(
+        select(TrainingSession)
+        .options(selectinload(TrainingSession.session_tasks).selectinload(SessionTask.task_template))
+        .where(TrainingSession.id == session_id)
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="训练记录不存在")
+    profile = db.get(PatientProfile, session.patient_profile_id)
+    _therapist_profile(db, actor, profile.user_id)
+    task = next((item for item in session.session_tasks if item.id == task_id), None)
+    if not task:
+        raise HTTPException(status_code=404, detail="练习不存在")
+
+    task_family = task.exercise_type_snapshot or _enum_value(task.task_template.task_type)
+    exercise = _task_dict(db, task)
+    if task_family == "scenario":
+        dialogue = db.scalar(select(ScenarioDialogueSession).where(ScenarioDialogueSession.session_task_id == task.id))
+        source_type = "scenario_dialogue"
+        source_ids = [dialogue.id] if dialogue else []
+        metric_catalog = SCENARIO_METRIC_LABELS
+        scenario_dialogue = (
+            scenario_dialogue_service.to_read(db, dialogue).model_dump(mode="json")
+            if dialogue
+            else None
+        )
+    else:
+        dialogue = None
+        attempts = list(db.scalars(select(Attempt.id).where(Attempt.session_task_id == task.id)))
+        source_type = None
+        source_ids = attempts
+        metric_catalog = METRIC_LABELS
+        scenario_dialogue = None
+
+    metric_stmt = select(MetricRecord).where(
+        MetricRecord.training_session_id == session.id,
+        MetricRecord.source_id.in_(source_ids),
+    )
+    if source_type:
+        metric_stmt = metric_stmt.where(MetricRecord.source_type == source_type)
+    else:
+        metric_stmt = metric_stmt.where(MetricRecord.source_type.in_(["attempt", "attempt_pronunciation"]))
+    metric_rows = list(db.scalars(metric_stmt.order_by(MetricRecord.measured_at)))
+    current = {item.code: item for item in metric_rows}
+    professional_metrics = []
+    for code, label in metric_catalog.items():
+        if code in current:
+            payload = metric_dict(current[code])
+            payload.update({"display_source": "current_exercise"})
+        else:
+            payload = {
+                "code": code,
+                "label": label,
+                "value": None,
+                "status": "not_observed",
+                "unit": None,
+                "display_source": "current_exercise",
+                "message": "本练习未测得该指标",
+            }
+        professional_metrics.append(payload)
+
+    evidence_stmt = select(EvidenceRecord).where(
+        EvidenceRecord.training_session_id == session.id,
+        EvidenceRecord.source_id.in_(source_ids),
+    )
+    if source_type:
+        evidence_stmt = evidence_stmt.where(EvidenceRecord.source_type == source_type)
+    else:
+        evidence_stmt = evidence_stmt.where(EvidenceRecord.source_type == "attempt")
+    evidence_rows = list(db.scalars(evidence_stmt.order_by(EvidenceRecord.measured_at)))
+    return {
+        "session_id": str(session.id),
+        "exercise": exercise,
+        "exercise_type": task_family,
+        "professional_metrics": professional_metrics,
+        "metrics": [metric_dict(item) for item in metric_rows],
+        "evidence": [evidence_dict(item) for item in evidence_rows],
+        "scenario_dialogue": scenario_dialogue,
+    }
+
+
 def evidence_dict(item: EvidenceRecord):
     return {"id": str(item.id), "type": item.evidence_type, "source_type": item.source_type, "source_id": str(item.source_id), "source_status": item.source_status, "provider": item.provider, "provider_version": item.provider_version, "quality_status": item.quality_status, "payload": item.payload, "measured_at": item.measured_at.isoformat()}
 
 
 def metric_dict(item: MetricRecord):
-    return {"id": str(item.id), "code": item.code, "label": METRIC_LABELS.get(item.code, item.code), "value": item.value, "status": item.status, "unit": item.unit, "measured_at": item.measured_at.isoformat(), "measurement_context": item.measurement_context, "source": {"type": item.source_type, "id": str(item.source_id)}, "provider": item.provider, "algorithm": item.algorithm, "instrument": item.instrument, "version": item.version, "quality": item.quality, "evidence_ids": item.evidence_ids, "comparison_key": item.comparison_key, "decision_eligible": item.decision_eligible}
+    family = (item.measurement_context or {}).get("task_family")
+    label = SCENARIO_METRIC_LABELS.get(item.code) if family == "scenario" else METRIC_LABELS.get(item.code)
+    return {"id": str(item.id), "code": item.code, "label": label or ALL_METRIC_LABELS.get(item.code, item.code), "value": item.value, "status": item.status, "unit": item.unit, "measured_at": item.measured_at.isoformat(), "measurement_context": item.measurement_context, "source": {"type": item.source_type, "id": str(item.source_id)}, "provider": item.provider, "algorithm": item.algorithm, "instrument": item.instrument, "version": item.version, "quality": item.quality, "evidence_ids": item.evidence_ids, "comparison_key": item.comparison_key, "decision_eligible": item.decision_eligible}
 
 
 def observation_dict(item: ObservationRecord):

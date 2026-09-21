@@ -233,7 +233,9 @@ def test_completed_scenario_materializes_evidence_and_metrics(product_db, monkey
         "functional_goal",
         "information_units",
         "response_effectiveness",
+        "relevance_and_organization",
         "independence",
+        "repair_ability",
     }
 
 

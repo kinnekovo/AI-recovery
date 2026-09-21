@@ -87,6 +87,7 @@ const router = createRouter({
         { path: 'patients/:patientId/assessments/new', component: () => import('@/features/formal-assessment/FormalAssessmentV2.vue'), meta: { role: 'therapist', v2Only: true, legacyFallback: '/therapist/assessments' } },
         { path: 'patients/:patientId/:tab(overview|training|assessment|clinical-stage|profile|policy|controlled-actions)', component: () => import('@/views/therapist/PatientWorkspaceView.vue'), meta: { role: 'therapist' } },
         { path: 'training-sessions/:sessionId', component: () => import('@/features/patient-workspace/TrainingSessionDetailV2.vue'), meta: { role: 'therapist', v2Only: true, legacyFallback: '/therapist/patients' } },
+        { path: 'training-sessions/:sessionId/exercises/:taskId', component: () => import('@/features/patient-workspace/ExerciseProfessionalMetricsV2.vue'), meta: { role: 'therapist', v2Only: true, legacyFallback: '/therapist/patients' } },
         { path: 'plans', component: () => import('@/features/training-plan/TrainingPlansV2.vue'), meta: { role: 'therapist', v2Only: true, legacyFallback: '/therapist/patients' } },
         { path: 'stage-reviews/:reviewId', component: () => import('@/features/stage-review/StageReviewV2.vue'), meta: { role: 'therapist', v2Only: true, legacyFallback: '/therapist/patients' } },
         // Internal calibration/governance routes are deliberately not exposed in

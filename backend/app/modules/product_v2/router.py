@@ -114,6 +114,11 @@ def therapist_training_session(session_id: UUID, current_user: User = Depends(re
     return api_success(service.therapist_session_detail(db, current_user, session_id))
 
 
+@router.get("/therapist/training-sessions/{session_id}/exercises/{task_id}")
+def therapist_training_exercise(session_id: UUID, task_id: UUID, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    return api_success(service.therapist_exercise_detail(db, current_user, session_id, task_id))
+
+
 @router.post("/therapist/patients/{patient_user_id}/rehabilitation-goals")
 def create_rehabilitation_goal(patient_user_id: UUID, payload: GoalCreate, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
     return api_success(service.create_goal(db, current_user, patient_user_id, payload))

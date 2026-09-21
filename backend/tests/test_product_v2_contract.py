@@ -116,6 +116,7 @@ def test_product_v2_application_routes_are_registered():
         "/api/v2/therapist/workbench",
         "/api/v2/therapist/patients/{patient_user_id}/workspace",
         "/api/v2/therapist/training-sessions/{session_id}",
+        "/api/v2/therapist/training-sessions/{session_id}/exercises/{task_id}",
         "/api/v2/therapist/stage-reviews/{review_id}/decisions",
     }
     assert required <= paths

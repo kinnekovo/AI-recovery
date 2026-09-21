@@ -149,6 +149,17 @@ export interface MetricV2 {
   quality?: Record<string, unknown>
   evidence_ids?: string[]
   message?: string
+  source?: { type: string; id: string }
+}
+
+export interface ExerciseProfessionalDetailV2 {
+  session_id: string
+  exercise: ExerciseV2
+  exercise_type: 'repeat' | 'scenario'
+  professional_metrics: MetricV2[]
+  metrics: MetricV2[]
+  evidence: Array<Record<string, unknown>>
+  scenario_dialogue: Record<string, unknown> | null
 }
 
 export interface SessionDetailV2 {
@@ -185,6 +196,7 @@ export const v2Api = {
   workbench: () => request<WorkbenchV2>(http.get('/v2/therapist/workbench')),
   workspace: (patientId: string) => request<Record<string, any>>(http.get(`/v2/therapist/patients/${patientId}/workspace`)),
   therapistSession: (sessionId: string) => request<SessionDetailV2>(http.get(`/v2/therapist/training-sessions/${sessionId}`)),
+  therapistExercise: (sessionId: string, taskId: string) => request<ExerciseProfessionalDetailV2>(http.get(`/v2/therapist/training-sessions/${sessionId}/exercises/${taskId}`)),
   plans: (patientId: string) => request<TrainingPlanV2[]>(http.get(`/v2/therapist/patients/${patientId}/training-plans`)),
   createGoal: (patientId: string, payload: Record<string, unknown>) => request<GoalV2>(http.post(`/v2/therapist/patients/${patientId}/rehabilitation-goals`, payload)),
   createPlan: (patientId: string, payload: Record<string, unknown>) => request<TrainingPlanV2>(http.post(`/v2/therapist/patients/${patientId}/training-plans`, payload)),
