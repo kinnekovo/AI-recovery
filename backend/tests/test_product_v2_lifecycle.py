@@ -24,6 +24,7 @@ from app.modules.product_v2.schema import (
     StageReviewCreate,
     TrainingPlanDraftCreate,
 )
+from app.modules.scoring.model import AttemptAnalysisResult
 from app.modules.training.model import SessionTask, TaskTemplate, TrainingType
 from app.modules.users.model import OnboardingStatus, PatientProfile, TherapistPatientAssignment, User, UserRole
 
@@ -253,6 +254,30 @@ def test_completed_tencent_soe_repeat_projects_evidence_and_metrics(product_db):
     )
     db.add(attempt)
     db.flush()
+    db.add(
+        AttemptAnalysisResult(
+            attempt_id=attempt.id,
+            asr_text="我要一杯水",
+            acoustic_metrics={},
+            semantic_metrics={
+                "asr_provider": "tencent",
+                "asr_fallback_used": False,
+                "process_monitoring": {
+                    "details": {
+                        "independence_score": 75,
+                        "independence_evidence": {"prompt_level": 1, "requested_help": False, "start_latency_ms": 800},
+                        "quality_status": "pass",
+                        "loudness_unit": "dBFS",
+                        "input_sources": {"asr_provider": "tencent", "acoustic_provider": "local"},
+                        "evaluation_source": "system_rule",
+                        "provider_version": "rehab-process-v2",
+                    }
+                },
+            },
+            raw_model_output={},
+            provider_version="rehab-process-v2",
+        )
+    )
     analysis = PronunciationAnalysisResult(
         attempt_id=attempt.id,
         provider="tencent_soe",
@@ -317,7 +342,7 @@ def test_completed_tencent_soe_repeat_projects_evidence_and_metrics(product_db):
     metrics = list(
         db.scalars(
             select(MetricRecord).where(
-                MetricRecord.source_type == "attempt_pronunciation",
+                MetricRecord.source_type.in_(["attempt", "attempt_pronunciation"]),
                 MetricRecord.source_id == attempt.id,
             )
         )
@@ -331,8 +356,12 @@ def test_completed_tencent_soe_repeat_projects_evidence_and_metrics(product_db):
         "phoneme_accuracy",
         "tone_accuracy",
         "pronunciation_mismatch_count",
+        "independence",
     }
-    assert all(item.decision_eligible is False for item in metrics)
+    assert all(item.decision_eligible is False for item in metrics if item.code != "independence")
+    independence = next(item for item in metrics if item.code == "independence")
+    assert independence.value == 75
+    assert independence.decision_eligible is True
 
 
 def test_stage_review_decision_creates_unpublished_plan_version(product_db, monkeypatch):
@@ -386,9 +415,8 @@ def test_formal_assessment_is_separate_and_never_accepts_wab_reliability(product
     create_active_plan(db, therapist, patient, repeat, scenario)
     session = service.start_or_resume(db, patient, "formal", None)
     panel = service.professional_metric_panel(db, profile.id, UUID(session["id"]))
-    cadl = next(item for item in panel if item["code"] == "cadl_score")
-    assert cadl["status"] == "not_administered"
-    assert cadl["value"] is None
+    assert "cadl_score" not in {item["code"] for item in panel}
+    assert "wab_reliability" not in {item["code"] for item in panel}
 
     with pytest.raises(HTTPException) as exc:
         service.create_formal_assessment(

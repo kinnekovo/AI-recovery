@@ -268,6 +268,19 @@ const longTermMetricLabels: Record<string, { label: string; unit: string; polari
   acceptance_score: { label: '接受度', unit: '分', polarity: 'positive' }
 }
 
+const hiddenProfessionalMetricCodes = new Set([
+  'acceptance_score',
+  'cadl_score',
+  'wab_reliability',
+  'wab_fluency',
+  'wab_grammar',
+  'wab_information',
+  'wab_repetition_intelligibility',
+  'wab_word_order',
+  'wab_comprehensibility',
+  'wab_repetition_comprehensibility'
+])
+
 function metricDefinition(key: string) {
   if (isProcessMetricKey(key)) return processMetricCatalog[key]
   return longTermMetricLabels[key]
@@ -279,7 +292,7 @@ const displayHistory = computed(() => [...history.value].reverse())
 const totalPendingCount = computed(() => patients.value.reduce((sum, item) => sum + item.pending_review_count, 0))
 const metricCards = computed(() => {
   const metrics = selectedAssessment.value?.metrics || {}
-  return Object.entries(metrics).map(([key, value]) => ({
+  return Object.entries(metrics).filter(([key]) => !hiddenProfessionalMetricCodes.has(key)).map(([key, value]) => ({
     key,
     label: metricDefinition(key)?.label || key,
     unit: metricDefinition(key)?.unit || '',

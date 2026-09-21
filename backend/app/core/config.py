@@ -49,6 +49,7 @@ class Settings:
     tencent_soe_server_type: int
     tencent_soe_engine_type: str
     tencent_soe_score_coeff: float
+    tencent_soe_tone_detection: bool
     pronunciation_timeout_seconds: int
     pronunciation_shadow_mode: bool
     tts_provider: str
@@ -132,6 +133,7 @@ class Settings:
         self.tencent_soe_server_type = int(os.getenv("TENCENT_SOE_SERVER_TYPE", "1"))
         self.tencent_soe_engine_type = os.getenv("TENCENT_SOE_ENGINE_TYPE", "16k_zh").strip() or "16k_zh"
         self.tencent_soe_score_coeff = float(os.getenv("TENCENT_SOE_SCORE_COEFF", "1.0"))
+        self.tencent_soe_tone_detection = os.getenv("TENCENT_SOE_TONE_DETECTION", "true").strip().lower() not in {"0", "false", "no"}
         self.pronunciation_timeout_seconds = int(os.getenv("PRONUNCIATION_TIMEOUT_SECONDS", "30"))
         self.pronunciation_shadow_mode = os.getenv("PRONUNCIATION_SHADOW_MODE", "true").strip().lower() not in {"0", "false", "no"}
         self.tts_provider = os.getenv("TTS_PROVIDER", "mock").strip().lower() or "mock"

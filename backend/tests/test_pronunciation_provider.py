@@ -19,7 +19,7 @@ from app.integrations.pronunciation_assessment.provider import (
 
 class PronunciationProviderTest(unittest.TestCase):
     def tearDown(self) -> None:
-        for key in ("PRONUNCIATION_PROVIDER", "TENCENTCLOUD_SECRET_ID", "TENCENTCLOUD_SECRET_KEY", "TENCENT_SOE_APP_ID", "TENCENT_SOE_ENGINE_TYPE"):
+        for key in ("PRONUNCIATION_PROVIDER", "TENCENTCLOUD_SECRET_ID", "TENCENTCLOUD_SECRET_KEY", "TENCENT_SOE_APP_ID", "TENCENT_SOE_ENGINE_TYPE", "TENCENT_SOE_TONE_DETECTION"):
             os.environ.pop(key, None)
         get_settings.cache_clear()
 
@@ -191,8 +191,17 @@ class PronunciationProviderTest(unittest.TestCase):
         self.assertEqual(query["server_engine_type"], ["16k_zh"])
         self.assertEqual(query["rec_mode"], ["1"])
         self.assertEqual(query["voice_format"], ["1"])
-        self.assertEqual(query["ref_text"], ["今天很好"])
+        self.assertEqual(query["ref_text"], ["{::cmd{F_TDET=true}}今天很好"])
         self.assertIn("signature", query)
+
+    def test_tencent_tone_detection_can_be_disabled_without_changing_reference_text(self) -> None:
+        os.environ["TENCENTCLOUD_SECRET_ID"] = "id"
+        os.environ["TENCENTCLOUD_SECRET_KEY"] = "key"
+        os.environ["TENCENT_SOE_APP_ID"] = "123456"
+        os.environ["TENCENT_SOE_TONE_DETECTION"] = "false"
+        get_settings.cache_clear()
+        url = TencentSoeProvider()._build_websocket_url("今天很好", 1)
+        self.assertEqual(parse_qs(urlparse(url).query)["ref_text"], ["今天很好"])
 
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ from app.modules.attempts import service as attempt_service
 from app.modules.attempts.model import AnalysisStatus, Attempt
 from app.modules.attempts.schema import AttemptCreate
 from app.modules.evaluation_runs.model import EvaluationRun
+from app.modules.evaluations.evidence_gate import process_evidence_gate
 from app.modules.evaluations.model import AttemptEvaluation, EvaluationMetric, EvaluationSource
 from app.modules.files.model import FileType
 from app.modules.files.service import save_upload
@@ -53,8 +54,6 @@ from app.modules.users.service import get_patient_profile
 
 
 METRIC_LABELS = {
-    "acceptance_score": "接受度",
-    "cadl_score": "CADL 总分",
     "error_count": "错误次数",
     "loudness": "声音响度",
     "script_accuracy": "表达完整度",
@@ -66,12 +65,6 @@ METRIC_LABELS = {
     "phoneme_accuracy": "音素准确度",
     "tone_accuracy": "声调准确度",
     "pronunciation_mismatch_count": "发音匹配问题",
-    "wab_reliability": "WAB 可靠度",
-    "wab_fluency": "WAB 流利性",
-    "wab_grammar": "WAB 语法",
-    "wab_information": "WAB 信息量",
-    "wab_repetition_intelligibility": "WAB 复述可懂度",
-    "wab_word_order": "WAB 语序",
 }
 TRAINING_METRICS = {
     "error_count",
@@ -86,7 +79,19 @@ TRAINING_METRICS = {
     "tone_accuracy",
     "pronunciation_mismatch_count",
 }
-ASSESSMENT_METRICS = set(METRIC_LABELS) - TRAINING_METRICS - {"wab_reliability"}
+# Legacy formal-assessment payloads remain accepted for compatibility, but
+# these metrics are intentionally omitted from the new Product V2 panel.
+ASSESSMENT_METRICS = {
+    "acceptance_score",
+    "cadl_score",
+    "wab_fluency",
+    "wab_grammar",
+    "wab_information",
+    "wab_repetition_intelligibility",
+    "wab_word_order",
+    "wab_comprehensibility",
+    "wab_repetition_comprehensibility",
+}
 
 
 def pronunciation_metric_values(analysis: PronunciationAnalysisResult, segments: list[PronunciationSegment]):
@@ -728,6 +733,70 @@ def project_attempt(db: Session, attempt_id: UUID):
                     evidence_ids=[str(evidence.id)],
                     comparison_key=comparison_key,
                     decision_eligible=bool(evaluation.decision_eligible and not mock),
+                )
+            )
+
+    # The repeat process engine already derives independence from persisted
+    # prompt/help/latency events. Project that fact into the v2 metric graph
+    # instead of requiring a second, divergent calculation.
+    task_family = task.exercise_type_snapshot or _enum_value(task.task_template.task_type)
+    process_monitoring = ((analysis.semantic_metrics or {}).get("process_monitoring") or {}) if analysis else {}
+    process_details = process_monitoring.get("details") or {}
+    independence_value = process_details.get("independence_score")
+    if task_family == "repeat" and independence_value is not None and analysis:
+        gate = process_evidence_gate(attempt.audio_quality, analysis.semantic_metrics, analysis.provider_version)
+        independence_context = {
+            "task_family": task_family,
+            "exercise_contract_version": task.contract_version_snapshot,
+            "prompt_level": attempt.prompt_level,
+            "independence_evidence": process_details.get("independence_evidence") or {},
+            "process_quality": process_details.get("quality_status"),
+            "gate_reasons": list(gate.reasons),
+        }
+        independence_key = hashlib.sha256(
+            json.dumps(
+                {
+                    "code": "independence",
+                    "context": independence_context,
+                    "algorithm": analysis.provider_version,
+                    "unit": "%",
+                },
+                sort_keys=True,
+                ensure_ascii=False,
+            ).encode()
+        ).hexdigest()
+        existing_independence = db.scalar(
+            select(MetricRecord).where(
+                MetricRecord.source_type == "attempt",
+                MetricRecord.source_id == attempt.id,
+                MetricRecord.code == "independence",
+            )
+        )
+        if not existing_independence:
+            db.add(
+                MetricRecord(
+                    patient_profile_id=session.patient_profile_id,
+                    training_session_id=session.id,
+                    code="independence",
+                    value=float(independence_value),
+                    status="measured" if attempt.measurement_eligibility == "eligible" else "invalid",
+                    unit="%",
+                    measured_at=analysis.created_at,
+                    measurement_context=independence_context,
+                    source_type="attempt",
+                    source_id=attempt.id,
+                    provider="process_rule_engine",
+                    algorithm=analysis.provider_version,
+                    version=analysis.provider_version,
+                    quality={
+                        "source_status": "real" if gate.eligible else "provisional",
+                        "quality_status": process_details.get("quality_status"),
+                        "gate_reasons": list(gate.reasons),
+                        "decision_eligible": gate.eligible,
+                    },
+                    evidence_ids=[str(evidence.id)],
+                    comparison_key=independence_key,
+                    decision_eligible=gate.eligible,
                 )
             )
 
@@ -1380,22 +1449,11 @@ def recommendation_dict(item: RecommendationRecord):
 
 def professional_metric_panel(db: Session, profile_id: UUID, session_id: UUID):
     current = {item.code: item for item in db.scalars(select(MetricRecord).where(MetricRecord.training_session_id == session_id))}
-    assessment = db.scalar(select(AssessmentSession).where(AssessmentSession.patient_profile_id == profile_id).order_by(AssessmentSession.assessed_at.desc()))
     output = []
     for code, label in METRIC_LABELS.items():
         if code in current:
             payload = metric_dict(current[code])
             payload.update({"display_source": "current_training_session"})
-        elif code == "wab_reliability":
-            payload = {"code": code, "label": label, "value": None, "status": "unsupported", "unit": None, "display_source": "unsupported", "message": "当前系统尚未支持该指标"}
-        elif (
-            code in ASSESSMENT_METRICS
-            and assessment
-            and (assessment.metrics or {}).get(code) is not None
-        ):
-            payload = {"code": code, "label": label, "value": assessment.metrics.get(code), "status": "measured", "unit": assessment.score_unit, "display_source": "latest_formal_assessment", "measured_at": assessment.assessed_at.isoformat(), "instrument": assessment.instrument_name, "version": assessment.instrument_version}
-        elif code in ASSESSMENT_METRICS:
-            payload = {"code": code, "label": label, "value": None, "status": "not_administered", "unit": None, "display_source": "formal_assessment", "message": "最近一次正式评估未施测该指标"}
         else:
             payload = {"code": code, "label": label, "value": None, "status": "not_observed", "unit": None, "display_source": "current_training_session", "message": "本次训练未测得该指标"}
         output.append(payload)

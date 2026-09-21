@@ -93,6 +93,7 @@ class TencentSoeProvider(PronunciationAssessmentProvider):
         self.app_id = settings.tencent_soe_app_id
         self.engine_type = settings.tencent_soe_engine_type
         self.score_coeff = settings.tencent_soe_score_coeff
+        self.tone_detection_enabled = settings.tencent_soe_tone_detection
         self.timeout_seconds = settings.pronunciation_timeout_seconds
         self.ffmpeg_bin = settings.ffmpeg_bin or self._bundled_ffmpeg_bin()
 
@@ -192,6 +193,7 @@ class TencentSoeProvider(PronunciationAssessmentProvider):
 
     def _build_websocket_url(self, reference_text: str, mode: int) -> str:
         timestamp = int(time.time())
+        reference_text = self._reference_text_for_mode(reference_text, mode)
         params = {
             "eval_mode": str(mode),
             "expired": str(timestamp + 300),
@@ -215,6 +217,18 @@ class TencentSoeProvider(PronunciationAssessmentProvider):
         ).decode("ascii")
         query = "&".join(f"{key}={quote(value, safe='')}" for key, value in {**params, "signature": signature}.items())
         return f"wss://{path}?{query}"
+
+    def _reference_text_for_mode(self, reference_text: str, mode: int) -> str:
+        """Enable Tencent's sentence-level tone detector for Chinese repeats.
+
+        Tencent enables tone output through an inline ref_text command rather
+        than a standalone query parameter. Paragraph/free-speech modes are
+        left untouched because this switch is defined for sentence mode.
+        """
+        marker = "{::cmd{F_TDET=true}}"
+        if not self.tone_detection_enabled or self.engine_type != "16k_zh" or mode != self.mode_values["sentence"]:
+            return reference_text
+        return reference_text if marker in reference_text else f"{marker}{reference_text}"
 
     @staticmethod
     def _decode_response(message) -> dict:

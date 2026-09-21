@@ -4,7 +4,7 @@
       <RouterLink :to="`/therapist/patients/${patientId}#assessment`" class="v2-text-link">← 返回患者工作区</RouterLink>
       <p class="v2-context">正式专业评估</p>
       <h1>记录量表施测</h1>
-      <p>这里只记录治疗师实际完成的正式施测。留空代表未施测，不会用日常训练数据补齐。</p>
+      <p>这里只记录治疗师实际完成的正式施测。新版暂不接入 WAB、CADL 和接受度指标。</p>
     </header>
     <form class="assessment-form workspace-band" @submit.prevent="submit">
       <div class="assessment-form-grid">
@@ -14,12 +14,8 @@
         <label>施测方式<select v-model="form.administration_mode" required><option value="in_person">面对面</option><option value="remote">远程</option><option value="hybrid">混合</option></select></label>
       </div>
       <fieldset>
-        <legend>已施测指标</legend>
-        <p class="v2-quiet-copy">只填写本次实际得到的结果。WAB 可靠度当前不支持。</p>
-        <div class="assessment-metric-grid">
-          <label v-for="metric in metrics" :key="metric.code">{{ metric.label }}<input v-model.number="metric.value" type="number" step="0.01" min="0" /></label>
-          <label class="unsupported-metric">WAB 可靠度<input disabled value="当前不支持" /></label>
-        </div>
+        <legend>正式量表指标</legend>
+        <p class="v2-quiet-copy">WAB、CADL 和接受度暂不在新版指标面板中展示或录入；历史正式评估数据仍保留。</p>
       </fieldset>
       <label>专业备注<textarea v-model="form.notes" placeholder="记录施测条件、偏差或解释边界"></textarea></label>
       <p v-if="error" class="v2-inline-error" role="alert">{{ error }}</p>
@@ -40,29 +36,18 @@ const patientId = computed(() => String(route.params.patientId))
 const busy = ref(false)
 const error = ref('')
 const form = reactive({ instrument_name: '', instrument_version: '', score_unit: '分', administration_mode: 'in_person', notes: '' })
-const metrics = reactive([
-  { code: 'acceptance_score', label: '接受度', value: undefined as number | undefined },
-  { code: 'cadl_score', label: 'CADL 总分', value: undefined as number | undefined },
-  { code: 'wab_fluency', label: 'WAB 流利性', value: undefined as number | undefined },
-  { code: 'wab_grammar', label: 'WAB 语法', value: undefined as number | undefined },
-  { code: 'wab_information', label: 'WAB 信息量', value: undefined as number | undefined },
-  { code: 'wab_repetition_intelligibility', label: 'WAB 复述可懂度', value: undefined as number | undefined },
-  { code: 'wab_word_order', label: 'WAB 语序', value: undefined as number | undefined }
-])
-
 async function submit() {
   busy.value = true
   error.value = ''
   try {
-    const measured = Object.fromEntries(metrics.filter(item => typeof item.value === 'number' && Number.isFinite(item.value)).map(item => [item.code, item.value]))
     await v2Api.createFormalAssessment(patientId.value, {
       ...form,
       language_locale: 'zh-CN',
       raw_item_results: {},
       subscale_results: {},
       total_result: {},
-      metrics: measured,
-      missing_items: metrics.filter(item => typeof item.value !== 'number' || !Number.isFinite(item.value)).map(item => item.code),
+      metrics: {},
+      missing_items: [],
       protocol_deviations: {},
       protocol_deviation_reasons: []
     })
