@@ -293,6 +293,9 @@ def parse_tencent_soe_response(payload: dict, evaluation_mode: str, provider_ver
     segments: list[PronunciationSegmentResult] = []
     for word_index, word in enumerate(words):
         tone = word.get("Tone") or {}
+        # The new SOE response uses HypothesisTone. Keep the legacy Tone
+        # fallback because older fixtures/responses used that shorter key.
+        recognized_tone = tone.get("HypothesisTone", tone.get("Tone"))
         segments.append(
             PronunciationSegmentResult(
                 level="word",
@@ -305,8 +308,8 @@ def parse_tencent_soe_response(payload: dict, evaluation_mode: str, provider_ver
                 fluency=_normalize_ratio(word.get("PronFluency")),
                 match_type=_match_type(word.get("MatchTag")),
                 reference_tone=tone.get("RefTone") if tone.get("Valid") else None,
-                recognized_tone=tone.get("Tone") if tone.get("Valid") else None,
-                tone_correct=tone.get("RefTone") == tone.get("Tone") if tone.get("Valid") else None,
+                recognized_tone=recognized_tone if tone.get("Valid") else None,
+                tone_correct=tone.get("RefTone") == recognized_tone if tone.get("Valid") else None,
                 payload=word,
             )
         )

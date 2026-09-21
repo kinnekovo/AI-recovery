@@ -48,7 +48,7 @@ class PronunciationProviderTest(unittest.TestCase):
                             "PronAccuracy": 72,
                             "PronFluency": 0.8,
                             "MatchTag": 3,
-                            "Tone": {"Valid": True, "RefTone": 3, "Tone": 2},
+                            "Tone": {"Valid": True, "RefTone": 3, "HypothesisTone": 2},
                             "PhoneInfos": [{"ReferencePhone": "hao", "Phone": "hao", "PronAccuracy": 0.8, "MatchTag": 0}],
                         }
                     ],
@@ -62,6 +62,25 @@ class PronunciationProviderTest(unittest.TestCase):
         self.assertEqual(result.segments[0].match_type, "substitution")
         self.assertFalse(result.segments[0].tone_correct)
         self.assertEqual(result.segments[1].level, "phoneme")
+
+    def test_parser_keeps_legacy_tone_key_compatible(self) -> None:
+        result = parse_tencent_soe_response(
+            {
+                "Response": {
+                    "PronAccuracy": 90,
+                    "Words": [
+                        {
+                            "ReferenceWord": "好",
+                            "Word": "好",
+                            "MatchTag": 0,
+                            "Tone": {"Valid": True, "RefTone": 3, "Tone": 3},
+                        }
+                    ],
+                }
+            },
+            "sentence",
+        )
+        self.assertTrue(result.segments[0].tone_correct)
 
     def test_tencent_soe_transcodes_browser_audio_before_request(self) -> None:
         os.environ["TENCENTCLOUD_SECRET_ID"] = "id"

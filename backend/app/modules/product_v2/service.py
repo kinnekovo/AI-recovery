@@ -41,6 +41,7 @@ from app.modules.product_v2.schema import (
     StageReviewCreate,
     TrainingPlanDraftCreate,
 )
+from app.modules.pronunciation.model import PronunciationAnalysisResult, PronunciationSegment
 from app.modules.scenario_dialogues.model import DialogueStatus, ScenarioDialogueEvaluation, ScenarioDialogueSession
 from app.modules.scenario_dialogues import service as scenario_dialogue_service
 from app.modules.scoring.model import AttemptAnalysisResult
@@ -59,6 +60,12 @@ METRIC_LABELS = {
     "script_accuracy": "表达完整度",
     "speech_rate": "言语速率",
     "independence": "独立完成度",
+    "pronunciation_accuracy": "发音准确度",
+    "pronunciation_fluency": "发音流利度",
+    "pronunciation_completion": "发音完成度",
+    "phoneme_accuracy": "音素准确度",
+    "tone_accuracy": "声调准确度",
+    "pronunciation_mismatch_count": "发音匹配问题",
     "wab_reliability": "WAB 可靠度",
     "wab_fluency": "WAB 流利性",
     "wab_grammar": "WAB 语法",
@@ -66,8 +73,56 @@ METRIC_LABELS = {
     "wab_repetition_intelligibility": "WAB 复述可懂度",
     "wab_word_order": "WAB 语序",
 }
-TRAINING_METRICS = {"error_count", "loudness", "script_accuracy", "speech_rate", "independence"}
+TRAINING_METRICS = {
+    "error_count",
+    "loudness",
+    "script_accuracy",
+    "speech_rate",
+    "independence",
+    "pronunciation_accuracy",
+    "pronunciation_fluency",
+    "pronunciation_completion",
+    "phoneme_accuracy",
+    "tone_accuracy",
+    "pronunciation_mismatch_count",
+}
 ASSESSMENT_METRICS = set(METRIC_LABELS) - TRAINING_METRICS - {"wab_reliability"}
+
+
+def pronunciation_metric_values(analysis: PronunciationAnalysisResult, segments: list[PronunciationSegment]):
+    """Convert one completed SOE result into canonical, explainable metrics.
+
+    Provider percentages are normalized at the adapter boundary: fluency and
+    completion are stored as percentages here, while the raw response remains
+    in the pronunciation Evidence payload. These metrics are intentionally
+    training facts; they are not WAB/CADL values.
+    """
+    if analysis.status != "completed":
+        return []
+
+    values = []
+    if analysis.overall_accuracy is not None:
+        values.append(("pronunciation_accuracy", float(analysis.overall_accuracy), "%"))
+    if analysis.fluency is not None:
+        fluency = float(analysis.fluency)
+        values.append(("pronunciation_fluency", round(fluency * 100 if 0 <= fluency <= 1 else fluency, 2), "%"))
+    if analysis.completion is not None:
+        completion = float(analysis.completion)
+        values.append(("pronunciation_completion", round(completion * 100 if 0 <= completion <= 1 else completion, 2), "%"))
+
+    phonemes = [item.accuracy for item in segments if item.level == "phoneme" and item.accuracy is not None]
+    if phonemes:
+        values.append(("phoneme_accuracy", round(sum(phonemes) / len(phonemes), 2), "%"))
+
+    tone_items = [item for item in segments if item.tone_correct is not None]
+    if tone_items:
+        values.append(("tone_accuracy", round(sum(bool(item.tone_correct) for item in tone_items) / len(tone_items) * 100, 2), "%"))
+
+    word_items = [item for item in segments if item.level == "word"]
+    mismatches = sum(item.match_type != "matched" for item in word_items)
+    if word_items:
+        values.append(("pronunciation_mismatch_count", float(mismatches), "count/attempt"))
+    return values
 
 
 def _enum_value(value):
@@ -673,6 +728,130 @@ def project_attempt(db: Session, attempt_id: UUID):
                     evidence_ids=[str(evidence.id)],
                     comparison_key=comparison_key,
                     decision_eligible=bool(evaluation.decision_eligible and not mock),
+                )
+            )
+
+    # Project Tencent SOE's fine-grained pronunciation result into the v2
+    # evidence/metric boundary. The result remains training evidence and is
+    # deliberately not eligible for clinical profile decisions until the
+    # pronunciation contract has been locally validated.
+    pronunciation = db.scalar(
+        select(PronunciationAnalysisResult)
+        .where(PronunciationAnalysisResult.attempt_id == attempt.id)
+        .options(selectinload(PronunciationAnalysisResult.segments))
+    )
+    if pronunciation:
+        pronunciation_real = pronunciation.provider == "tencent_soe" and pronunciation.status == "completed"
+        pronunciation_source_status = "real" if pronunciation_real else "unavailable"
+        pronunciation_evidence = db.scalar(
+            select(EvidenceRecord).where(
+                EvidenceRecord.source_type == "attempt",
+                EvidenceRecord.source_id == attempt.id,
+                EvidenceRecord.evidence_type == "pronunciation_bundle",
+            )
+        )
+        segments = list(pronunciation.segments or [])
+        segment_payload = [
+            {
+                "level": item.level,
+                "ordinal": item.ordinal,
+                "reference_text": item.reference_text,
+                "recognized_text": item.recognized_text,
+                "start_ms": item.start_ms,
+                "end_ms": item.end_ms,
+                "accuracy": item.accuracy,
+                "fluency": item.fluency,
+                "match_type": item.match_type,
+                "reference_tone": item.reference_tone,
+                "recognized_tone": item.recognized_tone,
+                "tone_correct": item.tone_correct,
+            }
+            for item in segments
+        ]
+        if not pronunciation_evidence:
+            pronunciation_evidence = EvidenceRecord(
+                patient_profile_id=session.patient_profile_id,
+                training_session_id=session.id,
+                evidence_type="pronunciation_bundle",
+                source_type="attempt",
+                source_id=attempt.id,
+                source_status=pronunciation_source_status,
+                provider=pronunciation.provider,
+                provider_version=pronunciation.provider_version,
+                quality_status=pronunciation.status,
+                payload={
+                    "evaluation_mode": pronunciation.evaluation_mode,
+                    "overall_accuracy": pronunciation.overall_accuracy,
+                    "fluency": pronunciation.fluency,
+                    "completion": pronunciation.completion,
+                    "suggested_score": pronunciation.suggested_score,
+                    "confidence": pronunciation.confidence,
+                    "coverage": pronunciation.coverage,
+                    "segments": segment_payload,
+                    "raw_provider_output": pronunciation.raw_provider_output,
+                    "error_code": pronunciation.error_code,
+                    "error_message": pronunciation.error_message,
+                },
+                measured_at=pronunciation.created_at,
+            )
+            db.add(pronunciation_evidence)
+            db.flush()
+        for code, value, unit in pronunciation_metric_values(pronunciation, segments):
+            metric_context = {
+                "task_family": "repeat",
+                "evaluation_mode": pronunciation.evaluation_mode,
+                "contract_version": task.contract_version_snapshot,
+                "pronunciation_shadow": True,
+            }
+            comparison_key = hashlib.sha256(
+                json.dumps(
+                    {
+                        "code": code,
+                        "provider": pronunciation.provider,
+                        "provider_version": pronunciation.provider_version,
+                        "evaluation_mode": pronunciation.evaluation_mode,
+                        "contract_version": task.contract_version_snapshot,
+                        "unit": unit,
+                    },
+                    sort_keys=True,
+                    ensure_ascii=False,
+                ).encode()
+            ).hexdigest()
+            existing = db.scalar(
+                select(MetricRecord).where(
+                    MetricRecord.source_type == "attempt_pronunciation",
+                    MetricRecord.source_id == attempt.id,
+                    MetricRecord.code == code,
+                )
+            )
+            if existing:
+                continue
+            db.add(
+                MetricRecord(
+                    patient_profile_id=session.patient_profile_id,
+                    training_session_id=session.id,
+                    code=code,
+                    value=value,
+                    status="measured",
+                    unit=unit,
+                    measured_at=pronunciation.created_at,
+                    measurement_context=metric_context,
+                    source_type="attempt_pronunciation",
+                    source_id=attempt.id,
+                    provider=pronunciation.provider,
+                    algorithm=pronunciation.algorithm_version,
+                    version=pronunciation.provider_version,
+                    quality={
+                        "source_status": pronunciation_source_status,
+                        "provider_status": pronunciation.status,
+                        "confidence": pronunciation.confidence,
+                        "coverage": pronunciation.coverage,
+                        "review_status": pronunciation.review_status,
+                        "decision_eligible": False,
+                    },
+                    evidence_ids=[str(pronunciation_evidence.id)],
+                    comparison_key=comparison_key,
+                    decision_eligible=False,
                 )
             )
     db.commit()

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from uuid import UUID
 
 import pytest
@@ -10,9 +10,11 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database.base import Base, import_models
+from app.modules.attempts.model import AnalysisStatus, Attempt
 from app.modules.assessment.model import AssessmentSession
 from app.modules.product_v2 import service
 from app.modules.product_v2.model import AttentionItem, EvidenceRecord, MetricRecord, TherapistDecision, TrainingPlanVersion
+from app.modules.pronunciation.model import PronunciationAnalysisResult, PronunciationSegment
 from app.modules.scenario_dialogues import service as scenario_service
 from app.modules.product_v2.schema import (
     DecisionCreate,
@@ -22,7 +24,7 @@ from app.modules.product_v2.schema import (
     StageReviewCreate,
     TrainingPlanDraftCreate,
 )
-from app.modules.training.model import TaskTemplate, TrainingType
+from app.modules.training.model import SessionTask, TaskTemplate, TrainingType
 from app.modules.users.model import OnboardingStatus, PatientProfile, TherapistPatientAssignment, User, UserRole
 
 
@@ -232,6 +234,105 @@ def test_completed_scenario_materializes_evidence_and_metrics(product_db, monkey
         "response_effectiveness",
         "independence",
     }
+
+
+def test_completed_tencent_soe_repeat_projects_evidence_and_metrics(product_db):
+    db, therapist, patient, _, _, repeat, scenario = product_db
+    create_active_plan(db, therapist, patient, repeat, scenario)
+    session = service.start_or_resume(db, patient, "formal", None)
+    task = db.get(SessionTask, UUID(session["exercises"][0]["id"]))
+    attempt = Attempt(
+        session_task_id=task.id,
+        attempt_no=1,
+        terminal_state="completed",
+        technical_validity="valid",
+        measurement_eligibility="eligible",
+        completed_at=datetime.now(timezone.utc),
+        audio_quality="pass",
+        analysis_status=AnalysisStatus.completed,
+    )
+    db.add(attempt)
+    db.flush()
+    analysis = PronunciationAnalysisResult(
+        attempt_id=attempt.id,
+        provider="tencent_soe",
+        provider_version="soe-new-wss-v1",
+        evaluation_mode="sentence",
+        status="completed",
+        overall_accuracy=91,
+        fluency=0.86,
+        completion=0.95,
+        suggested_score=90,
+        confidence=0.95,
+        coverage=1.0,
+        raw_provider_output={"PronAccuracy": 91},
+    )
+    db.add(analysis)
+    db.flush()
+    db.add_all(
+        [
+            PronunciationSegment(
+                analysis_id=analysis.id,
+                level="word",
+                ordinal=0,
+                match_type="substitution",
+                accuracy=72,
+                tone_correct=False,
+            ),
+            PronunciationSegment(
+                analysis_id=analysis.id,
+                level="word",
+                ordinal=1,
+                match_type="matched",
+                accuracy=100,
+                tone_correct=True,
+            ),
+            PronunciationSegment(
+                analysis_id=analysis.id,
+                level="phoneme",
+                ordinal=0,
+                match_type="matched",
+                accuracy=80,
+            ),
+            PronunciationSegment(
+                analysis_id=analysis.id,
+                level="phoneme",
+                ordinal=1,
+                match_type="matched",
+                accuracy=100,
+            ),
+        ]
+    )
+    db.commit()
+
+    service.project_attempt(db, attempt.id)
+
+    evidence = db.scalar(
+        select(EvidenceRecord).where(
+            EvidenceRecord.source_type == "attempt",
+            EvidenceRecord.source_id == attempt.id,
+            EvidenceRecord.evidence_type == "pronunciation_bundle",
+        )
+    )
+    metrics = list(
+        db.scalars(
+            select(MetricRecord).where(
+                MetricRecord.source_type == "attempt_pronunciation",
+                MetricRecord.source_id == attempt.id,
+            )
+        )
+    )
+    assert evidence is not None
+    assert evidence.provider == "tencent_soe"
+    assert {item.code for item in metrics} == {
+        "pronunciation_accuracy",
+        "pronunciation_fluency",
+        "pronunciation_completion",
+        "phoneme_accuracy",
+        "tone_accuracy",
+        "pronunciation_mismatch_count",
+    }
+    assert all(item.decision_eligible is False for item in metrics)
 
 
 def test_stage_review_decision_creates_unpublished_plan_version(product_db, monkeypatch):

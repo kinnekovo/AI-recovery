@@ -8,6 +8,7 @@ from app.database.base import Base, import_models
 from app.main import app
 from app.modules.product_v2.comparability import build_comparable_set, trend_fact
 from app.modules.product_v2.schema import ExerciseRuleCreate, TrainingPlanDraftCreate
+from app.modules.product_v2.service import pronunciation_metric_values
 
 
 def metric(value, *, key="same-context", source_type="attempt", eligible=True, status="measured", offset=0):
@@ -44,6 +45,33 @@ def test_trend_engine_only_consumes_comparable_set():
     assert trend["sample_count"] == 3
     assert trend["delta"] == 20
     assert trend["slope"] == 10
+
+
+def test_tencent_soe_result_projects_to_training_metrics():
+    analysis = SimpleNamespace(
+        status="completed",
+        overall_accuracy=91.0,
+        fluency=0.86,
+        completion=0.95,
+    )
+    segments = [
+        SimpleNamespace(level="word", accuracy=72.0, match_type="substitution", tone_correct=False),
+        SimpleNamespace(level="word", accuracy=100.0, match_type="matched", tone_correct=True),
+        SimpleNamespace(level="phoneme", accuracy=80.0, match_type="matched", tone_correct=None),
+        SimpleNamespace(level="phoneme", accuracy=100.0, match_type="matched", tone_correct=None),
+    ]
+
+    values = {
+        code: (value, unit)
+        for code, value, unit in pronunciation_metric_values(analysis, segments)
+    }
+
+    assert values["pronunciation_accuracy"] == (91.0, "%")
+    assert values["pronunciation_fluency"] == (86.0, "%")
+    assert values["pronunciation_completion"] == (95.0, "%")
+    assert values["phoneme_accuracy"] == (90.0, "%")
+    assert values["tone_accuracy"] == (50.0, "%")
+    assert values["pronunciation_mismatch_count"] == (1.0, "count/attempt")
 
 
 def test_training_plan_schema_requires_unique_exercise_order():
@@ -91,4 +119,3 @@ def test_product_v2_application_routes_are_registered():
         "/api/v2/therapist/stage-reviews/{review_id}/decisions",
     }
     assert required <= paths
-
