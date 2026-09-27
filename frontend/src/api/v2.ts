@@ -81,6 +81,54 @@ export interface TrainingSessionV2 {
   resume_position: number
 }
 
+export interface DailyPracticePlanItemV2 {
+  id: string
+  task_template_id: string
+  order_index: number
+  exercise_type: 'repeat' | 'scenario'
+  sequence_role: string
+  estimated_duration_seconds: number
+  selection_source: string
+  reason_codes: string[]
+  therapist_locked: boolean
+  difficulty: string | null
+  title: string | null
+}
+
+export interface DailyPracticePlanV2 {
+  id: string
+  local_date: string
+  version_number: number
+  status: string
+  source: string
+  estimated_duration_seconds: number
+  estimated_duration_minutes: number
+  policy_version: string
+  items: DailyPracticePlanItemV2[]
+}
+
+export interface ExtraPracticeItemV2 {
+  id: string
+  title: string
+  instruction: string
+  target: string
+  scene_prompt: string | null
+  exercise_type: 'repeat' | 'scenario'
+  difficulty: string
+  selection_source: string
+  display_reason: string
+  tags: string[]
+}
+
+export interface ExtraPracticePoolV2 {
+  id: string
+  local_date: string
+  version_number: number
+  policy_version: string
+  repeat: ExtraPracticeItemV2[]
+  scenario: ExtraPracticeItemV2[]
+}
+
 export interface PatientHomeV2 {
   state: 'onboarding_required' | 'waiting_for_plan' | 'ready_to_train' | 'in_progress' | 'paused' | 'completed' | 'stage_review_pending' | 'plan_updated' | 'temporarily_unavailable'
   greeting: string
@@ -93,6 +141,8 @@ export interface PatientHomeV2 {
   primary_action: { label: string; action: string } | null
   recent_comparable_changes: TrendV2[]
   plan_update_announcement: string | null
+  daily_plan: DailyPracticePlanV2 | null
+  extra_practice: ExtraPracticePoolV2 | null
 }
 
 export interface TrendV2 {
@@ -181,7 +231,8 @@ export const v2Api = {
   progress: () => request<ProgressV2>(http.get('/v2/patient/progress')),
   patientSettings: () => request<{ timezone: string }>(http.get('/v2/patient/settings')),
   updatePatientSettings: (timezone: string) => request<{ timezone: string }>(http.patch('/v2/patient/settings', { timezone })),
-  startOrResume: (session_kind: 'formal' | 'extra_practice' = 'formal') => request<TrainingSessionV2>(http.post('/v2/patient/training-sessions/start-or-resume', { session_kind })),
+  startOrResume: (session_kind: 'formal' | 'extra_practice' = 'formal', task_template_ids: string[] = []) => request<TrainingSessionV2>(http.post('/v2/patient/training-sessions/start-or-resume', { session_kind, task_template_ids })),
+  extraPracticePool: (refresh = false) => request<ExtraPracticePoolV2>(http.get(`/v2/patient/practice/extra-pool${refresh ? '?refresh=true' : ''}`)),
   session: (id: string) => request<TrainingSessionV2>(http.get(`/v2/patient/training-sessions/${id}`)),
   sessionCommand: (id: string, command: string, reason?: string) => request<TrainingSessionV2>(http.post(`/v2/patient/training-sessions/${id}/${command}`, { reason: reason || null })),
   exerciseCommand: (sessionId: string, taskId: string, command: string) => request<TrainingSessionV2>(http.post(`/v2/patient/training-sessions/${sessionId}/exercises/${taskId}/${command}`)),
@@ -201,6 +252,8 @@ export const v2Api = {
   createGoal: (patientId: string, payload: Record<string, unknown>) => request<GoalV2>(http.post(`/v2/therapist/patients/${patientId}/rehabilitation-goals`, payload)),
   createPlan: (patientId: string, payload: Record<string, unknown>) => request<TrainingPlanV2>(http.post(`/v2/therapist/patients/${patientId}/training-plans`, payload)),
   publishPlan: (patientId: string, planId: string) => request<TrainingPlanV2>(http.post(`/v2/therapist/patients/${patientId}/training-plans/${planId}/publish`)),
+  dailyPlan: (patientId: string) => request<DailyPracticePlanV2>(http.get(`/v2/therapist/patients/${patientId}/daily-plan`)),
+  updateDailyPlan: (patientId: string, payload: { items: Array<{ task_template_id: string; order_index: number; sequence_role: string; therapist_locked: boolean }>; note?: string | null }) => request<DailyPracticePlanV2>(http.patch(`/v2/therapist/patients/${patientId}/daily-plan`, payload)),
   acknowledgeAttention: (id: string) => request<AttentionItemV2>(http.post(`/v2/therapist/attention-items/${id}/acknowledge`)),
   resolveAttention: (id: string, resolution_note: string, status = 'resolved') => request<AttentionItemV2>(http.post(`/v2/therapist/attention-items/${id}/resolve`, { resolution_note, status })),
   createStageReview: (patientId: string, payload: Record<string, unknown> = {}) => request<Record<string, any>>(http.post(`/v2/therapist/patients/${patientId}/stage-reviews`, payload)),

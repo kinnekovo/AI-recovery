@@ -50,6 +50,23 @@ class TrainingPlanDraftCreate(BaseModel):
 class SessionStart(BaseModel):
     session_kind: Literal["formal", "extra_practice"] = "formal"
     training_plan_version_id: UUID | None = None
+    task_template_ids: list[UUID] = Field(default_factory=list, max_length=13)
+
+
+class ExtraPracticeRefresh(BaseModel):
+    force: bool = False
+
+
+class DailyPlanItemUpdate(BaseModel):
+    task_template_id: UUID
+    order_index: int = Field(ge=0)
+    sequence_role: Literal["warmup", "main", "consolidation", "challenge"] = "main"
+    therapist_locked: bool = False
+
+
+class DailyPlanUpdate(BaseModel):
+    items: list[DailyPlanItemUpdate] = Field(min_length=1, max_length=20)
+    note: str | None = Field(default=None, max_length=500)
 
 
 class SessionCommand(BaseModel):

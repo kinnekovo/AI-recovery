@@ -11,6 +11,7 @@ from app.modules.product_v2 import service
 from app.modules.product_v2.schema import (
     AttemptCreateV2,
     AttentionResolve,
+    DailyPlanUpdate,
     DecisionCreate,
     FormalAssessmentCreate,
     GoalCreate,
@@ -59,7 +60,12 @@ def update_patient_settings(payload: PatientSettingsUpdate, current_user: User =
 
 @router.post("/patient/training-sessions/start-or-resume")
 def start_or_resume(payload: SessionStart, current_user: User = Depends(require_patient), db: Session = Depends(get_db)):
-    return api_success(service.start_or_resume(db, current_user, payload.session_kind, payload.training_plan_version_id))
+    return api_success(service.start_or_resume(db, current_user, payload.session_kind, payload.training_plan_version_id, payload.task_template_ids))
+
+
+@router.get("/patient/practice/extra-pool")
+def extra_practice_pool(refresh: bool = False, current_user: User = Depends(require_patient), db: Session = Depends(get_db)):
+    return api_success(service.patient_extra_practice_pool(db, current_user, force=refresh))
 
 
 @router.get("/patient/training-sessions/{session_id}")
@@ -127,6 +133,16 @@ def create_rehabilitation_goal(patient_user_id: UUID, payload: GoalCreate, curre
 @router.get("/therapist/patients/{patient_user_id}/training-plans")
 def list_training_plans(patient_user_id: UUID, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
     return api_success(service.list_plans(db, current_user, patient_user_id))
+
+
+@router.get("/therapist/patients/{patient_user_id}/daily-plan")
+def therapist_daily_plan(patient_user_id: UUID, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    return api_success(service.therapist_daily_plan(db, current_user, patient_user_id))
+
+
+@router.patch("/therapist/patients/{patient_user_id}/daily-plan")
+def update_therapist_daily_plan(patient_user_id: UUID, payload: DailyPlanUpdate, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    return api_success(service.update_therapist_daily_plan(db, current_user, patient_user_id, payload))
 
 
 @router.post("/therapist/patients/{patient_user_id}/training-plans")

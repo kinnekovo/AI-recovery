@@ -192,6 +192,20 @@ def test_start_resume_timezone_formal_extra_and_state_machine(product_db):
     assert summary["facts"]["skipped_exercises"] == 2
 
 
+def test_daily_plan_is_stable_and_extra_pool_is_separate(product_db):
+    db, therapist, patient, _, _, repeat, scenario = product_db
+    create_active_plan(db, therapist, patient, repeat, scenario)
+    first_home = service.patient_home(db, patient)
+    second_home = service.patient_home(db, patient)
+    assert first_home["daily_plan"]["id"] == second_home["daily_plan"]["id"]
+    assert first_home["daily_plan"]["estimated_duration_seconds"] <= 600
+    assert len(first_home["extra_practice"]["repeat"]) == 10
+    assert len(first_home["extra_practice"]["scenario"]) == 3
+    extra = service.start_or_resume(db, patient, "extra_practice", None, [repeat.id])
+    assert extra["session_kind"] == "extra_practice"
+    assert len(extra["exercises"]) == 1
+
+
 def test_attention_dedup_resolution_and_assignment_authorization(product_db):
     db, therapist, patient, stranger, profile, repeat, scenario = product_db
     _, _ = create_active_plan(db, therapist, patient, repeat, scenario)

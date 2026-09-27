@@ -103,6 +103,10 @@ def test_product_reset_tables_are_registered():
         "stage_reviews",
         "therapist_decisions",
         "training_session_summaries",
+        "daily_practice_plans",
+        "daily_practice_plan_items",
+        "extra_practice_pools",
+        "extra_practice_pool_items",
     }
     assert required <= set(Base.metadata.tables)
 
@@ -113,8 +117,10 @@ def test_product_v2_application_routes_are_registered():
         "/api/v2/patient/home",
         "/api/v2/patient/progress",
         "/api/v2/patient/training-sessions/start-or-resume",
+        "/api/v2/patient/practice/extra-pool",
         "/api/v2/therapist/workbench",
         "/api/v2/therapist/patients/{patient_user_id}/workspace",
+        "/api/v2/therapist/patients/{patient_user_id}/daily-plan",
         "/api/v2/therapist/training-sessions/{session_id}",
         "/api/v2/therapist/training-sessions/{session_id}/exercises/{task_id}",
         "/api/v2/therapist/stage-reviews/{review_id}/decisions",

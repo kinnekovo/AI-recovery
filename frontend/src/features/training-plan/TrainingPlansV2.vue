@@ -12,13 +12,14 @@
         <div class="workspace-band-heading"><div><p class="v2-section-label">TrainingPlan Draft</p><h2>创建版本化方案</h2></div></div>
         <form class="plan-form" @submit.prevent="createPlan">
           <label class="wide">当前目标<select v-model="planForm.rehabilitation_goal_id" required><option value="">先建立康复目标</option><option v-if="workspace?.rehabilitation_goal" :value="workspace.rehabilitation_goal.id">{{ workspace.rehabilitation_goal.description }}</option></select></label>
-          <label>阶段重点<input v-model="planForm.stage_focus" required /></label><label>每次时长（分钟）<input v-model.number="planForm.duration_minutes" type="number" min="1" max="180" /></label>
+          <label>阶段重点<input v-model="planForm.stage_focus" required /></label><label>方案参考时长（分钟）<input v-model.number="planForm.duration_minutes" type="number" min="1" max="180" /><small class="v2-quiet-copy">每日执行计划仍会单独控制在10分钟内。</small></label>
           <label>难度<select v-model="planForm.difficulty"><option value="supported">支持性</option><option value="standard">标准</option><option value="challenging">挑战性</option></select></label>
           <fieldset class="wide template-picker"><legend>练习编排</legend><p class="v2-quiet-copy">可同时选择复述与情境练习；顺序按下方排列固定到本版本。</p><label v-for="item in templates" :key="item.id" class="template-option"><input v-model="selectedTemplateIds" type="checkbox" :value="item.id" /><span><strong>{{ item.title }}</strong><small>{{ item.task_type === 'scenario' ? '情境练习' : '复述练习' }}</small></span></label></fieldset>
           <button class="v2-button primary" :disabled="busy || !selectedTemplateIds.length">保存草稿</button>
         </form>
       </section>
       <section class="workspace-band"><div class="workspace-band-heading"><div><p class="v2-section-label">Version History</p><h2>方案版本</h2></div></div><div class="plan-version-list"><article v-for="plan in plans" :key="plan.id"><div><span>v{{ plan.version_number }}</span><strong>{{ plan.stage_focus }}</strong><small>{{ plan.status }} · {{ plan.exercise_rules.length }} 项练习</small></div><button v-if="plan.status==='draft'" class="v2-button primary" :disabled="busy" @click="publish(plan.id)">{{ busy?'处理中…':'正式发布' }}</button><span v-else class="status-word">{{ plan.status==='active'?'当前生效':'历史版本' }}</span></article></div></section>
+      <section v-if="dailyPlan" class="workspace-band"><div class="workspace-band-heading"><div><p class="v2-section-label">Today Override</p><h2>今日练习安排</h2><p>只调整今天的具体任务；预计时长不能超过10分钟。</p></div><strong>{{ dailyPlan.estimated_duration_minutes }} 分钟</strong></div><div class="template-picker"><label v-for="item in templates" :key="item.id" class="template-option"><input v-model="dailySelectedIds" type="checkbox" :value="item.id" /><span><strong>{{ item.title }}</strong><small>{{ item.task_type === 'scenario' ? '场景表达' : '跟读训练' }} · {{ item.content_level }}</small></span></label></div><label class="wide daily-note-label">调整说明<textarea v-model="dailyNote" rows="2" placeholder="可选：说明今天为什么调整这些任务"></textarea></label><button class="v2-button primary" :disabled="busy || !dailySelectedIds.length" @click="saveDailyPlan">保存今日安排</button></section>
     </template>
   </section>
 </template>
@@ -27,7 +28,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { therapistApi } from '@/api/therapist'
-import { v2Api, type TrainingPlanV2 } from '@/api/v2'
+import { v2Api, type DailyPracticePlanV2, type TrainingPlanV2 } from '@/api/v2'
 import type { TaskTemplate, TherapistPatient } from '@/types/api'
 import { toUserMessage } from '@/utils/errors'
 
@@ -38,12 +39,15 @@ const selectedTemplateIds = ref<string[]>([])
 const patientId = ref(String(route.query.patient || ''))
 const workspace = ref<any>(null)
 const plans = ref<TrainingPlanV2[]>([])
+const dailyPlan = ref<DailyPracticePlanV2 | null>(null)
+const dailySelectedIds = ref<string[]>([])
+const dailyNote = ref('')
 const busy = ref(false)
 const error = ref('')
 const goalForm = reactive({ category: 'functional_communication', description: '' })
-const planForm = reactive({ rehabilitation_goal_id: '', stage_focus: '日常表达', duration_minutes: 15, difficulty: 'standard' })
+const planForm = reactive({ rehabilitation_goal_id: '', stage_focus: '日常表达', duration_minutes: 10, difficulty: 'standard' })
 
-async function loadPatient() { workspace.value=null;plans.value=[];error.value='';if (!patientId.value) return; try{[workspace.value, plans.value] = await Promise.all([v2Api.workspace(patientId.value), v2Api.plans(patientId.value)]); planForm.rehabilitation_goal_id = workspace.value.rehabilitation_goal?.id || ''}catch(err){error.value=toUserMessage(err,'患者方案加载失败。')} }
+async function loadPatient() { workspace.value=null;plans.value=[];dailyPlan.value=null;dailySelectedIds.value=[];error.value='';if (!patientId.value) return; try{[workspace.value, plans.value] = await Promise.all([v2Api.workspace(patientId.value), v2Api.plans(patientId.value)]); planForm.rehabilitation_goal_id = workspace.value.rehabilitation_goal?.id || ''; if (plans.value.some(item => item.status === 'active')) { dailyPlan.value = await v2Api.dailyPlan(patientId.value); dailySelectedIds.value = dailyPlan.value.items.map(item => item.task_template_id) }}catch(err){error.value=toUserMessage(err,'患者方案加载失败。')} }
 async function saveGoal() { busy.value = true; try { const goal = await v2Api.createGoal(patientId.value, goalForm); planForm.rehabilitation_goal_id = goal.id; await loadPatient() } catch (err) { error.value = toUserMessage(err, '康复目标保存失败。') } finally { busy.value = false } }
 async function createPlan() {
   busy.value = true; error.value = ''
@@ -54,5 +58,6 @@ async function createPlan() {
   } catch (err) { error.value = toUserMessage(err, '方案草稿保存失败。') } finally { busy.value = false }
 }
 async function publish(id: string) { if (!window.confirm('发布后该版本不可原地编辑，且只对患者下一次新建的正式训练生效。确认发布吗？')) return; busy.value = true; try { await v2Api.publishPlan(patientId.value, id); await loadPatient() } catch (err) { error.value = toUserMessage(err, '方案发布失败，旧方案仍然有效。') } finally { busy.value = false } }
+async function saveDailyPlan() { busy.value = true; error.value = ''; try { dailyPlan.value = await v2Api.updateDailyPlan(patientId.value, { items: dailySelectedIds.value.map((id, index) => ({ task_template_id: id, order_index: index, sequence_role: index === 0 ? 'warmup' : index === dailySelectedIds.value.length - 1 ? 'consolidation' : 'main', therapist_locked: true })), note: dailyNote.value || null }); dailySelectedIds.value = dailyPlan.value.items.map(item => item.task_template_id) } catch (err) { error.value = toUserMessage(err, '今日练习安排保存失败。') } finally { busy.value = false } }
 onMounted(async () => { [patients.value, templates.value] = await Promise.all([therapistApi.patients(), therapistApi.taskTemplates()]); if (patientId.value) await loadPatient() })
 </script>

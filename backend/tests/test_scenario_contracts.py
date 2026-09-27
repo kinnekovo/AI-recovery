@@ -9,6 +9,16 @@ from app.modules.training.service import SEED_TASKS, _complete_seed_dialogue_con
 
 
 class ScenarioContractTest(unittest.TestCase):
+    def test_repeat_library_has_three_balanced_difficulty_bands(self):
+        repeats = [item for item in SEED_TASKS if item["task_type"] == TrainingType.repeat]
+        self.assertEqual(len(repeats), 12)
+        self.assertEqual({band: sum(item["scoring_config"]["difficulty_band"] == band for item in repeats) for band in ("easy", "medium", "hard")}, {"easy": 4, "medium": 4, "hard": 4})
+
+    def test_new_route_and_supermarket_scenarios_are_present(self):
+        titles = {item["title"] for item in SEED_TASKS}
+        self.assertIn("街道路口问路场景", titles)
+        self.assertIn("超市购物场景", titles)
+
     def test_seed_contracts_gain_explicit_multi_turn_fields(self):
         source = next(item for item in SEED_TASKS if item["task_type"].value == "scenario")
         contract = _complete_seed_dialogue_contract(deepcopy(source))["scoring_config"]

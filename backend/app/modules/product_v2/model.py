@@ -83,6 +83,87 @@ class TrainingPlanExerciseRule(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     task_template = relationship("TaskTemplate")
 
 
+class DailyPracticePlan(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """A stable, date-scoped execution plan derived from the therapist plan."""
+
+    __tablename__ = "daily_practice_plans"
+    __table_args__ = (
+        UniqueConstraint("patient_profile_id", "local_date", "version_number", name="uq_daily_practice_plan_version"),
+        Index("ix_daily_practice_plans_patient_date", "patient_profile_id", "local_date"),
+    )
+
+    patient_profile_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patient_profiles.id"), index=True)
+    local_date: Mapped[date] = mapped_column(Date, nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="ready", nullable=False)
+    source: Mapped[str] = mapped_column(String(24), default="system", nullable=False)
+    training_plan_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("training_plan_versions.id"), nullable=True)
+    policy_version: Mapped[str] = mapped_column(String(80), default="daily-practice-v1", nullable=False)
+    estimated_duration_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    generation_snapshot: Mapped[dict] = mapped_column(JSONDocument, default=dict, nullable=False)
+    published_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    items: Mapped[list["DailyPracticePlanItem"]] = relationship(
+        back_populates="plan", cascade="all, delete-orphan", order_by="DailyPracticePlanItem.order_index"
+    )
+
+
+class DailyPracticePlanItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    __tablename__ = "daily_practice_plan_items"
+    __table_args__ = (UniqueConstraint("daily_plan_id", "order_index", name="uq_daily_plan_item_order"),)
+
+    daily_plan_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("daily_practice_plans.id"), index=True)
+    task_template_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("task_templates.id"), nullable=False)
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    exercise_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    sequence_role: Mapped[str] = mapped_column(String(24), default="main", nullable=False)
+    estimated_duration_seconds: Mapped[int] = mapped_column(Integer, default=90, nullable=False)
+    selection_source: Mapped[str] = mapped_column(String(32), default="system", nullable=False)
+    reason_codes: Mapped[list] = mapped_column(JSONDocument, default=list, nullable=False)
+    therapist_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    difficulty_snapshot: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    content_snapshot: Mapped[dict] = mapped_column(JSONDocument, default=dict, nullable=False)
+
+    plan: Mapped[DailyPracticePlan] = relationship(back_populates="items")
+    task_template = relationship("TaskTemplate")
+
+
+class ExtraPracticePool(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    __tablename__ = "extra_practice_pools"
+    __table_args__ = (UniqueConstraint("patient_profile_id", "local_date", "version_number", name="uq_extra_pool_version"),)
+
+    patient_profile_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patient_profiles.id"), index=True)
+    local_date: Mapped[date] = mapped_column(Date, nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(80), default="extra-pool-v1", nullable=False)
+    generation_snapshot: Mapped[dict] = mapped_column(JSONDocument, default=dict, nullable=False)
+    refreshed_by_user: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    items: Mapped[list["ExtraPracticePoolItem"]] = relationship(
+        back_populates="pool", cascade="all, delete-orphan", order_by="ExtraPracticePoolItem.order_index"
+    )
+
+
+class ExtraPracticePoolItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    __tablename__ = "extra_practice_pool_items"
+    __table_args__ = (UniqueConstraint("pool_id", "task_template_id", name="uq_extra_pool_task"),)
+
+    pool_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("extra_practice_pools.id"), index=True)
+    task_template_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("task_templates.id"), nullable=False)
+    exercise_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    selection_source: Mapped[str] = mapped_column(String(32), nullable=False)
+    display_reason: Mapped[str] = mapped_column(String(120), nullable=False)
+    difficulty_snapshot: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    pool: Mapped[ExtraPracticePool] = relationship(back_populates="items")
+    task_template = relationship("TaskTemplate")
+
+
 class EvidenceRecord(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "clinical_evidence"
     __table_args__ = (UniqueConstraint("source_type", "source_id", "evidence_type", name="uq_evidence_source_type"),)

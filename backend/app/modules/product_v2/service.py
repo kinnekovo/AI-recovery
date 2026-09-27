@@ -22,7 +22,11 @@ from app.modules.files.service import save_upload
 from app.modules.product_v2.comparability import build_comparable_set, trend_fact
 from app.modules.product_v2.model import (
     AttentionItem,
+    DailyPracticePlan,
+    DailyPracticePlanItem,
     EvidenceRecord,
+    ExtraPracticePool,
+    ExtraPracticePoolItem,
     MetricRecord,
     Milestone,
     ObservationRecord,
@@ -45,7 +49,7 @@ from app.modules.product_v2.schema import (
 from app.modules.pronunciation.model import PronunciationAnalysisResult, PronunciationSegment
 from app.modules.scenario_dialogues.model import DialogueStatus, ScenarioDialogueEvaluation, ScenarioDialogueSession
 from app.modules.scenario_dialogues import service as scenario_dialogue_service
-from app.modules.scoring.model import AttemptAnalysisResult
+from app.modules.scoring.model import AttemptAnalysisResult, AttemptScore
 from app.modules.scoring.service import analyze_attempt
 from app.modules.therapist.service import require_therapist_patient_access
 from app.modules.training.model import SessionTask, TaskTemplate, TrainingSession, TrainingStatus, TrainingType
@@ -369,7 +373,352 @@ def _session_owned(db: Session, user: User, session_id: UUID) -> TrainingSession
     return session
 
 
-def start_or_resume(db: Session, user: User, session_kind: str = "formal", requested_plan_id: UUID | None = None):
+def _template_duration_seconds(template: TaskTemplate) -> int:
+    configured = (template.scoring_config or {}).get("estimated_duration_seconds")
+    if isinstance(configured, (int, float)) and configured > 0:
+        return max(30, min(int(configured), 300))
+    return 210 if _enum_value(template.task_type) == "scenario" else 90
+
+
+def _template_content(template: TaskTemplate) -> dict:
+    return {
+        "template_id": str(template.id),
+        "title": template.title,
+        "scene_prompt": template.scene_prompt,
+        "scoring_config": template.scoring_config,
+        "tags": template.tags,
+        "content_level": template.content_level,
+        "autonomy_level": template.autonomy_level,
+    }
+
+
+def _daily_plan_row(db: Session, profile: PatientProfile, plan: TrainingPlanVersion | None):
+    if not plan:
+        return None
+    today = _patient_today(profile)
+    return db.scalar(
+        select(DailyPracticePlan)
+        .options(selectinload(DailyPracticePlan.items).selectinload(DailyPracticePlanItem.task_template))
+        .where(
+            DailyPracticePlan.patient_profile_id == profile.id,
+            DailyPracticePlan.local_date == today,
+            DailyPracticePlan.training_plan_version_id == plan.id,
+            DailyPracticePlan.is_current.is_(True),
+        )
+        .order_by(DailyPracticePlan.version_number.desc())
+    )
+
+
+def _practice_stats(db: Session, profile_id: UUID) -> dict[UUID, dict]:
+    rows = db.execute(
+        select(SessionTask, AttemptScore)
+        .join(TrainingSession, TrainingSession.id == SessionTask.training_session_id)
+        .outerjoin(Attempt, Attempt.session_task_id == SessionTask.id)
+        .outerjoin(AttemptScore, AttemptScore.attempt_id == Attempt.id)
+        .where(
+            TrainingSession.patient_profile_id == profile_id,
+            TrainingSession.session_kind.in_(["formal", "extra_practice"]),
+        )
+    )
+    stats: dict[UUID, dict] = {}
+    for row, score in rows:
+        item = stats.setdefault(row.task_template_id, {"count": 0, "last": None, "scores": [], "seen_tasks": set()})
+        if row.id not in item["seen_tasks"]:
+            item["seen_tasks"].add(row.id)
+            item["count"] += 1
+            if item["last"] is None or row.created_at > item["last"]:
+                item["last"] = row.created_at
+        if score and score.is_scorable:
+            item["scores"].append(float(score.overall_score))
+    for item in stats.values():
+        item["score_avg"] = round(sum(item["scores"]) / len(item["scores"]), 1) if item["scores"] else None
+        item.pop("seen_tasks", None)
+    return stats
+
+
+def _daily_plan_dict(plan: DailyPracticePlan | None) -> dict | None:
+    if not plan:
+        return None
+    return {
+        "id": str(plan.id),
+        "local_date": plan.local_date.isoformat(),
+        "version_number": plan.version_number,
+        "status": plan.status,
+        "source": plan.source,
+        "estimated_duration_seconds": plan.estimated_duration_seconds,
+        "estimated_duration_minutes": round(plan.estimated_duration_seconds / 60, 1),
+        "policy_version": plan.policy_version,
+        "items": [
+            {
+                "id": str(item.id),
+                "task_template_id": str(item.task_template_id),
+                "order_index": item.order_index,
+                "exercise_type": item.exercise_type,
+                "sequence_role": item.sequence_role,
+                "estimated_duration_seconds": item.estimated_duration_seconds,
+                "selection_source": item.selection_source,
+                "reason_codes": item.reason_codes,
+                "therapist_locked": item.therapist_locked,
+                "difficulty": item.difficulty_snapshot,
+                "title": item.task_template.title if item.task_template else None,
+            }
+            for item in plan.items
+        ],
+    }
+
+
+def ensure_daily_plan(db: Session, profile: PatientProfile, plan: TrainingPlanVersion) -> DailyPracticePlan:
+    existing = _daily_plan_row(db, profile, plan)
+    if existing:
+        return existing
+
+    stats = _practice_stats(db, profile.id)
+    rules = list(plan.exercise_rules or [])
+    if not rules:
+        raise HTTPException(status_code=409, detail="当前训练方案没有可执行练习")
+    candidates = []
+    for rule in rules:
+        template = rule.task_template
+        if not template or not template.is_active:
+            continue
+        # A therapist-authored plan is an explicit compatibility boundary. Keep
+        # legacy scenarios executable here; newly generated extra pools still
+        # require a complete functional scenario contract.
+        item_stats = stats.get(template.id, {"count": 0, "last": None})
+        locked = bool((rule.prompt_policy or {}).get("therapist_locked"))
+        candidates.append((rule, template, item_stats, locked))
+    if not candidates:
+        raise HTTPException(status_code=409, detail="当前训练方案没有可用练习")
+
+    candidates.sort(
+        key=lambda row: (
+            0 if row[3] else 1,
+            0 if row[2]["last"] is None else 1,
+            row[2]["last"].timestamp() if row[2]["last"] else float("-inf"),
+            row[2]["count"],
+            row[2].get("score_avg") if row[2].get("score_avg") is not None else 50.0,
+            row[0].order_index,
+        )
+    )
+    budget = 540  # reserve one minute for setup and transitions
+    selected = []
+    total = 60
+    for rule, template, item_stats, locked in candidates:
+        duration = _template_duration_seconds(template)
+        if selected and total + duration > budget:
+            continue
+        selected.append((rule, template, item_stats, locked, duration))
+        total += duration
+        if len(selected) >= 6:
+            break
+    if not selected:
+        rule, template, item_stats, locked = candidates[0]
+        selected = [(rule, template, item_stats, locked, _template_duration_seconds(template))]
+
+    previous_versions = list(
+        db.scalars(
+            select(DailyPracticePlan).where(
+                DailyPracticePlan.patient_profile_id == profile.id,
+                DailyPracticePlan.local_date == _patient_today(profile),
+            )
+        )
+    )
+    for previous in previous_versions:
+        previous.is_current = False
+    daily = DailyPracticePlan(
+        patient_profile_id=profile.id,
+        local_date=_patient_today(profile),
+        version_number=max([item.version_number for item in previous_versions], default=0) + 1,
+        status="ready",
+        source="system",
+        training_plan_version_id=plan.id,
+        policy_version="daily-practice-v1",
+        estimated_duration_seconds=min(total, 600),
+        generation_snapshot={
+            "active_plan_version": plan.version_number,
+            "candidate_count": len(candidates),
+            "budget_seconds": 600,
+            "selection_policy": "therapist_locked_then_least_practiced_then_history",
+        },
+        is_current=True,
+    )
+    db.add(daily)
+    db.flush()
+    for index, (rule, template, item_stats, locked, duration) in enumerate(selected):
+        role = "warmup" if index == 0 else "main" if index < len(selected) - 1 else "consolidation"
+        source = "therapist" if locked else "least_practiced" if item_stats["last"] is None else "performance_target" if (item_stats.get("score_avg") is not None and item_stats["score_avg"] < 75) else "spaced_review"
+        db.add(
+            DailyPracticePlanItem(
+                daily_plan_id=daily.id,
+                task_template_id=template.id,
+                order_index=index,
+                exercise_type=_enum_value(template.task_type),
+                sequence_role=role,
+                estimated_duration_seconds=duration,
+                selection_source=source,
+                reason_codes=[source],
+                therapist_locked=locked,
+                difficulty_snapshot=rule.difficulty or template.content_level,
+                content_snapshot=_template_content(template),
+            )
+        )
+    db.commit()
+    return _daily_plan_row(db, profile, plan)
+
+
+def _extra_pool_dict(pool: ExtraPracticePool | None) -> dict | None:
+    if not pool:
+        return None
+    groups = {"repeat": [], "scenario": []}
+    for item in pool.items:
+        template = item.task_template
+        if not template:
+            continue
+        groups.setdefault(item.exercise_type, []).append(
+            {
+                "id": str(template.id),
+                "title": template.title,
+                "instruction": template.instruction,
+                "target": template.target_text,
+                "scene_prompt": template.scene_prompt,
+                "exercise_type": item.exercise_type,
+                "difficulty": item.difficulty_snapshot or template.content_level,
+                "selection_source": item.selection_source,
+                "display_reason": item.display_reason,
+                "tags": template.tags,
+            }
+        )
+    return {
+        "id": str(pool.id),
+        "local_date": pool.local_date.isoformat(),
+        "version_number": pool.version_number,
+        "policy_version": pool.policy_version,
+        "repeat": groups.get("repeat", []),
+        "scenario": groups.get("scenario", []),
+    }
+
+
+def ensure_extra_pool(db: Session, profile: PatientProfile, force: bool = False) -> ExtraPracticePool:
+    today = _patient_today(profile)
+    if not force:
+        existing = db.scalar(
+            select(ExtraPracticePool)
+            .options(selectinload(ExtraPracticePool.items).selectinload(ExtraPracticePoolItem.task_template))
+            .where(ExtraPracticePool.patient_profile_id == profile.id, ExtraPracticePool.local_date == today)
+            .order_by(ExtraPracticePool.version_number.desc())
+        )
+        if existing:
+            return existing
+    from app.modules.training.service import ensure_seed_tasks, has_functional_scenario_contract, is_generalization_probe
+    ensure_seed_tasks(db)
+    templates = [item for item in db.scalars(select(TaskTemplate).where(TaskTemplate.is_active.is_(True))) if not is_generalization_probe(item) and has_functional_scenario_contract(item)]
+    stats = _practice_stats(db, profile.id)
+    daily = db.scalar(select(DailyPracticePlan).where(DailyPracticePlan.patient_profile_id == profile.id, DailyPracticePlan.local_date == today, DailyPracticePlan.is_current.is_(True)))
+    daily_ids = {item.task_template_id for item in daily.items} if daily else set()
+    repeat = [item for item in templates if _enum_value(item.task_type) == "repeat"]
+    scenario = [item for item in templates if _enum_value(item.task_type) == "scenario"]
+
+    def rank(item: TaskTemplate):
+        stat = stats.get(item.id, {"count": 0, "last": None})
+        stable_seed = hashlib.sha256(f"{profile.id}:{today.isoformat()}:{item.id}".encode()).hexdigest()
+        return (0 if item.id not in daily_ids else 1, 0 if stat["last"] is None else 1, stat["last"].timestamp() if stat["last"] else float("-inf"), stat["count"], stat.get("score_avg") if stat.get("score_avg") is not None else 50.0, stable_seed)
+
+    repeat = sorted(repeat, key=rank)[:10]
+    scenario = sorted(scenario, key=rank)[:3]
+    previous = db.scalar(select(func.max(ExtraPracticePool.version_number)).where(ExtraPracticePool.patient_profile_id == profile.id, ExtraPracticePool.local_date == today)) or 0
+    pool = ExtraPracticePool(
+        patient_profile_id=profile.id,
+        local_date=today,
+        version_number=previous + 1,
+        policy_version="extra-pool-v1",
+        generation_snapshot={"repeat_target": 10, "scenario_target": 3, "stable_daily_seed": True},
+        refreshed_by_user=force,
+    )
+    db.add(pool)
+    db.flush()
+    for index, item in enumerate(repeat):
+        source = "recommended" if index < 5 else "least_practiced" if index < 8 else "exploration"
+        db.add(ExtraPracticePoolItem(pool_id=pool.id, task_template_id=item.id, exercise_type="repeat", order_index=index, selection_source=source, display_reason={"recommended": "更适合当前练习", "least_practiced": "最近练得较少", "exploration": "换个内容试试"}[source], difficulty_snapshot=item.content_level))
+    for index, item in enumerate(scenario):
+        source = "recommended" if index == 0 else "least_practiced" if index == 1 else "exploration"
+        db.add(ExtraPracticePoolItem(pool_id=pool.id, task_template_id=item.id, exercise_type="scenario", order_index=len(repeat) + index, selection_source=source, display_reason={"recommended": "更适合当前练习", "least_practiced": "最近练得较少", "exploration": "换个内容试试"}[source], difficulty_snapshot=item.content_level))
+    db.commit()
+    return db.scalar(select(ExtraPracticePool).options(selectinload(ExtraPracticePool.items).selectinload(ExtraPracticePoolItem.task_template)).where(ExtraPracticePool.id == pool.id))
+
+
+def patient_extra_practice_pool(db: Session, user: User, force: bool = False):
+    profile = get_patient_profile(db, user)
+    return _extra_pool_dict(ensure_extra_pool(db, profile, force=force))
+
+
+def _daily_plan_for_therapist(db: Session, actor: User, patient_user_id: UUID) -> DailyPracticePlan:
+    profile = _therapist_profile(db, actor, patient_user_id)
+    plan = _active_plan(db, profile.id)
+    if not plan:
+        raise HTTPException(status_code=409, detail="患者尚未有有效训练方案")
+    return ensure_daily_plan(db, profile, plan)
+
+
+def therapist_daily_plan(db: Session, actor: User, patient_user_id: UUID):
+    return _daily_plan_dict(_daily_plan_for_therapist(db, actor, patient_user_id))
+
+
+def update_therapist_daily_plan(db: Session, actor: User, patient_user_id: UUID, payload):
+    profile = _therapist_profile(db, actor, patient_user_id)
+    plan = _active_plan(db, profile.id)
+    if not plan:
+        raise HTTPException(status_code=409, detail="患者尚未有有效训练方案")
+    daily = ensure_daily_plan(db, profile, plan)
+    if daily.started_at:
+        raise HTTPException(status_code=409, detail="今日训练已经开始，不能修改当前执行计划")
+    orders = [item.order_index for item in payload.items]
+    if len(orders) != len(set(orders)):
+        raise HTTPException(status_code=422, detail="每日练习顺序不能重复")
+    template_ids = [item.task_template_id for item in payload.items]
+    templates = {item.id: item for item in db.scalars(select(TaskTemplate).where(TaskTemplate.id.in_(template_ids)))}
+    if len(templates) != len(set(template_ids)):
+        raise HTTPException(status_code=422, detail="每日计划包含不存在的练习")
+    from app.modules.training.service import has_functional_scenario_contract, is_generalization_probe
+    total = 60
+    for item in payload.items:
+        template = templates[item.task_template_id]
+        if not template.is_active or is_generalization_probe(template) or not has_functional_scenario_contract(template):
+            raise HTTPException(status_code=422, detail="每日计划包含不可执行的练习")
+        total += _template_duration_seconds(template)
+    if total > 600:
+        raise HTTPException(status_code=422, detail="今日练习预计时长不能超过10分钟")
+    daily.items = []
+    daily.version_number += 1
+    daily.source = "therapist"
+    daily.status = "ready"
+    daily.estimated_duration_seconds = total
+    daily.published_by_user_id = actor.id
+    daily.published_at = utc_now()
+    daily.generation_snapshot = {**(daily.generation_snapshot or {}), "therapist_note": payload.note, "selection_policy": "therapist_override"}
+    db.flush()
+    for item in payload.items:
+        template = templates[item.task_template_id]
+        db.add(
+            DailyPracticePlanItem(
+                daily_plan_id=daily.id,
+                task_template_id=template.id,
+                order_index=item.order_index,
+                exercise_type=_enum_value(template.task_type),
+                sequence_role=item.sequence_role,
+                estimated_duration_seconds=_template_duration_seconds(template),
+                selection_source="therapist",
+                reason_codes=["therapist_override"],
+                therapist_locked=item.therapist_locked,
+                difficulty_snapshot=template.content_level,
+                content_snapshot=_template_content(template),
+            )
+        )
+    db.commit()
+    db.expire_all()
+    return _daily_plan_dict(_daily_plan_row(db, profile, plan))
+
+
+def start_or_resume(db: Session, user: User, session_kind: str = "formal", requested_plan_id: UUID | None = None, task_template_ids: list[UUID] | None = None):
     profile = get_patient_profile(db, user)
     # Keep maintained scenario contracts current for newly snapshotted Product
     # v2 sessions. Existing dialogue sessions retain their own historical
@@ -412,9 +761,38 @@ def start_or_resume(db: Session, user: User, session_kind: str = "formal", reque
         )
         if existing:
             return session_dict(db, existing)
-    rules = plan.exercise_rules
-    if not rules:
-        raise HTTPException(status_code=409, detail="当前训练方案没有可执行练习")
+    daily_plan = ensure_daily_plan(db, profile, plan) if session_kind == "formal" else None
+    if session_kind == "formal":
+        selected = [
+            (item.task_template, item.order_index, item.difficulty_snapshot, {}, item.exercise_type, item.max_information_units if hasattr(item, "max_information_units") else None)
+            for item in (daily_plan.items if daily_plan else [])
+            if item.task_template and item.task_template.is_active
+        ]
+    else:
+        pool = ensure_extra_pool(db, profile)
+        requested = {UUID(str(item)) for item in (task_template_ids or [])}
+        pool_items = [item for item in pool.items if item.task_template and item.task_template.is_active]
+        if requested:
+            pool_ids = {item.task_template_id for item in pool_items}
+            unknown = requested - pool_ids
+            if unknown:
+                # A stale client may hold a previous pool item. Accept it when
+                # the template is still active and safe, then snapshot it into
+                # this extra session without changing today's pool.
+                from app.modules.training.service import has_functional_scenario_contract, is_generalization_probe
+                stale = [item for item in db.scalars(select(TaskTemplate).where(TaskTemplate.id.in_(unknown), TaskTemplate.is_active.is_(True))) if not is_generalization_probe(item) and has_functional_scenario_contract(item)]
+                if len(stale) != len(unknown):
+                    raise HTTPException(status_code=422, detail="所选额外练习不在当前候选池中")
+                pool_items.extend(ExtraPracticePoolItem(pool_id=pool.id, task_template_id=item.id, exercise_type=_enum_value(item.task_type), order_index=len(pool_items), selection_source="stale_pool", display_reason="已保存的候选练习", difficulty_snapshot=item.content_level, task_template=item) for item in stale)
+            pool_items = [item for item in pool_items if item.task_template_id in requested]
+        else:
+            pool_items = pool_items[:3]
+        selected = [(item.task_template, index, item.difficulty_snapshot, {}, item.exercise_type, None) for index, item in enumerate(pool_items)]
+    if not selected:
+        raise HTTPException(status_code=409, detail="当前没有可执行练习")
+    if daily_plan:
+        daily_plan.started_at = daily_plan.started_at or utc_now()
+        daily_plan.status = "in_progress"
     session = TrainingSession(
         patient_profile_id=profile.id,
         agent_id=profile.current_agent_id,
@@ -425,35 +803,28 @@ def start_or_resume(db: Session, user: User, session_kind: str = "formal", reque
         started_at=utc_now(),
         summary_status="pending",
         technical_status="ready",
-        training_type=TrainingType.repeat if any(rule.exercise_type == "repeat" for rule in rules) else TrainingType.scenario,
+        training_type=TrainingType.repeat if any(item[4] == "repeat" for item in selected) else TrainingType.scenario,
         status=TrainingStatus.in_progress,
     )
     db.add(session)
     db.flush()
-    for rule in rules:
-        template = rule.task_template
-        content = {
-            "template_id": str(template.id),
-            "title": template.title,
-            "scene_prompt": template.scene_prompt,
-            "scoring_config": template.scoring_config,
-            "tags": template.tags,
-        }
+    for template, order_index, difficulty, prompt_policy, exercise_type, max_information_units in selected:
+        content = _template_content(template)
         db.add(
             SessionTask(
                 training_session_id=session.id,
                 task_template_id=template.id,
-                order_index=rule.order_index,
+                order_index=order_index,
                 prompt_level=0,
                 status=TrainingStatus.in_progress,
                 v2_status="planned",
                 content_snapshot=content,
                 instruction_snapshot=template.instruction,
                 target_snapshot=template.target_text,
-                exercise_type_snapshot=rule.exercise_type,
-                difficulty_snapshot=rule.difficulty,
-                max_information_units_snapshot=rule.max_information_units,
-                prompt_policy_snapshot=rule.prompt_policy,
+                exercise_type_snapshot=exercise_type,
+                difficulty_snapshot=difficulty or template.content_level,
+                max_information_units_snapshot=max_information_units,
+                prompt_policy_snapshot=prompt_policy or {},
                 contract_version_snapshot=str((template.scoring_config or {}).get("version", "legacy-template-v1")),
             )
         )
@@ -567,6 +938,17 @@ def session_command(db: Session, user: User, session_id: UUID, command: str, rea
         session.v2_status = "completed"
         session.status = TrainingStatus.completed
         session.completed_at = utc_now()
+        if session.session_kind == "formal":
+            daily = db.scalar(
+                select(DailyPracticePlan).where(
+                    DailyPracticePlan.patient_profile_id == session.patient_profile_id,
+                    DailyPracticePlan.local_date == session.local_session_date,
+                    DailyPracticePlan.is_current.is_(True),
+                )
+            )
+            if daily:
+                daily.status = "completed"
+                daily.completed_at = session.completed_at
         _create_summary(db, session)
         _derive_milestones(db, session)
     else:
@@ -1263,6 +1645,8 @@ def patient_home(db: Session, user: User):
     profile = get_patient_profile(db, user)
     goal = _active_goal(db, profile.id)
     plan = _active_plan(db, profile.id)
+    daily_plan = ensure_daily_plan(db, profile, plan) if plan else None
+    extra_pool = ensure_extra_pool(db, profile) if plan else None
     session = None
     if plan:
         today = _patient_today(profile)
@@ -1316,6 +1700,7 @@ def patient_home(db: Session, user: User):
         primary_action = {"label": "开始今天的训练", "action": "start_session"}
     else:
         primary_action = None
+    daily_data = _daily_plan_dict(daily_plan)
     return {
         "state": state,
         "greeting": f"你好，{user.username}",
@@ -1323,8 +1708,10 @@ def patient_home(db: Session, user: User):
         "active_training_plan": plan_dict(plan) if plan else None,
         "stage_focus": plan.stage_focus if plan else None,
         "today_session": session_data,
-        "today_training_structure": plan_dict(plan).get("exercise_rules", []) if plan else [],
-        "estimated_duration": (plan.strategy_snapshot or {}).get("duration") if plan else None,
+        "today_training_structure": daily_data.get("items", []) if daily_data else [],
+        "estimated_duration": round(daily_plan.estimated_duration_seconds / 60, 1) if daily_plan else None,
+        "daily_plan": daily_data,
+        "extra_practice": _extra_pool_dict(extra_pool),
         "primary_action": primary_action,
         "recent_comparable_changes": trends,
         "plan_update_announcement": "治疗师已发布新的训练方案；完成当前训练后，新方案会从下一次新建训练开始生效。" if session and session.formal_training_plan_version_id != plan.id else None,
