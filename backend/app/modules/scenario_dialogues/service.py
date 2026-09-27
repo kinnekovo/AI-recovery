@@ -9,8 +9,12 @@ from app.database.base import utc_now
 from app.modules.training.model import SessionTask, TrainingType
 from app.modules.users.model import PatientProfile, User
 from app.modules.users.service import get_patient_profile
-from app.integrations.llm.scenario_semantics import ROLE_REPLY_PROMPT_VERSION, extract_evidence, generate_role_reply
-from app.core.config import get_settings
+from app.integrations.llm.scenario_semantics import (
+    ROLE_REPLY_PROMPT_VERSION,
+    extract_evidence_with_status,
+    generate_role_reply_with_status,
+)
+from app.modules.scenario_dialogues.policy import choose_dialogue_action, unit_by_id
 
 
 def _owned_task(db: Session, user: User, task_id):
@@ -26,7 +30,10 @@ def create_dialogue(db: Session, user: User, task_id):
     existing = db.scalar(select(ScenarioDialogueSession).where(ScenarioDialogueSession.session_task_id == task.id))
     if existing:
         return to_read(db, existing)
-    contract = task.task_template.scoring_config or {}
+    # A session task owns the immutable contract snapshot used by the plan.  The
+    # live template is only a compatibility fallback for legacy tasks created
+    # before Product v2 began snapshotting task content.
+    contract = (task.content_snapshot or {}).get("scoring_config") or task.task_template.scoring_config or {}
     if contract.get("mode") != "functional_scenario":
         raise HTTPException(status_code=400, detail="该场景尚未配置多轮沟通契约")
     session = ScenarioDialogueSession(
@@ -258,19 +265,58 @@ def add_patient_turn(
     if dialogue.patient_turn_count >= max_turns:
         raise HTTPException(status_code=409, detail="本场对话已达到最大回合数")
     turns = list(db.scalars(select(ScenarioDialogueTurn).where(ScenarioDialogueTurn.dialogue_session_id == dialogue.id).order_by(ScenarioDialogueTurn.turn_index)))
-    semantic = extract_evidence(contract, text)
-    settings = get_settings()
+    previous_agent = next((turn for turn in reversed(turns) if turn.speaker == DialogueSpeaker.agent), None)
+    previous_agent_metadata = (previous_agent.semantic_evidence or {}) if previous_agent else {}
+    current_target_id = str(previous_agent_metadata.get("target_information_unit_id") or "") or None
+    current_target = unit_by_id(contract, current_target_id)
+    conversation_history = [
+        {
+            "speaker": "patient" if turn.speaker == DialogueSpeaker.patient else "agent",
+            "dialogue_act": turn.dialogue_act,
+            "text": turn.text,
+        }
+        for turn in turns
+    ]
+    previous_collected = _collected_unit_ids(db, dialogue.id, [])
+    semantic_result = extract_evidence_with_status(
+        contract,
+        text,
+        last_agent_question=previous_agent.text if previous_agent else None,
+        current_target_information_unit=current_target,
+        conversation_history=conversation_history,
+        collected_information_unit_ids=sorted(previous_collected),
+    )
+    semantic = semantic_result.value if isinstance(semantic_result.value, dict) else None
+    semantic_from_llm = semantic_result.status == "success" and semantic is not None and semantic.get("source") == "llm_structured"
     matched = semantic["information_units"] if semantic else _match_units(contract, text)
+    if semantic is None:
+        target_supported = bool(current_target_id and any(item.get("id") == current_target_id for item in matched))
+        semantic = {
+            "source": "contract_fallback",
+            "information_units": matched,
+            "answered_current_question": target_supported,
+            "answered_target_id": current_target_id,
+            "answer_status": "supported" if target_supported else "uncertain",
+            "dialogue_act": "answer",
+            "relevance": "relevant" if matched else "uncertain",
+            "contradictions": [],
+        }
+    semantic.update({
+        "llm_status": semantic_result.status,
+        "llm_error_code": semantic_result.error_code,
+        "llm_latency_ms": semantic_result.latency_ms,
+        "fallback_used": not semantic_from_llm,
+    })
     next_index = (turns[-1].turn_index if turns else 0) + 1
     db.add(ScenarioDialogueTurn(
         dialogue_session_id=dialogue.id, turn_index=next_index, speaker=DialogueSpeaker.patient,
         dialogue_act="response", text=text,
         audio_file_id=audio_file_id,
         asr_provider=asr_provider,
-        llm_provider=settings.llm_feedback_provider if semantic else None,
-        llm_model_version=settings.llm_feedback_model if semantic else None,
-        llm_prompt_version=semantic.get("prompt_version") if semantic else None,
-        semantic_evidence={**(semantic or {"source": "contract_fallback", "information_units": matched}), "quote": text, "asr_provider": asr_provider, "client_turn_id": client_turn_id},
+        llm_provider=semantic_result.provider if semantic_from_llm else None,
+        llm_model_version=semantic_result.model if semantic_from_llm else None,
+        llm_prompt_version=semantic.get("prompt_version") if semantic_from_llm else None,
+        semantic_evidence={**semantic, "quote": text, "asr_provider": asr_provider, "client_turn_id": client_turn_id},
     ))
     dialogue.patient_turn_count += 1
     if safety_reply:
@@ -284,71 +330,90 @@ def add_patient_turn(
         db.commit()
         return to_read(db, dialogue)
     collected = _collected_unit_ids(db, dialogue.id, matched)
-    required = {item for item in contract.get("goal_requirements", []) if isinstance(item, str)}
-    missing = [unit for unit in contract.get("required_information_units", []) if isinstance(unit, dict) and unit.get("id") not in collected]
-    optional_missing = [unit for unit in contract.get("optional_information_units", []) if isinstance(unit, dict) and unit.get("id") not in collected]
-    repair_required = bool(contract.get("repair_opportunities"))
-    repair_already_offered = any(turn.dialogue_act == "repair" for turn in turns)
-    reply_target: dict | None = None
-    if required and required.issubset(collected) and dialogue.patient_turn_count >= minimum_turns and repair_required and not repair_already_offered:
-        dialogue.current_state = DialogueState.repairing
-        repair = contract.get("repair_opportunities")[0]
+    decision = choose_dialogue_action(
+        contract,
+        collected=collected,
+        patient_turn_count=dialogue.patient_turn_count,
+        minimum_patient_turns=minimum_turns,
+        maximum_patient_turns=max_turns,
+        current_target_id=current_target_id,
+        answered_current_question=semantic.get("answered_current_question"),
+        answer_status=semantic.get("answer_status"),
+        repair_already_offered=any(turn.dialogue_act == "repair" for turn in turns),
+    )
+    reply_target = decision.target
+    dialogue.current_state = DialogueState(decision.state)
+    if decision.action == "repair":
+        repair = (contract.get("repair_opportunities") or [])[0]
         reply = str(repair.get("question") or repair.get("text") or "我想确认一下，你能换一种说法再告诉我吗？") if isinstance(repair, dict) else "我想确认一下，你能换一种说法再告诉我吗？"
         act = "repair"
-    elif required and required.issubset(collected) and (dialogue.patient_turn_count >= minimum_turns or not optional_missing):
-        dialogue.current_state = DialogueState.completed
+    elif decision.action == "complete":
         dialogue.status = DialogueStatus.completed
         reply, act = _completion_reply(contract, text), "complete"
-    elif required and required.issubset(collected):
-        dialogue.current_state = DialogueState.confirming
-        reply_target = optional_missing[0]
-        target_id = str(reply_target.get("id", ""))
-        reply, act = _follow_up_question(contract, target_id, reply_target), "clarify"
-    elif dialogue.patient_turn_count >= max_turns:
-        dialogue.current_state = DialogueState.turn_limit_reached
+    elif decision.action == "confirm":
+        reply, act = _confirmation_reply(contract), "confirm"
+    elif decision.action == "close":
         dialogue.status = DialogueStatus.completed
         reply, act = "谢谢你的表达。这一轮先到这里，我们下次继续练习。", "close"
     else:
-        dialogue.current_state = DialogueState.clarifying
-        reply_target = missing[0] if missing else None
-        target_id = str(reply_target.get("id", "")) if reply_target else ""
+        target_id = str((reply_target or {}).get("id", ""))
         reply = _follow_up_question(contract, target_id, reply_target)
-        act = "clarify"
-    # A closing instruction is part of the scenario contract, not wording that an
-    # LLM may soften into another empty acknowledgement.  The model may only vary
-    # an active clarification or repair prompt.
-    conversation_history = [
-        {
-            "speaker": "patient" if turn.speaker == DialogueSpeaker.patient else "agent",
-            "dialogue_act": turn.dialogue_act,
-            "text": turn.text,
-        }
-        for turn in turns
-    ] + [{"speaker": "patient", "dialogue_act": "response", "text": text}]
-    generated_reply = (
-        generate_role_reply(
-            contract,
-            act,
-            reply,
-            conversation_history=conversation_history,
-            current_patient_utterance=text,
-            target_information_unit=reply_target,
-            collected_information_unit_ids=sorted(collected),
-        )
-        if act in {"clarify", "repair"}
-        else None
-    )
-    reply = generated_reply or reply
+        act = decision.action if decision.action in {"acknowledge_and_ask", "clarify_current", "ask_optional"} else "clarify"
+    # A closing instruction remains rule-owned, but active replies may be
+    # contextualized as long as the model echoes the locked action and target.
+    conversation_history = conversation_history + [{"speaker": "patient", "dialogue_act": "response", "text": text}]
+    reply_result = generate_role_reply_with_status(
+        contract,
+        act,
+        reply,
+        conversation_history=conversation_history,
+        current_patient_utterance=text,
+        target_information_unit=reply_target,
+        collected_information_unit_ids=sorted(collected),
+        acknowledge_evidence=semantic.get("information_units", []),
+    ) if act in {"clarify", "clarify_current", "acknowledge_and_ask", "ask_optional", "repair", "confirm", "complete"} else None
+    generated_reply = reply_result.value if reply_result and isinstance(reply_result.value, str) else None
+    if not generated_reply and act in {"acknowledge_and_ask", "clarify_current", "ask_optional", "confirm", "complete"}:
+        reply = _acknowledging_fallback(text, reply, semantic.get("information_units", []))
+    else:
+        reply = generated_reply or reply
     db.flush()
     db.add(ScenarioDialogueTurn(
         dialogue_session_id=dialogue.id, turn_index=next_index + 1, speaker=DialogueSpeaker.agent,
         dialogue_act=act, text=reply,
-        llm_provider=settings.llm_feedback_provider if generated_reply else None,
-        llm_model_version=settings.llm_feedback_model if generated_reply else None,
+        llm_provider=reply_result.provider if reply_result and reply_result.status == "success" else None,
+        llm_model_version=reply_result.model if reply_result and reply_result.status == "success" else None,
         llm_prompt_version=ROLE_REPLY_PROMPT_VERSION if generated_reply else None,
+        semantic_evidence={
+            "source": "dialogue_policy_v1",
+            "policy_action": decision.action,
+            "policy_reason": decision.reason,
+            "target_information_unit_id": str((reply_target or {}).get("id")) if reply_target else None,
+            "llm_status": reply_result.status if reply_result else "not_requested",
+            "llm_error_code": reply_result.error_code if reply_result else None,
+            "llm_latency_ms": reply_result.latency_ms if reply_result else None,
+            "fallback_used": not bool(generated_reply),
+            "acknowledged_information_unit_ids": [str(item.get("id")) for item in semantic.get("information_units", []) if item.get("id")],
+        },
     ))
     db.commit()
     return to_read(db, dialogue)
+
+
+def _acknowledging_fallback(transcript: str, reply: str, information_units: list[dict]) -> str:
+    """Keep the fallback grounded in the patient's words when LLM wording fails."""
+    if not information_units:
+        return reply
+    quote = next((item.get("quote") for item in information_units if isinstance(item, dict) and item.get("quote")), transcript)
+    quote = " ".join(str(quote).split()).strip().rstrip("。！？?!")
+    if not quote:
+        return reply
+    if len(quote) > 20:
+        quote = quote[:20] + "…"
+    normalized_reply = reply.strip()
+    if normalized_reply.startswith("好的，"):
+        normalized_reply = normalized_reply[3:]
+    return f"好的，我听到您说“{quote}”了。{normalized_reply}"
 
 
 def _match_units(contract: dict, transcript: str) -> list[dict]:
@@ -396,6 +461,13 @@ def _follow_up_question(contract: dict, target_id: str, missing_unit: dict | Non
     return f"为了更好地帮助你，能再说说{label}吗？"
 
 
+def _confirmation_reply(contract: dict) -> str:
+    response = contract.get("confirmation_response")
+    if isinstance(response, str) and response.strip():
+        return response.strip()
+    return "好的，我记下了。还有其他需要说明的吗？"
+
+
 def _completion_reply(contract: dict, transcript: str) -> str:
     """End with the next conversational action, never a hollow acknowledgement."""
     response = contract.get("completion_response")
@@ -440,9 +512,20 @@ def _evaluate_dialogue(db: Session, dialogue: ScenarioDialogueSession) -> Scenar
     achieved = bool(required and required.issubset(collected))
     goal_status = "achieved" if achieved else ("partly_achieved" if collected else "not_achieved")
     goal_score = config_value("scenario_dialogue_goal_scores")[goal_status]
-    relevant_turns = [turn for turn in patient_turns if (turn.semantic_evidence or {}).get("information_units")]
-    response = round(100 * len(relevant_turns) / max(1, len(patient_turns)), 1)
-    relevance = response
+    response_turns = [
+        turn
+        for turn in patient_turns
+        if (turn.semantic_evidence or {}).get("answered_current_question")
+        or (turn.semantic_evidence or {}).get("information_units")
+    ]
+    relevant_turns = [
+        turn
+        for turn in patient_turns
+        if (turn.semantic_evidence or {}).get("relevance") == "relevant"
+        or (turn.semantic_evidence or {}).get("information_units")
+    ]
+    response = round(100 * len(response_turns) / max(1, len(patient_turns)), 1)
+    relevance = round(100 * len(relevant_turns) / max(1, len(patient_turns)), 1)
     independence_penalties = config_value("scenario_dialogue_independence_penalties")
     independence = max(
         0.0,
@@ -476,8 +559,23 @@ def _evaluate_dialogue(db: Session, dialogue: ScenarioDialogueSession) -> Scenar
         dialogue_session_id=dialogue.id, goal_status=goal_status, goal_score=goal_score,
         information_score=information, response_score=response, relevance_score=relevance,
         independence_score=independence, repair_score=repair_score, overall_score=overall,
-        confidence=confidence, review_status=review_status, scoring_version="scenario-dialogue-rules-v1",
-        evidence_snapshot={"collected_information_unit_ids": sorted(collected), "required_information_unit_ids": sorted(required), "patient_turn_count": len(patient_turns), "fallback_used": fallback_used, "mock_asr_used": mock_asr_used, "low_confidence": low_confidence},
+        confidence=confidence, review_status=review_status, scoring_version="scenario-dialogue-rules-v2",
+        evidence_snapshot={
+            "collected_information_unit_ids": sorted(collected),
+            "required_information_unit_ids": sorted(required),
+            "patient_turn_count": len(patient_turns),
+            "fallback_used": fallback_used,
+            "mock_asr_used": mock_asr_used,
+            "low_confidence": low_confidence,
+            "unanswered_current_question_count": sum(
+                1 for turn in patient_turns if (turn.semantic_evidence or {}).get("answered_current_question") is False
+            ),
+            "policy_actions": [
+                (turn.semantic_evidence or {}).get("policy_action")
+                for turn in turns
+                if (turn.semantic_evidence or {}).get("policy_action")
+            ],
+        },
     )
 
 

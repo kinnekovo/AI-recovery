@@ -13,6 +13,11 @@ const audioExtensionByMimeType: Record<string, string> = {
   'audio/webm;codecs=opus': 'webm'
 }
 
+// A scenario turn may include browser upload, Tencent ASR, semantic extraction,
+// and a contextual role reply. Keep the normal API timeout short, but allow this
+// deliberately multi-provider request enough time to finish.
+const SCENARIO_TURN_TIMEOUT_MS = 60_000
+
 export const scenarioDialoguesApi = {
   trends() {
     return request<ScenarioDialogueTrends>(http.get('/scenario-dialogues/trends'))
@@ -36,6 +41,6 @@ export const scenarioDialoguesApi = {
     const form = new FormData()
     form.append('audio_file', audio, `scenario-turn.${audioExtensionByMimeType[audio.type] ?? 'webm'}`)
     form.append('client_turn_id', clientTurnId)
-    return request<ScenarioDialogue>(http.post(`/scenario-dialogues/${dialogueId}/turns/audio`, form))
+    return request<ScenarioDialogue>(http.post(`/scenario-dialogues/${dialogueId}/turns/audio`, form, { timeout: SCENARIO_TURN_TIMEOUT_MS }))
   }
 }

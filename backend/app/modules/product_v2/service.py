@@ -371,6 +371,11 @@ def _session_owned(db: Session, user: User, session_id: UUID) -> TrainingSession
 
 def start_or_resume(db: Session, user: User, session_kind: str = "formal", requested_plan_id: UUID | None = None):
     profile = get_patient_profile(db, user)
+    # Keep maintained scenario contracts current for newly snapshotted Product
+    # v2 sessions. Existing dialogue sessions retain their own historical
+    # contract_snapshot and therefore remain reproducible.
+    from app.modules.training.service import ensure_seed_tasks
+    ensure_seed_tasks(db)
     today = _patient_today(profile)
     if session_kind == "formal":
         resumable = db.scalar(

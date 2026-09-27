@@ -130,7 +130,7 @@ SEED_TASKS = [
         "tags": ["医疗", "需求表达", "场景"],
         "recommendation_weight": 86,
         "scoring_config": {
-            "version": "scenario-contract-v1",
+            "version": "scenario-contract-v2",
             "mode": "functional_scenario",
             "agent_role": "医院挂号处工作人员",
             "opening_line": "您好，这里是挂号处。请问您今天需要办理什么？",
@@ -143,9 +143,26 @@ SEED_TASKS = [
                 {"id": "request", "label": "希望对方提供什么帮助", "keywords": ["帮", "请问", "麻烦", "怎么", "哪个科", "挂", "看看", "咨询"]},
             ],
             "optional_information_units": [
-                {"id": "time", "label": "症状持续多久", "keywords": ["今天", "两天", "几天", "最近", "一直", "上午", "晚上"]},
+                {
+                    "id": "time",
+                    "label": "症状持续多久",
+                    "keywords": ["今天", "两天", "几天", "最近", "一直", "上午", "晚上"],
+                    "depends_on": ["problem"],
+                    "prompt_when_missing": False,
+                },
             ],
-            "goal_requirements": ["medical_intent", "request"],
+            # A registration request without a problem statement is not enough
+            # for this scenario: the learner must communicate why they need care
+            # before the role can move to the registration action.
+            "goal_requirements": ["medical_intent", "problem", "request"],
+            "question_priority": ["medical_intent", "problem", "request", "time"],
+            "optional_follow_up_policy": "when_relevant",
+            "follow_up_questions": [
+                {"target_information_unit": "medical_intent", "question": "好的，请问您是想看病、挂号，还是咨询一下？"},
+                {"target_information_unit": "problem", "question": "好的，请问您哪里不舒服？可以简单说说症状。"},
+                {"target_information_unit": "request", "question": "您希望我们帮您挂号、找科室，还是先咨询一下？"},
+                {"target_information_unit": "time", "question": "这个不舒服大概持续多久了？"},
+            ],
             "prompt_hints": ["先想一想：你想请工作人员帮什么忙？", "可以先说：我想挂号或看医生。", "再补充：你哪里不舒服，或者想问什么。"],
         },
     },
@@ -484,7 +501,8 @@ def _validate_scenario_contract(task_type: TrainingType, scoring_config: dict | 
             detail="场景表达必须配置功能性沟通评分契约：目标、至少两个关键信息单元和分级提示。",
         )
     unit_ids = set()
-    for unit in required_units:
+    all_units = list(required_units) + [item for item in (config.get("optional_information_units") or []) if isinstance(item, dict)]
+    for unit in all_units:
         if (
             not isinstance(unit, dict)
             or not isinstance(unit.get("id"), str)
@@ -502,6 +520,20 @@ def _validate_scenario_contract(task_type: TrainingType, scoring_config: dict | 
         unit_ids.add(unit["id"])
     if not set(config["goal_requirements"]).issubset(unit_ids):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="场景沟通目标引用了不存在的信息单元。")
+    for unit in all_units:
+        dependencies = unit.get("depends_on") or unit.get("requires") or []
+        if dependencies and (
+            not isinstance(dependencies, list)
+            or any(not isinstance(item, str) or item not in unit_ids for item in dependencies)
+        ):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="场景信息单元的前置条件无效。")
+    priorities = config.get("question_priority") or []
+    if priorities and (
+        not isinstance(priorities, list)
+        or any(not isinstance(item, str) or item not in unit_ids for item in priorities)
+        or len(priorities) != len(set(priorities))
+    ):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="场景追问优先级配置无效。")
 
 
 def get_training_recommendation(db: Session, user: User) -> TrainingRecommendationRead:

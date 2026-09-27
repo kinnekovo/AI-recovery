@@ -1,10 +1,19 @@
 import unittest
 from types import SimpleNamespace
 
-from app.modules.scenario_dialogues.service import _completion_reply, _follow_up_question, _match_units, _repair_score, _safety_escalation_reply, _trend_summary
+from app.modules.scenario_dialogues.service import _acknowledging_fallback, _completion_reply, _follow_up_question, _match_units, _repair_score, _safety_escalation_reply, _trend_summary
 
 
 class ScenarioDialogueStateTest(unittest.TestCase):
+    def test_fallback_reply_acknowledges_patient_evidence(self):
+        reply = _acknowledging_fallback(
+            "我今天有点头疼。",
+            "好的，请问您是想看病、挂号，还是咨询一下？",
+            [{"id": "problem", "quote": "我今天有点头疼。"}],
+        )
+        self.assertIn("头疼", reply)
+        self.assertIn("挂号", reply)
+
     def test_contract_fallback_collects_evidence_without_reference_sentence(self):
         contract = {
             "required_information_units": [

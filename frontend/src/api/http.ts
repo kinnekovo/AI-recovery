@@ -31,7 +31,7 @@ export async function request<T>(promise: Promise<{ data: ApiEnvelope<T> }>): Pr
   } catch (err) {
     if (axios.isAxiosError(err)) {
       const status = err.response?.status
-      const message = readApiError(err.response?.data) || httpStatusMessage(status) || err.message
+      const message = readApiError(err.response?.data) || httpStatusMessage(status) || axiosErrorMessage(err)
       if (status === 401 && window.location.pathname !== '/login') {
         localStorage.removeItem('access_token')
         window.location.assign('/login')
@@ -70,4 +70,11 @@ function httpStatusMessage(status?: number): string {
   if (status === 422) return '提交内容未通过校验，请检查表单。'
   if (status && status >= 500) return '服务器暂时无法完成请求，请稍后再试。'
   return ''
+}
+
+function axiosErrorMessage(error: { code?: string; message?: string }): string {
+  if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT' || error.message?.toLowerCase().includes('timeout')) {
+    return '语音分析时间较长，服务仍可能在处理中。请稍候再查看，或稍后重试。'
+  }
+  return error.message || '网络请求失败，请稍后重试。'
 }

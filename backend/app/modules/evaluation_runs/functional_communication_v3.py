@@ -27,6 +27,7 @@ from app.modules.users.model import User
 
 ALGORITHM_VERSION = "functional-communication-eval-v3.0"
 DOMAIN = "functional_communication"
+RESPONSE_ACTIONS = {"opening", "clarify", "clarify_current", "acknowledge_and_ask", "ask_optional", "repair", "confirm", "confirming"}
 
 
 def _fingerprint(value: dict) -> str:
@@ -76,8 +77,8 @@ def _build(dialogue: ScenarioDialogueSession, turns: list[ScenarioDialogueTurn],
     goal_status = "achieved" if required_ids and required_ids <= collected else ("partly_achieved" if collected else "not_achieved")
     goal_value = float(config_value("scenario_dialogue_goal_scores")[goal_status])
     relevant = [t for t in patient if any(t.id == owner.id for owner, _ in evidence)]
-    response_opportunities = [t for t in turns if t.speaker == DialogueSpeaker.agent and t.dialogue_act in {"opening", "clarify", "repair", "confirming"}]
-    response_count = sum(1 for i, t in enumerate(turns) if t.speaker == DialogueSpeaker.agent and t.dialogue_act in {"opening", "clarify", "repair", "confirming"} and any(x.speaker == DialogueSpeaker.patient for x in turns[i + 1:]))
+    response_opportunities = [t for t in turns if t.speaker == DialogueSpeaker.agent and t.dialogue_act in RESPONSE_ACTIONS]
+    response_count = sum(1 for i, t in enumerate(turns) if t.speaker == DialogueSpeaker.agent and t.dialogue_act in RESPONSE_ACTIONS and any(x.speaker == DialogueSpeaker.patient for x in turns[i + 1:]))
     response = round(100 * response_count / len(response_opportunities), 1) if response_opportunities else 0.0
     relevance = round(100 * len(relevant) / len(patient), 1) if patient else 0.0
     penalties = config_value("scenario_dialogue_independence_penalties")
@@ -119,7 +120,7 @@ def _build(dialogue: ScenarioDialogueSession, turns: list[ScenarioDialogueTurn],
                     if key in patch: setattr(dimension, key, patch[key])
                 if "evidence_snapshot" in patch and isinstance(patch["evidence_snapshot"], dict): dimension.evidence_snapshot.update(patch["evidence_snapshot"])
         result_status, profile_eligible, ineligibility = "review_required", False, ["clinician_revision_requires_future_reassessment"]
-    provenance = {"source_snapshot": {"dialogue_session_id": str(dialogue.id), "session_task_id": str(dialogue.session_task_id), "training_session_id": str(dialogue.training_session_id), "template_contract": contract, "evaluation_role": dialogue.evaluation_role, "dialogue_status": dialogue.status.value, "turns": [_turn_snapshot(t) for t in turns]}, "providers": {"semantic_schema": "scenario-semantic-evidence-v1", "authored_reply_fallback_used": any(t.speaker == DialogueSpeaker.agent and t.llm_provider is None for t in turns), "asr_providers": sorted({t.asr_provider or "not_recorded" for t in patient})}, "contract_version": dialogue.contract_version}
+    provenance = {"source_snapshot": {"dialogue_session_id": str(dialogue.id), "session_task_id": str(dialogue.session_task_id), "training_session_id": str(dialogue.training_session_id), "template_contract": contract, "evaluation_role": dialogue.evaluation_role, "dialogue_status": dialogue.status.value, "turns": [_turn_snapshot(t) for t in turns]}, "providers": {"semantic_schema": "scenario-semantic-evidence-v3", "authored_reply_fallback_used": any(t.speaker == DialogueSpeaker.agent and t.llm_provider is None for t in turns), "asr_providers": sorted({t.asr_provider or "not_recorded" for t in patient})}, "contract_version": dialogue.contract_version}
     fingerprint_source = {"algorithm_version": ALGORITHM_VERSION, "contract": contract, "contract_version": dialogue.contract_version, "turns": provenance["source_snapshot"]["turns"], "review_override": review_override or {}}
     return EvaluationRunCreate(patient_profile_id=_profile_id(dialogue), domain=DOMAIN, source_type="dialogue_session", source_id=dialogue.id, algorithm_version=ALGORITHM_VERSION, input_fingerprint=_fingerprint(fingerprint_source), config_snapshot={"functional_dimensions": ["goal_achievement", "information_sufficiency", "response_ability", "relevance_and_organization", "independence", "repair_ability"], "goal_scores": config_entry("scenario_dialogue_goal_scores"), "independence_penalties": config_entry("scenario_dialogue_independence_penalties"), "evidence_confidence_min": config_entry("scenario_dialogue_evidence_confidence_min")}, input_provenance=InputProvenanceSnapshot(**provenance), quality_gate=QualityGateSnapshot(eligible=formal, reasons=quality_reasons, algorithm_version=ALGORITHM_VERSION, measurement_quality="semantic_evidence"), result_status=result_status, profile_eligibility=profile_eligible, profile_ineligibility_reasons=ineligibility, limitations=quality_reasons, dimensions=dimensions)
 
