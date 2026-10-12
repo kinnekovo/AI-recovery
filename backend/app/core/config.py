@@ -70,6 +70,12 @@ class Settings:
     aliyun_avatar_auto_provision: bool
     aliyun_avatar_instance_id: str | None
     aliyun_avatar_endpoint: str
+    tencent_avatar_enabled: bool
+    tencent_avatar_sign: str | None
+    tencent_avatar_asset_virtualman_key: str | None
+    tencent_avatar_protocol: str
+    tencent_avatar_driver_type: int
+    tencent_avatar_user_id_prefix: str
     llm_feedback_provider: str
     llm_feedback_api_key: str | None
     llm_feedback_base_url: str | None
@@ -154,6 +160,12 @@ class Settings:
         self.aliyun_avatar_auto_provision = os.getenv("ALIYUN_AVATAR_AUTO_PROVISION", "false").strip().lower() in {"1", "true", "yes"}
         self.aliyun_avatar_instance_id = os.getenv("ALIYUN_AVATAR_INSTANCE_ID") or None
         self.aliyun_avatar_endpoint = os.getenv("ALIYUN_AVATAR_ENDPOINT", "lingmou.cn-beijing.aliyuncs.com").strip()
+        self.tencent_avatar_enabled = os.getenv("TENCENT_AVATAR_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+        self.tencent_avatar_sign = os.getenv("TENCENT_AVATAR_SIGN") or None
+        self.tencent_avatar_asset_virtualman_key = os.getenv("TENCENT_AVATAR_ASSET_VIRTUALMAN_KEY") or None
+        self.tencent_avatar_protocol = os.getenv("TENCENT_AVATAR_PROTOCOL", "webrtc").strip().lower() or "webrtc"
+        self.tencent_avatar_driver_type = int(os.getenv("TENCENT_AVATAR_DRIVER_TYPE", "3"))
+        self.tencent_avatar_user_id_prefix = os.getenv("TENCENT_AVATAR_USER_ID_PREFIX", "speech-rehab-").strip()
         self.llm_feedback_provider = os.getenv("LLM_FEEDBACK_PROVIDER", "mock").strip().lower() or "mock"
         self.llm_feedback_api_key = os.getenv("LLM_FEEDBACK_API_KEY")
         self.llm_feedback_base_url = os.getenv("LLM_FEEDBACK_BASE_URL")

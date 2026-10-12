@@ -1,4 +1,4 @@
-export type AvatarProviderKind = 'static_2d' | 'live2d' | 'three_d' | 'external_streaming'
+export type AvatarProviderKind = 'static_2d' | 'live2d' | 'three_d' | 'external_streaming' | 'tencent_cloud'
 
 export type AvatarRuntimeState = 'idle' | 'loading_speech' | 'speaking' | 'listening' | 'thinking' | 'encouraging' | 'error'
 export type AvatarSpeechSource = 'none' | 'cloud_audio' | 'browser_tts' | 'silent'

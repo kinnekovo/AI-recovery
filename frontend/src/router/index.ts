@@ -40,6 +40,7 @@ const router = createRouter({
         { path: 'agent/create', component: AgentCreateView, meta: { role: 'patient' } },
         { path: 'agent/list', component: AgentListView, meta: { role: 'patient' } },
         { path: 'training', component: productV2Enabled ? () => import('@/features/training-session/TrainingHubV2.vue') : TrainingView, meta: { role: 'patient' } },
+        { path: 'training/extra', component: () => import('@/features/training-session/ExtraPracticeV2.vue'), meta: { role: 'patient', v2Only: true, legacyFallback: '/legacy/training' } },
         { path: 'training/session/:sessionId', component: () => import('@/features/training-session/TrainingSessionV2.vue'), meta: { role: 'patient', focusMode: true, v2Only: true, legacyFallback: '/legacy/training' } },
         { path: 'training/session/:sessionId/summary', component: () => import('@/features/training-session/SessionSummaryV2.vue'), meta: { role: 'patient', v2Only: true, legacyFallback: '/legacy/training' } },
         { path: 'training/:type(repeat|scenario)', component: TrainingSessionView, meta: { role: 'patient' } },

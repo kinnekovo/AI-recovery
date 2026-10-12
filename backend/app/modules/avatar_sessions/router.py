@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.response import api_success
@@ -17,8 +17,10 @@ router = APIRouter(prefix="/avatar/sessions", tags=["avatar-sessions"])
 @router.post("")
 def create(payload: AvatarSessionCreate, current_user: User = Depends(require_patient), db: Session = Depends(get_db)):
     agent = get_owned_agent(db, current_user, payload.agent_id)
-    lease, result = service.create_session(db, current_user, agent)
-    return api_success({"id": str(lease.id), "session_id": result["session_id"], "rtc_params": result["rtc_params"]})
+    if payload.provider not in {"aliyun", "tencent"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="不支持的数字人服务商。")
+    lease, result = service.create_session(db, current_user, agent, provider=payload.provider)
+    return api_success({"id": str(lease.id), **result})
 
 
 @router.delete("/{session_id}")

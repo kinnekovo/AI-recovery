@@ -17,13 +17,10 @@
         </div>
         <button class="v2-button primary" :disabled="!home.active_training_plan || starting" @click="start('formal')">{{ starting ? '正在准备…' : formalLabel }}</button>
       </section>
-      <section class="v2-section-block extra-practice-panel">
-        <div class="v2-section-heading"><div><p class="v2-section-label">额外练习</p><h2>自己选一项继续练习</h2><p>额外练习会单独记录，不会改变今日练习完成情况。</p></div><button class="v2-button secondary" :disabled="starting" @click="refreshPool">换一批</button></div>
-        <div v-if="home.extra_practice" class="extra-practice-groups">
-          <div><h3>跟读训练 <small>可选 {{ home.extra_practice.repeat.length }} 条</small></h3><div class="extra-practice-grid"><button v-for="item in home.extra_practice.repeat" :key="item.id" class="extra-practice-card" :disabled="starting" @click="start('extra_practice', [item.id])"><span>{{ difficultyLabel(item.difficulty) }}</span><strong>{{ item.target }}</strong><small>{{ item.display_reason }}</small></button></div></div>
-          <div><h3>场景训练 <small>可选 {{ home.extra_practice.scenario.length }} 个</small></h3><div class="extra-practice-grid"><button v-for="item in home.extra_practice.scenario" :key="item.id" class="extra-practice-card" :disabled="starting" @click="start('extra_practice', [item.id])"><span>场景表达</span><strong>{{ item.title }}</strong><small>{{ item.display_reason }}</small></button></div></div>
-        </div>
-        <p v-else class="v2-quiet-copy">额外练习候选正在准备中。</p>
+      <section class="v2-section-block extra-practice-entry">
+        <div><p class="v2-section-label">额外练习</p><h2>再练一组</h2><p>系统会组合跟读和场景练习。额外练习单独记录，不改变今日练习的完成情况。</p></div>
+        <RouterLink v-if="home.active_training_plan" class="v2-button secondary" to="/training/extra">进入额外训练</RouterLink>
+        <button v-else class="v2-button secondary" disabled>等待训练方案</button>
       </section>
     </template>
   </section>
@@ -37,9 +34,7 @@ const router = useRouter(); const home = ref<PatientHomeV2|null>(null); const lo
 const formalLabel=computed(()=>home.value?.state==='completed'?'查看今天总结':home.value?.state==='in_progress'?'继续正式训练':'开始正式训练')
 const formalDescription=computed(()=>!home.value?.active_training_plan?'当前没有有效训练方案。':home.value.state==='completed'?'今天的练习已经完成。':`系统根据今天的安排准备了一小组练习，完成大约需要 ${home.value.estimated_duration||10} 分钟。`)
 async function load(){loading.value=true;error.value='';try{home.value=await v2Api.patientHome()}catch(err){error.value=toUserMessage(err,'请稍后再试。')}finally{loading.value=false}}
-async function start(kind:'formal'|'extra_practice', taskIds:string[]=[]){if(kind==='formal'&&home.value?.state==='completed'&&home.value.today_session){await router.push(`/training/session/${home.value.today_session.id}/summary`);return}starting.value=true;try{const session=await v2Api.startOrResume(kind, taskIds);await router.push(`/training/session/${session.id}`)}catch(err){error.value=toUserMessage(err,'暂时无法开始训练。')}finally{starting.value=false}}
-async function refreshPool(){starting.value=true;try{home.value=home.value?{...home.value,extra_practice:await v2Api.extraPracticePool(true)}:home.value}catch(err){error.value=toUserMessage(err,'暂时无法换一批练习。')}finally{starting.value=false}}
-function difficultyLabel(level:string){return level==='L1'||level==='L2'?'初级':level==='L3'?'中级':'高级'}
+async function start(kind:'formal'){if(home.value?.state==='completed'&&home.value.today_session){await router.push(`/training/session/${home.value.today_session.id}/summary`);return}starting.value=true;try{const session=await v2Api.startOrResume(kind);await router.push(`/training/session/${session.id}`)}catch(err){error.value=toUserMessage(err,'暂时无法开始训练。')}finally{starting.value=false}}
 onMounted(load)
 </script>
 

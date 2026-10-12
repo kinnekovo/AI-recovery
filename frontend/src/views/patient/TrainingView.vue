@@ -75,7 +75,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { AliyunCloudAvatarProvider } from '@/avatar/providers/aliyunCloud'
+import { TencentCloudAvatarProvider } from '@/avatar/providers/tencentCloud'
 import AvatarCoachPanel from '@/components/avatar/AvatarCoachPanel.vue'
 import { trainingApi } from '@/api/training'
 import { useAvatarRuntime } from '@/composables/useAvatarRuntime'
@@ -94,7 +94,7 @@ const isTodayRecommendationCompleted = computed(() => Boolean(today.value?.recom
 const currentAgent = computed(() =>
   agentStore.agents.find((agent) => agent.id === auth.me?.patient_profile?.current_agent_id) || agentStore.agents[0]
 )
-const cloudProvider = new AliyunCloudAvatarProvider('training-avatar-cloud')
+const cloudProvider = new TencentCloudAvatarProvider('training-avatar-cloud')
 const avatar = useAvatarRuntime(cloudProvider)
 
 watch(currentAgent, (agent) => cloudProvider.setAgent(agent?.id || null), { immediate: true })

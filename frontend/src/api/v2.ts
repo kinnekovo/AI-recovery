@@ -125,6 +125,8 @@ export interface ExtraPracticePoolV2 {
   local_date: string
   version_number: number
   policy_version: string
+  session_items: ExtraPracticeItemV2[]
+  estimated_duration_minutes: number
   repeat: ExtraPracticeItemV2[]
   scenario: ExtraPracticeItemV2[]
 }
@@ -231,7 +233,7 @@ export const v2Api = {
   progress: () => request<ProgressV2>(http.get('/v2/patient/progress')),
   patientSettings: () => request<{ timezone: string }>(http.get('/v2/patient/settings')),
   updatePatientSettings: (timezone: string) => request<{ timezone: string }>(http.patch('/v2/patient/settings', { timezone })),
-  startOrResume: (session_kind: 'formal' | 'extra_practice' = 'formal', task_template_ids: string[] = []) => request<TrainingSessionV2>(http.post('/v2/patient/training-sessions/start-or-resume', { session_kind, task_template_ids })),
+  startOrResume: (session_kind: 'formal' | 'extra_practice' = 'formal', extra_pool_id?: string) => request<TrainingSessionV2>(http.post('/v2/patient/training-sessions/start-or-resume', { session_kind, extra_pool_id })),
   extraPracticePool: (refresh = false) => request<ExtraPracticePoolV2>(http.get(`/v2/patient/practice/extra-pool${refresh ? '?refresh=true' : ''}`)),
   session: (id: string) => request<TrainingSessionV2>(http.get(`/v2/patient/training-sessions/${id}`)),
   sessionCommand: (id: string, command: string, reason?: string) => request<TrainingSessionV2>(http.post(`/v2/patient/training-sessions/${id}/${command}`, { reason: reason || null })),

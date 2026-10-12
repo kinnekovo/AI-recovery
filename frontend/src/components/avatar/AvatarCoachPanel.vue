@@ -2,16 +2,13 @@
   <section class="avatar-coach-panel" :class="[`state-${snapshot.state}`, { compact, immersive }]">
     <div class="avatar-stage" aria-hidden="true">
       <div class="avatar-presence-ring"></div>
-      <video
-        v-show="snapshot.provider === 'external_streaming'"
+      <div
+        v-show="isStreamingProvider"
         :id="cloudContainerId"
         class="avatar-video avatar-cloud-video"
-        autoplay
-        :muted="false"
-        playsinline
-      ></video>
+      ></div>
       <video
-        v-if="snapshot.videoUrl && snapshot.provider !== 'external_streaming'"
+        v-if="snapshot.videoUrl && !isStreamingProvider"
         class="avatar-video"
         :src="snapshot.videoUrl"
         autoplay
@@ -116,10 +113,12 @@ function validAnchor(anchor: PortraitAnimationConfig['mouth'] | undefined): anch
 }
 const providerLabel = computed(() => ({
   static_2d: '2.5D 动态陪练',
-  external_streaming: '阿里云实时数字人',
+  external_streaming: '外部实时数字人',
+  tencent_cloud: '腾讯云实时数字人',
   live2d: 'Live2D 陪练',
   three_d: '3D 陪练'
 }[props.snapshot.provider]))
+const isStreamingProvider = computed(() => props.snapshot.provider === 'external_streaming' || props.snapshot.provider === 'tencent_cloud')
 const capabilityLabel = computed(() => {
   if (!props.snapshot.canSpeak) return '文字引导'
   const labels = {

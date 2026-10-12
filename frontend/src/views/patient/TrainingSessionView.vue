@@ -89,7 +89,7 @@ import { scenarioDialoguesApi } from '@/api/scenarioDialogues'
 import { trainingApi } from '@/api/training'
 import type { ScenarioDialogue } from '@/types/api'
 import { useAvatarRuntime } from '@/composables/useAvatarRuntime'
-import { AliyunCloudAvatarProvider } from '@/avatar/providers/aliyunCloud'
+import { TencentCloudAvatarProvider } from '@/avatar/providers/tencentCloud'
 import { useAgentStore } from '@/stores/agent'
 import { useTrainingStore } from '@/stores/training'
 import { toUserMessage } from '@/utils/errors'
@@ -120,7 +120,7 @@ const pendingAttemptId = ref('')
 const currentAgent = computed(() =>
   agentStore.agents.find((agent) => agent.id === store.currentSession?.agent_id) || agentStore.agents[0]
 )
-const cloudProvider = new AliyunCloudAvatarProvider('training-session-avatar-cloud')
+const cloudProvider = new TencentCloudAvatarProvider('training-session-avatar-cloud')
 const avatar = useAvatarRuntime(cloudProvider)
 
 watch(currentAgent, (agent) => cloudProvider.setAgent(agent?.id || null), { immediate: true })

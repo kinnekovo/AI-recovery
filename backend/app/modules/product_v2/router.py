@@ -60,7 +60,7 @@ def update_patient_settings(payload: PatientSettingsUpdate, current_user: User =
 
 @router.post("/patient/training-sessions/start-or-resume")
 def start_or_resume(payload: SessionStart, current_user: User = Depends(require_patient), db: Session = Depends(get_db)):
-    return api_success(service.start_or_resume(db, current_user, payload.session_kind, payload.training_plan_version_id, payload.task_template_ids))
+    return api_success(service.start_or_resume(db, current_user, payload.session_kind, payload.training_plan_version_id, payload.extra_pool_id))
 
 
 @router.get("/patient/practice/extra-pool")

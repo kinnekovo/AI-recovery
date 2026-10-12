@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.integrations.aliyun_avatar.provider import AliyunAvatarError, close_chat_session, create_chat_session, is_configured, provision_no_train_avatar
+from app.integrations.tencent_avatar.provider import TencentAvatarError, create_browser_session, is_configured as tencent_is_configured
 from app.modules.agents.model import Agent, AliyunAvatarStatus
 from app.modules.avatar_sessions.model import AvatarSession, AvatarSessionStatus
 from app.modules.consent.service import require_active_consent
@@ -63,7 +64,9 @@ def sync_agent(db: Session, user: User, agent: Agent) -> Agent:
     return ensure_agent_provisioned(db, user, agent, explicit_retry=True)
 
 
-def create_session(db: Session, user: User, agent: Agent) -> tuple[AvatarSession, dict[str, object]]:
+def create_session(db: Session, user: User, agent: Agent, *, provider: str = "aliyun") -> tuple[AvatarSession, dict[str, object]]:
+    if provider == "tencent":
+        return create_tencent_session(db, user, agent)
     if not provider_enabled():
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="阿里云数字人尚未启用，当前将继续使用本地形象。")
     agent = ensure_agent_provisioned(db, user, agent)
@@ -89,6 +92,43 @@ def create_session(db: Session, user: User, agent: Agent) -> tuple[AvatarSession
         db.commit()
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.message) from exc
     lease.provider_session_id = str(result["session_id"])
+    lease.status = AvatarSessionStatus.active
+    db.commit()
+    db.refresh(lease)
+    return lease, result
+
+
+def create_tencent_session(db: Session, user: User, agent: Agent) -> tuple[AvatarSession, dict[str, object]]:
+    if not tencent_is_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="腾讯云数字人尚未启用；请配置 TENCENT_AVATAR_ENABLED、TENCENT_AVATAR_SIGN 和 TENCENT_AVATAR_ASSET_VIRTUALMAN_KEY。",
+        )
+    # A Tencent asset is cloud-rendered and represents the patient's image;
+    # keep the existing consent gate before returning a browser sign.
+    require_active_consent(db, user, agent.id, "image")
+    settings = get_settings()
+    instance_id = f"tencent:{settings.tencent_avatar_asset_virtualman_key}"
+    active = db.scalar(
+        select(AvatarSession).where(
+            AvatarSession.instance_id == instance_id,
+            AvatarSession.status.in_([AvatarSessionStatus.opening, AvatarSessionStatus.active]),
+        )
+    )
+    if active:
+        if active.owner_user_id == user.id:
+            close_session(db, user, active)
+        else:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="数字人正在被其他会话使用，请稍后再试。")
+    lease = AvatarSession(owner_user_id=user.id, agent_id=agent.id, instance_id=instance_id, status=AvatarSessionStatus.opening)
+    db.add(lease)
+    db.commit()
+    try:
+        result = create_browser_session(user_id=str(user.id))
+    except TencentAvatarError as exc:
+        lease.status = AvatarSessionStatus.failed
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.message) from exc
     lease.status = AvatarSessionStatus.active
     db.commit()
     db.refresh(lease)

@@ -50,7 +50,7 @@ class TrainingPlanDraftCreate(BaseModel):
 class SessionStart(BaseModel):
     session_kind: Literal["formal", "extra_practice"] = "formal"
     training_plan_version_id: UUID | None = None
-    task_template_ids: list[UUID] = Field(default_factory=list, max_length=13)
+    extra_pool_id: UUID | None = None
 
 
 class ExtraPracticeRefresh(BaseModel):

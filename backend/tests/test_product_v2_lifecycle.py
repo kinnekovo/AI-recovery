@@ -201,9 +201,20 @@ def test_daily_plan_is_stable_and_extra_pool_is_separate(product_db):
     assert first_home["daily_plan"]["estimated_duration_seconds"] <= 600
     assert len(first_home["extra_practice"]["repeat"]) == 10
     assert len(first_home["extra_practice"]["scenario"]) == 3
-    extra = service.start_or_resume(db, patient, "extra_practice", None, [repeat.id])
+    initial_pool = first_home["extra_practice"]
+    assert len(initial_pool["session_items"]) == 4
+    assert [item["exercise_type"] for item in initial_pool["session_items"]] == ["repeat", "repeat", "repeat", "scenario"]
+    assert service.patient_extra_practice_pool(db, patient)["session_items"] == initial_pool["session_items"]
+    refreshed_pool = service.patient_extra_practice_pool(db, patient, force=True)
+    assert refreshed_pool["id"] != initial_pool["id"]
+    assert [item["id"] for item in refreshed_pool["session_items"]] != [item["id"] for item in initial_pool["session_items"]]
+    with pytest.raises(HTTPException) as exc:
+        service.start_or_resume(db, patient, "extra_practice", None, UUID(initial_pool["id"]))
+    assert exc.value.status_code == 409
+    extra = service.start_or_resume(db, patient, "extra_practice", None, UUID(refreshed_pool["id"]))
     assert extra["session_kind"] == "extra_practice"
-    assert len(extra["exercises"]) == 1
+    tasks = db.scalars(select(SessionTask).where(SessionTask.training_session_id == UUID(extra["id"])).order_by(SessionTask.order_index)).all()
+    assert [str(task.task_template_id) for task in tasks] == [item["id"] for item in refreshed_pool["session_items"]]
 
 
 def test_attention_dedup_resolution_and_assignment_authorization(product_db):

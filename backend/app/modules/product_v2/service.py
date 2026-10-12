@@ -566,33 +566,49 @@ def ensure_daily_plan(db: Session, profile: PatientProfile, plan: TrainingPlanVe
     return _daily_plan_row(db, profile, plan)
 
 
+def _extra_session_items(pool: ExtraPracticePool) -> list[ExtraPracticePoolItem]:
+    """Choose a short, stable set from the day's larger candidate pool."""
+    repeat = [item for item in pool.items if item.exercise_type == "repeat" and item.task_template and item.task_template.is_active]
+    scenario = [item for item in pool.items if item.exercise_type == "scenario" and item.task_template and item.task_template.is_active]
+    offset = pool.version_number - 1
+    repeat_start = (offset * 3) % len(repeat) if repeat else 0
+    chosen_repeat = [repeat[(repeat_start + index) % len(repeat)] for index in range(min(3, len(repeat)))]
+    chosen_scenario = [scenario[offset % len(scenario)]] if scenario else []
+    return chosen_repeat + chosen_scenario
+
+
 def _extra_pool_dict(pool: ExtraPracticePool | None) -> dict | None:
     if not pool:
         return None
     groups = {"repeat": [], "scenario": []}
+    by_id = {}
     for item in pool.items:
         template = item.task_template
         if not template:
             continue
-        groups.setdefault(item.exercise_type, []).append(
-            {
-                "id": str(template.id),
-                "title": template.title,
-                "instruction": template.instruction,
-                "target": template.target_text,
-                "scene_prompt": template.scene_prompt,
-                "exercise_type": item.exercise_type,
-                "difficulty": item.difficulty_snapshot or template.content_level,
-                "selection_source": item.selection_source,
-                "display_reason": item.display_reason,
-                "tags": template.tags,
-            }
-        )
+        data = {
+            "id": str(template.id),
+            "title": template.title,
+            "instruction": template.instruction,
+            "target": template.target_text,
+            "scene_prompt": template.scene_prompt,
+            "exercise_type": item.exercise_type,
+            "difficulty": item.difficulty_snapshot or template.content_level,
+            "selection_source": item.selection_source,
+            "display_reason": item.display_reason,
+            "tags": template.tags,
+        }
+        groups.setdefault(item.exercise_type, []).append(data)
+        by_id[item.task_template_id] = data
+    chosen = _extra_session_items(pool)
+    session_items = [by_id[item.task_template_id] for item in chosen if item.task_template_id in by_id]
     return {
         "id": str(pool.id),
         "local_date": pool.local_date.isoformat(),
         "version_number": pool.version_number,
         "policy_version": pool.policy_version,
+        "session_items": session_items,
+        "estimated_duration_minutes": round(sum(_template_duration_seconds(item.task_template) for item in chosen) / 60, 1),
         "repeat": groups.get("repeat", []),
         "scenario": groups.get("scenario", []),
     }
@@ -718,7 +734,7 @@ def update_therapist_daily_plan(db: Session, actor: User, patient_user_id: UUID,
     return _daily_plan_dict(_daily_plan_row(db, profile, plan))
 
 
-def start_or_resume(db: Session, user: User, session_kind: str = "formal", requested_plan_id: UUID | None = None, task_template_ids: list[UUID] | None = None):
+def start_or_resume(db: Session, user: User, session_kind: str = "formal", requested_plan_id: UUID | None = None, extra_pool_id: UUID | None = None):
     profile = get_patient_profile(db, user)
     # Keep maintained scenario contracts current for newly snapshotted Product
     # v2 sessions. Existing dialogue sessions retain their own historical
@@ -770,23 +786,9 @@ def start_or_resume(db: Session, user: User, session_kind: str = "formal", reque
         ]
     else:
         pool = ensure_extra_pool(db, profile)
-        requested = {UUID(str(item)) for item in (task_template_ids or [])}
-        pool_items = [item for item in pool.items if item.task_template and item.task_template.is_active]
-        if requested:
-            pool_ids = {item.task_template_id for item in pool_items}
-            unknown = requested - pool_ids
-            if unknown:
-                # A stale client may hold a previous pool item. Accept it when
-                # the template is still active and safe, then snapshot it into
-                # this extra session without changing today's pool.
-                from app.modules.training.service import has_functional_scenario_contract, is_generalization_probe
-                stale = [item for item in db.scalars(select(TaskTemplate).where(TaskTemplate.id.in_(unknown), TaskTemplate.is_active.is_(True))) if not is_generalization_probe(item) and has_functional_scenario_contract(item)]
-                if len(stale) != len(unknown):
-                    raise HTTPException(status_code=422, detail="所选额外练习不在当前候选池中")
-                pool_items.extend(ExtraPracticePoolItem(pool_id=pool.id, task_template_id=item.id, exercise_type=_enum_value(item.task_type), order_index=len(pool_items), selection_source="stale_pool", display_reason="已保存的候选练习", difficulty_snapshot=item.content_level, task_template=item) for item in stale)
-            pool_items = [item for item in pool_items if item.task_template_id in requested]
-        else:
-            pool_items = pool_items[:3]
+        if extra_pool_id and pool.id != extra_pool_id:
+            raise HTTPException(status_code=409, detail="额外练习组合已更新，请刷新后再开始")
+        pool_items = _extra_session_items(pool)
         selected = [(item.task_template, index, item.difficulty_snapshot, {}, item.exercise_type, None) for index, item in enumerate(pool_items)]
     if not selected:
         raise HTTPException(status_code=409, detail="当前没有可执行练习")

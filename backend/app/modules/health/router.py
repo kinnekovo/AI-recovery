@@ -79,6 +79,11 @@ def provider_statuses(settings) -> dict[str, dict[str, str | list[str] | bool]]:
             "aliyun" if getattr(settings, "aliyun_avatar_enabled", False) else "disabled",
             aliyun_avatar_missing_env(settings) if getattr(settings, "aliyun_avatar_enabled", False) else [],
         ),
+        "tencent_avatar": provider_status(
+            "tencent_avatar",
+            "tencent" if getattr(settings, "tencent_avatar_enabled", False) else "disabled",
+            tencent_avatar_missing_env(settings) if getattr(settings, "tencent_avatar_enabled", False) else [],
+        ),
         "llm_feedback": provider_status(
             "llm_feedback",
             settings.llm_feedback_provider,
@@ -184,6 +189,16 @@ def aliyun_avatar_missing_env(settings) -> list[str]:
     # be environment variables, a local profile, or a RAM role. Only the paid
     # RTC instance is an application-level mandatory setting.
     return required_missing(settings, {"ALIYUN_AVATAR_INSTANCE_ID": getattr(settings, "aliyun_avatar_instance_id", None)})
+
+
+def tencent_avatar_missing_env(settings) -> list[str]:
+    return required_missing(
+        settings,
+        {
+            "TENCENT_AVATAR_SIGN": getattr(settings, "tencent_avatar_sign", None),
+            "TENCENT_AVATAR_ASSET_VIRTUALMAN_KEY": getattr(settings, "tencent_avatar_asset_virtualman_key", None),
+        },
+    )
 
 
 def acoustic_missing_env(settings) -> list[str]:

@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 class AvatarSessionCreate(BaseModel):
     agent_id: UUID
+    provider: str = "aliyun"
 
 
 class AvatarSessionRead(BaseModel):
