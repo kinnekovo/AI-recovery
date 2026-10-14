@@ -175,6 +175,10 @@ export interface AttentionItemV2 {
   priority: string
   summary: string
   status: string
+  assigned_to_user_id?: string | null
+  assigned_to?: string | null
+  acknowledged_at?: string | null
+  evidence_count?: number
   created_at: string
   resolved_at: string | null
 }

@@ -18,6 +18,11 @@
       </div>
     </div>
 
+    <section class="legacy-review-notice" aria-label="统一待复核入口">
+      <div><strong>复核入口已统一</strong><p>自动测量确认、原音核对与阶段决定请从待复核队列进入；此处保留历史评估记录查询。</p></div>
+      <RouterLink class="v2-button primary" to="/therapist/reviews">打开待复核队列</RouterLink>
+    </section>
+
     <p v-if="loading" class="success-text">正在加载患者与评估记录。</p>
     <p v-if="pageError" class="error-text">{{ pageError }}</p>
 

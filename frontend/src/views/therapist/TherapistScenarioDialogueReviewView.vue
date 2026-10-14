@@ -14,13 +14,9 @@
           <AudioPlayback v-if="turn.audio_file_id" :src="`/api/files/${turn.audio_file_id}/content`" compact />
         </article>
       </section>
-      <section class="form-panel">
-        <h2>修正自动证据</h2>
-        <p>只填写确有原话或音频依据的更正；保存后会留下复核人和时间。</p>
-        <label>证据修正（JSON）<textarea v-model="overridesText" aria-describedby="override-help" /></label>
-        <small id="override-help">示例：{&quot;request&quot;: {&quot;status&quot;: &quot;supported&quot;, &quot;turn_index&quot;: 3}}</small>
-        <label>治疗师备注<textarea v-model="notes" placeholder="记录漏识别、误识别或下一轮训练重点。" /></label>
-        <AppButton variant="primary" :loading="saving" @click="save">保存复核</AppButton>
+      <section class="legacy-review-notice" aria-label="旧复核入口迁移提示">
+        <div><strong>此处仅保留历史对话查看</strong><p>人工确认、证据修正与阶段决定已统一到待复核工作流，不再通过手写 JSON 修改旧评估记录。</p></div>
+        <RouterLink class="v2-button primary" to="/therapist/reviews">打开待复核队列</RouterLink>
       </section>
     </template>
   </section>
@@ -29,13 +25,11 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import AppButton from '@/components/common/AppButton.vue'
 import AudioPlayback from '@/components/common/AudioPlayback.vue'
 import { therapistApi } from '@/api/therapist'
 import type { TherapistScenarioDialogue } from '@/types/api'
 import { toUserMessage } from '@/utils/errors'
 
-const route = useRoute(); const dialogue = ref<TherapistScenarioDialogue | null>(null); const loading = ref(true); const saving = ref(false); const error = ref(''); const notes = ref(''); const overridesText = ref('{}')
+const route = useRoute(); const dialogue = ref<TherapistScenarioDialogue | null>(null); const loading = ref(true); const error = ref('')
 onMounted(async () => { try { dialogue.value = await therapistApi.scenarioDialogue(String(route.params.dialogueId)) } catch (err) { error.value = toUserMessage(err, '无法读取场景对话') } finally { loading.value = false } })
-async function save() { try { const evidence_overrides = JSON.parse(overridesText.value); saving.value = true; await therapistApi.saveScenarioDialogueReview(String(route.params.dialogueId), { evidence_overrides, review_notes: notes.value || null, review_status: 'confirmed' }) } catch (err) { error.value = err instanceof SyntaxError ? '证据修正必须是有效的 JSON。' : toUserMessage(err, '复核保存失败') } finally { saving.value = false } }
 </script>

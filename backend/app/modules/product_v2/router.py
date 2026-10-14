@@ -11,6 +11,7 @@ from app.modules.product_v2 import service
 from app.modules.product_v2.schema import (
     AttemptCreateV2,
     AttentionResolve,
+    AttentionStageReviewCreate,
     DailyPlanUpdate,
     DecisionCreate,
     FormalAssessmentCreate,
@@ -20,6 +21,9 @@ from app.modules.product_v2.schema import (
     SessionStart,
     StageReviewCreate,
     TrainingPlanDraftCreate,
+    TrainingPlanDraftUpdate,
+    TrainingPlanAbandon,
+    TrainingPlanPublish,
 )
 from app.modules.users.model import User
 from app.modules.users.service import require_patient, require_therapist
@@ -150,9 +154,29 @@ def create_training_plan(patient_user_id: UUID, payload: TrainingPlanDraftCreate
     return api_success(service.create_plan_draft(db, current_user, patient_user_id, payload))
 
 
+@router.get("/therapist/training-plans/{plan_id}")
+def get_training_plan(plan_id: UUID, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    return api_success(service.training_plan_detail(db, current_user, plan_id))
+
+
+@router.patch("/therapist/training-plans/{plan_id}")
+def update_training_plan(plan_id: UUID, payload: TrainingPlanDraftUpdate, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    return api_success(service.update_plan_draft(db, current_user, plan_id, payload))
+
+
+@router.get("/therapist/training-plans/{plan_id}/diff")
+def training_plan_diff(plan_id: UUID, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    return api_success(service.plan_diff(db, current_user, plan_id))
+
+
+@router.post("/therapist/training-plans/{plan_id}/abandon")
+def abandon_training_plan(plan_id: UUID, payload: TrainingPlanAbandon, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    return api_success(service.abandon_plan(db, current_user, plan_id, payload.reason))
+
+
 @router.post("/therapist/patients/{patient_user_id}/training-plans/{plan_id}/publish")
-def publish_training_plan(patient_user_id: UUID, plan_id: UUID, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
-    return api_success(service.publish_plan(db, current_user, patient_user_id, plan_id))
+def publish_training_plan(patient_user_id: UUID, plan_id: UUID, payload: TrainingPlanPublish | None = None, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    return api_success(service.publish_plan(db, current_user, patient_user_id, plan_id, payload))
 
 
 @router.post("/therapist/attention-items/{item_id}/acknowledge")
@@ -162,7 +186,7 @@ def acknowledge_attention(item_id: UUID, current_user: User = Depends(require_th
 
 @router.post("/therapist/attention-items/{item_id}/resolve")
 def resolve_attention(item_id: UUID, payload: AttentionResolve, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
-    return api_success(service.set_attention_status(db, current_user, item_id, payload.status, payload.resolution_note))
+    return api_success(service.set_attention_status(db, current_user, item_id, payload.status, payload.resolution_note, payload.resolution_code))
 
 
 @router.post("/therapist/patients/{patient_user_id}/stage-reviews")
@@ -170,9 +194,19 @@ def create_stage_review(patient_user_id: UUID, payload: StageReviewCreate, curre
     return api_success(service.create_stage_review(db, current_user, patient_user_id, payload))
 
 
+@router.post("/therapist/attention-items/{item_id}/stage-review")
+def create_attention_stage_review(item_id: UUID, payload: AttentionStageReviewCreate, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    return api_success(service.create_stage_review_from_attention(db, current_user, item_id, payload))
+
+
 @router.get("/therapist/stage-reviews/{review_id}")
 def get_stage_review(review_id: UUID, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
     return api_success(service.stage_review_detail(db, current_user, review_id))
+
+
+@router.post("/therapist/stage-reviews/{review_id}/ready")
+def mark_stage_review_ready(review_id: UUID, current_user: User = Depends(require_therapist), db: Session = Depends(get_db)):
+    return api_success(service.mark_stage_review_ready(db, current_user, review_id))
 
 
 @router.post("/therapist/stage-reviews/{review_id}/decisions")

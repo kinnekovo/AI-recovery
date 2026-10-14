@@ -12,14 +12,15 @@ from sqlalchemy.orm import Session
 from app.core.algorithm_config import config_entry
 from app.core.observability import log_event
 from app.modules.attempts.model import Attempt
-from app.modules.evaluation_runs.model import EvaluationRun
+from app.modules.evaluation_runs.model import EvaluationReviewRevision, EvaluationRun
 from app.modules.evaluation_runs.schema import (
     EvaluationDimensionResultCreate,
     EvaluationRunCreate,
     InputProvenanceSnapshot,
     QualityGateSnapshot,
 )
-from app.modules.evaluation_runs.service import adopt_candidate_run, create_candidate_run, get_adopted_run, source_patient_profile_id
+from app.modules.evaluation_runs.service import adopt_candidate_run, create_candidate_run, get_adopted_run, get_run, get_run_for_professional, source_patient_profile_id
+from app.modules.evaluation_runs.schema import EvaluationReviewRevisionCreate
 from app.modules.evaluations.evidence_gate import process_evidence_gate
 from app.modules.pronunciation.model import PronunciationAnalysisResult
 from app.modules.scoring.model import AttemptAnalysisResult, AttemptScore
@@ -71,7 +72,7 @@ def _shadow_dimension(pronunciation: PronunciationAnalysisResult | None) -> Eval
     )
 
 
-def build_repeat_v3_payload(db: Session, attempt: Attempt) -> EvaluationRunCreate:
+def build_repeat_v3_payload(db: Session, attempt: Attempt, review_override: dict | None = None) -> EvaluationRunCreate:
     analysis = db.scalar(select(AttemptAnalysisResult).where(AttemptAnalysisResult.attempt_id == attempt.id))
     task = db.get(SessionTask, attempt.session_task_id)
     template = db.get(TaskTemplate, task.task_template_id) if task else None
@@ -118,12 +119,29 @@ def build_repeat_v3_payload(db: Session, attempt: Attempt) -> EvaluationRunCreat
         ),
         _shadow_dimension(pronunciation),
     ]
-    config = {"algorithm": REPEAT_V3_VERSION, "engineering_reference": {key: config_entry(key) for key in ["repeat_loudness_reference", "speech_rate_reference", "articulation_rate_reference", "independence_prompt_penalties", "independence_help_penalty", "independence_latency_penalties"]}, "missing_dimension_policy": "unavailable_and_not_observed_are_not_zero", "overall_score": "not_created"}
+    if review_override:
+        for dimension in dimensions:
+            patch = review_override.get(dimension.dimension_code)
+            if not isinstance(patch, dict):
+                continue
+            if patch.get("status") == "unjudgeable":
+                dimension.status, dimension.value, dimension.level = "unavailable", None, "unjudgeable"
+            else:
+                for key in ("value", "level", "unit", "status"):
+                    if key in patch:
+                        setattr(dimension, key, patch[key])
+            if isinstance(patch.get("evidence_snapshot"), dict):
+                dimension.evidence_snapshot.update(patch["evidence_snapshot"])
+        result_status, profile_eligibility, ineligibility = "review_required", False, ["clinician_revision_requires_future_reassessment"]
+        limitations = [*limitations, "治疗师修订保留在独立人工复核版本中；不可直接晋升正式画像。"]
+    config = {"algorithm": REPEAT_V3_VERSION, "engineering_reference": {key: config_entry(key) for key in ["repeat_loudness_reference", "speech_rate_reference", "articulation_rate_reference", "independence_prompt_penalties", "independence_help_penalty", "independence_latency_penalties"]}, "missing_dimension_policy": "unavailable_and_not_observed_are_not_zero", "overall_score": "not_created", "manual_review_override": review_override or {}}
     provenance = InputProvenanceSnapshot(
         source_snapshot={"attempt_id": str(attempt.id), "audio_file_id": str(attempt.audio_file_id) if attempt.audio_file_id else None, "target_text_snapshot": template.target_text, "task_template_id": str(template.id), "task_type": template.task_type.value},
         providers={"asr": {"provider": semantic.get("asr_provider"), "requested_provider": semantic.get("requested_asr_provider"), "fallback_used": semantic.get("asr_fallback_used")}, "acoustic": {"provider": acoustic.get("provider"), "requested_provider": acoustic.get("requested_provider")}, "process": {"algorithm_version": details.get("provider_version")}, "pronunciation_shadow": {"provider": pronunciation.provider if pronunciation else None, "status": pronunciation.status if pronunciation else "not_observed"}},
         contract_version=(template.scoring_config or {}).get("version"), device_context={"calibration_status": "uncalibrated", "loudness_unit": gate.loudness_unit},
     )
+    if review_override:
+        provenance.source_snapshot["manual_review_override"] = review_override
     fingerprint = _fingerprint({"analysis": analysis.id if analysis else None, "semantic": semantic, "acoustic": acoustic, "pronunciation": pronunciation.id if pronunciation else None, "template": {"id": template.id, "target": template.target_text, "config": template.scoring_config}, "algorithm": REPEAT_V3_VERSION, "config": config})
     return EvaluationRunCreate(patient_profile_id=task.session.patient_profile_id, domain="repeat", source_type="attempt", source_id=attempt.id, algorithm_version=REPEAT_V3_VERSION, input_fingerprint=fingerprint, config_snapshot=config, input_provenance=provenance, quality_gate=QualityGateSnapshot(eligible=gate.eligible, reasons=list(gate.reasons), loudness_unit=gate.loudness_unit, algorithm_version=gate.algorithm_version, audio_quality=attempt.audio_quality, measurement_quality=details.get("quality_status")), result_status=result_status, profile_eligibility=profile_eligibility, profile_ineligibility_reasons=ineligibility, limitations=limitations, dimensions=dimensions)
 
@@ -156,3 +174,122 @@ def require_repeat_professional_access(db: Session, current_user: User, attempt_
     from app.modules.therapist.service import require_therapist_patient_access
 
     require_therapist_patient_access(db, current_user, profile.user_id)
+
+
+def review_or_recompute(db: Session, user: User, run_id: UUID, payload: EvaluationReviewRevisionCreate | None = None):
+    current = get_run(db, run_id)
+    if current.domain != "repeat":
+        raise HTTPException(status_code=409, detail="该评估不是跟读 V3 结果")
+    current_read = get_run_for_professional(db, user, run_id)
+    if payload is None:
+        attempt = db.get(Attempt, current.source_id)
+        if not attempt:
+            raise HTTPException(status_code=404, detail="跟读原始作答已不存在")
+        rebuilt = build_repeat_v3_payload(db, attempt)
+        candidate = db.scalar(select(EvaluationRun).where(EvaluationRun.source_type == "attempt", EvaluationRun.source_id == attempt.id, EvaluationRun.domain == "repeat", EvaluationRun.input_fingerprint == rebuilt.input_fingerprint))
+        if not candidate:
+            candidate = create_candidate_run(db, rebuilt)
+        adopted = candidate if candidate.adoption_status == "adopted" else adopt_candidate_run(db, candidate.id)
+        return adopted, None
+    key_source = {
+        "run_id": str(run_id),
+        "reviewer": str(user.id),
+        "action": payload.review_action if payload else "recompute",
+        "dimension": str(payload.dimension_result_id) if payload and payload.dimension_result_id else None,
+        "revised": payload.revised_value_snapshot if payload else {},
+        "evidence": payload.evidence_override if payload else {},
+        "reason": payload.reason if payload else None,
+    }
+    request_key = (payload.review_request_key if payload else None) or _fingerprint(key_source)
+    existing_revision = db.scalar(select(EvaluationReviewRevision).where(EvaluationReviewRevision.evaluation_run_id == run_id, EvaluationReviewRevision.review_request_key == request_key))
+    if existing_revision:
+        return (get_run(db, existing_revision.recomputed_run_id) if existing_revision.recomputed_run_id else current), existing_revision
+
+    target = None
+    if payload and payload.dimension_result_id:
+        target = next((item for item in current_read.dimension_results if item.id == payload.dimension_result_id), None)
+        if not target:
+            raise HTTPException(status_code=409, detail="复核维度不属于该评估运行")
+    if payload and payload.review_action in {"corrected", "unjudgeable"} and not target:
+        raise HTTPException(status_code=422, detail="修正或标记无法判断时必须选择一个评估维度")
+    if payload and payload.review_action == "corrected":
+        if not payload.reason or not payload.reason.strip():
+            raise HTTPException(status_code=422, detail="修正结果必须说明依据")
+        if not payload.revised_value_snapshot:
+            raise HTTPException(status_code=422, detail="请填写修正后的测量值或状态")
+    if payload and payload.review_action == "unjudgeable" and not payload.reason_code:
+        raise HTTPException(status_code=422, detail="无法判断必须选择原因")
+
+    attempt = db.get(Attempt, current.source_id)
+    if not attempt:
+        raise HTTPException(status_code=404, detail="跟读原始作答已不存在")
+    if payload and payload.review_action in {"confirmed", "corrected"} and not attempt.audio_file_id:
+        raise HTTPException(status_code=409, detail="缺少患者原音，只能记录无法判断，不能确认或修正自动结果")
+
+    automatic = {}
+    if target:
+        automatic = {
+            "dimension_code": target.dimension_code,
+            "value": target.value,
+            "level": target.level,
+            "unit": target.unit,
+            "status": _status_from_gate_value(target.status),
+            "evidence_snapshot": target.evidence_snapshot or {},
+            "measurement_quality": target.measurement_quality or {},
+        }
+    if payload and payload.review_action == "confirmed":
+        revision = EvaluationReviewRevision(
+            evaluation_run_id=run_id,
+            dimension_result_id=payload.dimension_result_id,
+            review_action="confirmed",
+            automatic_value_snapshot=automatic,
+            revised_value_snapshot={},
+            evidence_override={},
+            reason=payload.reason,
+            reason_code=payload.reason_code,
+            reviewer_user_id=user.id,
+            review_request_key=request_key,
+        )
+        db.add(revision)
+        db.commit()
+        return current, revision
+
+    override = {}
+    if payload:
+        patch = dict(payload.revised_value_snapshot or {})
+        if payload.review_action == "unjudgeable":
+            patch["status"] = "unjudgeable"
+            patch["value"] = None
+        if payload.evidence_override:
+            patch["evidence_snapshot"] = dict(payload.evidence_override)
+        override[target.dimension_code] = patch
+    rebuilt = build_repeat_v3_payload(db, attempt, review_override=override)
+    try:
+        candidate = db.scalar(select(EvaluationRun).where(EvaluationRun.source_type == "attempt", EvaluationRun.source_id == attempt.id, EvaluationRun.domain == "repeat", EvaluationRun.input_fingerprint == rebuilt.input_fingerprint))
+        if not candidate:
+            candidate = create_candidate_run(db, rebuilt, commit=False)
+        revision = EvaluationReviewRevision(
+            evaluation_run_id=run_id,
+            dimension_result_id=payload.dimension_result_id if payload else None,
+            review_action=payload.review_action if payload else "confirmed",
+            automatic_value_snapshot=automatic,
+            revised_value_snapshot=payload.revised_value_snapshot if payload else {},
+            evidence_override=payload.evidence_override if payload else {},
+            reason=payload.reason if payload else None,
+            reason_code=payload.reason_code if payload else None,
+            reviewer_user_id=user.id,
+            recomputed_run_id=candidate.id,
+            review_request_key=request_key,
+        )
+        db.add(revision)
+        db.flush()
+        adopted = candidate if candidate.adoption_status == "adopted" else adopt_candidate_run(db, candidate.id, commit=False)
+        db.commit()
+        return adopted, revision
+    except Exception:
+        db.rollback()
+        raise
+
+
+def _status_from_gate_value(value) -> str:
+    return str(getattr(value, "value", value))

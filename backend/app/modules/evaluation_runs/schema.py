@@ -85,6 +85,7 @@ class EvaluationReviewRevisionCreate(BaseModel):
     revised_value_snapshot: dict[str, Any] = Field(default_factory=dict)
     evidence_override: dict[str, Any] = Field(default_factory=dict)
     reason: str | None = None
+    reason_code: Literal["asr_mismatch", "audio_unavailable", "noise", "task_not_applicable", "not_observed", "insufficient_evidence", "other"] | None = None
     reviewer_user_id: UUID | None = None
     recomputed_run_id: UUID | None = None
     review_request_key: str | None = Field(default=None, max_length=64)

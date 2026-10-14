@@ -150,6 +150,16 @@ class EvaluationDimensionResult(Base, UUIDPrimaryKeyMixin):
 
 class EvaluationReviewRevision(Base, UUIDPrimaryKeyMixin):
     __tablename__ = "evaluation_review_revisions"
+    __table_args__ = (
+        Index(
+            "uq_evaluation_review_revisions_request",
+            "evaluation_run_id",
+            "review_request_key",
+            unique=True,
+            postgresql_where=text("review_request_key IS NOT NULL"),
+            sqlite_where=text("review_request_key IS NOT NULL"),
+        ),
+    )
 
     evaluation_run_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("evaluation_runs.id", ondelete="RESTRICT"), index=True, nullable=False
@@ -162,6 +172,7 @@ class EvaluationReviewRevision(Base, UUIDPrimaryKeyMixin):
     revised_value_snapshot: Mapped[dict] = mapped_column(JSONDocument, default=dict, nullable=False)
     evidence_override: Mapped[dict] = mapped_column(JSONDocument, default=dict, nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reason_code: Mapped[str | None] = mapped_column(String(48), nullable=True)
     reviewer_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     recomputed_run_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("evaluation_runs.id", ondelete="RESTRICT"), nullable=True

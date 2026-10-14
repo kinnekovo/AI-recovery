@@ -42,6 +42,7 @@ def import_models() -> None:
     from app.modules.controlled_policy import model as controlled_policy_model  # noqa: F401
     from app.modules.controlled_governance import model as controlled_governance_model  # noqa: F401
     from app.modules.product_v2 import model as product_v2_model  # noqa: F401
+    from app.modules.review_workflow import model as review_workflow_model  # noqa: F401
     from app.modules.pronunciation import model as pronunciation_model  # noqa: F401
     from app.modules.scoring import model as scoring_model  # noqa: F401
     from app.modules.scenario_dialogues import model as scenario_dialogues_model  # noqa: F401

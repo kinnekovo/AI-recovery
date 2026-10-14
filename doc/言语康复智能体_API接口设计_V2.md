@@ -705,3 +705,28 @@ POST
 历史用途：治疗师记录推荐效果判断。
 
 当前替代：`GET /api/therapist/patients/{patient_user_id}/training-recommendation/effects` 自动返回趋势归因与提醒。
+
+## 治疗师复核闭环（new-UI）
+
+所有写接口均要求治疗师或管理员身份，并校验患者授权范围。证据包保留原音、原始转写和自动评估版本；治疗师修订写入独立审计记录，不覆盖自动结果。待办状态依次使用 `open`、`acknowledged`、`in_review`、`waiting_information`、`waiting_plan_publish` 与关闭状态；“等待方案发布”只在正式方案发布成功后关闭。
+
+### 待复核队列与证据包
+
+- `GET /api/v2/therapist/review-queue`：筛选待办队列；支持 `status`（逗号分隔）、`type`、`priority`、`patient`、`assigned_to`（`me`/`unassigned`/`all`）、`cursor`、`limit`。
+- `GET /api/v2/therapist/attention-items/{item_id}/review-bundle`：获取患者目标、当前方案、待办、原音/ASR/对话轮次、自动评估、质量门控、证据、历史修订和审计事件。
+- `POST /api/v2/therapist/attention-items/{item_id}/begin-review`：领取/继续复核；已由他人接手时返回 `409`。
+- `POST /api/v2/therapist/attention-items/{item_id}/release`：释放尚未开始的接手事项。
+- `POST /api/v2/therapist/attention-items/{item_id}/audio-opened`：记录治疗师打开待办关联录音的事件，body 为 `{ "file_id": "uuid" }`。
+- `POST /api/v2/therapist/attention-items/{item_id}/wait-for-information`：暂停当前复核，body 为 `{ "reason": "audio_unavailable|source_not_resolved|...", "note": "..." }`。
+
+### 人工评估复核
+
+- `POST /api/v2/therapist/attention-items/{item_id}/evaluation-runs/{run_id}/reviews`：只允许复核属于该待办证据包的运行。body 包含 `review_action`（`confirmed`/`corrected`/`unjudgeable`）、`dimension_result_id`、`revised_value_snapshot`、`evidence_override`、`reason_code`、`reason` 和 UUID `review_request_key`。确认/修正需有患者原音；修正须写明依据。原音缺失时仅能记为无法判断。
+
+### 阶段决定与方案版本
+
+- `POST /api/v2/therapist/attention-items/{item_id}/stage-review`：以明确选择的待办及其证据创建阶段复核；支持 `additional_attention_item_ids`，不能隐式纳入同患者其他待办。
+- `GET /api/v2/therapist/stage-reviews/{review_id}`、`POST .../{review_id}/ready`、`POST .../{review_id}/decisions`：读取冻结事实、检查进入决定阶段、保存幂等的治疗师决定。计划调整类决定只创建草稿，并把关联待办转入 `waiting_plan_publish`。
+- `GET /api/v2/therapist/training-plans/{plan_id}`、`GET .../{plan_id}/diff`、`PATCH .../{plan_id}`：读取版本上下文与差异、编辑草稿。保存时需携带 `expected_active_plan_id`；基线已变化时返回 `409`。
+- `POST /api/v2/therapist/training-plans/{plan_id}/abandon`：废弃草稿；关联来源待办恢复为可复核状态。
+- `POST /api/v2/therapist/patients/{patient_user_id}/training-plans/{plan_id}/publish`：body 携带 `expected_active_plan_id` 和幂等 `request_key`。成功后激活新版本、记录发布快照，并原子关闭关联的等待发布待办。

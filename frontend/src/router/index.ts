@@ -73,6 +73,8 @@ const router = createRouter({
       meta: { role: 'therapist' },
       children: [
         { path: '', component: productV2Enabled ? () => import('@/features/therapist-workbench/TherapistWorkbenchV2.vue') : () => import('@/views/therapist/TherapistDashboardView.vue'), meta: { role: 'therapist' } },
+        { path: 'reviews', component: () => import('@/features/review-queue/ReviewQueueView.vue'), meta: { role: 'therapist', v2Only: true, legacyFallback: '/therapist/assessments' } },
+        { path: 'reviews/:attentionItemId', component: () => import('@/features/evidence-review/EvidenceReviewView.vue'), meta: { role: 'therapist', v2Only: true, legacyFallback: '/therapist/assessments' } },
         {
           path: 'assessments',
           component: () => import('@/views/therapist/TherapistAssessmentsView.vue'),
@@ -90,7 +92,8 @@ const router = createRouter({
         { path: 'training-sessions/:sessionId', component: () => import('@/features/patient-workspace/TrainingSessionDetailV2.vue'), meta: { role: 'therapist', v2Only: true, legacyFallback: '/therapist/patients' } },
         { path: 'training-sessions/:sessionId/exercises/:taskId', component: () => import('@/features/patient-workspace/ExerciseProfessionalMetricsV2.vue'), meta: { role: 'therapist', v2Only: true, legacyFallback: '/therapist/patients' } },
         { path: 'plans', component: () => import('@/features/training-plan/TrainingPlansV2.vue'), meta: { role: 'therapist', v2Only: true, legacyFallback: '/therapist/patients' } },
-        { path: 'stage-reviews/:reviewId', component: () => import('@/features/stage-review/StageReviewV2.vue'), meta: { role: 'therapist', v2Only: true, legacyFallback: '/therapist/patients' } },
+        { path: 'plans/:planId/edit', component: () => import('@/features/training-plan/TrainingPlanEditorV2.vue'), meta: { role: 'therapist', v2Only: true, legacyFallback: '/therapist/plans' } },
+        { path: 'stage-reviews/:reviewId', component: () => import('@/features/stage-review/StageReviewWorkspace.vue'), meta: { role: 'therapist', v2Only: true, legacyFallback: '/therapist/patients' } },
         // Internal calibration/governance routes are deliberately not exposed in
         // the therapist product shell. Keep legacy deep links harmless.
         { path: 'calibration', redirect: '/therapist' },

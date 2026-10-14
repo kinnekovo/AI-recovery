@@ -45,6 +45,13 @@ class TrainingPlanVersion(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             postgresql_where=text("status = 'active'"),
             sqlite_where=text("status = 'active'"),
         ),
+        Index(
+            "uq_training_plan_publish_request_key",
+            "publish_request_key",
+            unique=True,
+            postgresql_where=text("publish_request_key IS NOT NULL"),
+            sqlite_where=text("publish_request_key IS NOT NULL"),
+        ),
     )
 
     patient_profile_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patient_profiles.id"), index=True)
@@ -59,6 +66,10 @@ class TrainingPlanVersion(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     supersedes_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("training_plan_versions.id"), nullable=True)
     source_decision_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    abandoned_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    abandoned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    abandon_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    publish_request_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     exercise_rules: Mapped[list["TrainingPlanExerciseRule"]] = relationship(
         back_populates="plan_version", cascade="all, delete-orphan", order_by="TrainingPlanExerciseRule.order_index"
@@ -72,6 +83,8 @@ class TrainingPlanExerciseRule(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     training_plan_version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("training_plan_versions.id"), index=True)
     task_template_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("task_templates.id"), nullable=False)
     exercise_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    sequence_role: Mapped[str] = mapped_column(String(24), default="main", nullable=False)
+    estimated_duration_seconds: Mapped[int] = mapped_column(Integer, default=90, nullable=False)
     order_index: Mapped[int] = mapped_column(Integer, nullable=False)
     target_repetitions: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     difficulty: Mapped[str] = mapped_column(String(32), default="standard", nullable=False)
@@ -256,8 +269,8 @@ class AttentionItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "patient_profile_id",
             "dedup_key",
             unique=True,
-            postgresql_where=text("status IN ('open', 'acknowledged')"),
-            sqlite_where=text("status IN ('open', 'acknowledged')"),
+            postgresql_where=text("status IN ('open', 'acknowledged', 'in_review', 'waiting_information', 'waiting_plan_publish')"),
+            sqlite_where=text("status IN ('open', 'acknowledged', 'in_review', 'waiting_information', 'waiting_plan_publish')"),
         ),
     )
 
@@ -275,6 +288,11 @@ class AttentionItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolution_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    primary_evaluation_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("evaluation_runs.id"), nullable=True)
+    primary_stage_review_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("stage_reviews.id"), nullable=True)
+    waiting_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
 class StageReview(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -284,6 +302,7 @@ class StageReview(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     training_plan_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("training_plan_versions.id"), nullable=True)
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     status: Mapped[str] = mapped_column(String(24), default="draft", nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     review_window: Mapped[dict] = mapped_column(JSONDocument, default=dict, nullable=False)
     facts_snapshot: Mapped[dict] = mapped_column(JSONDocument, default=dict, nullable=False)
     observation_ids: Mapped[list] = mapped_column(JSONDocument, default=list, nullable=False)
@@ -293,10 +312,25 @@ class StageReview(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     clinical_stage_run_ids: Mapped[list] = mapped_column(JSONDocument, default=list, nullable=False)
     therapist_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    primary_attention_item_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("attention_items.id"), nullable=True)
+    patient_context_snapshot: Mapped[dict] = mapped_column(JSONDocument, default=dict, nullable=False)
+    evidence_review_revision_ids: Mapped[list] = mapped_column(JSONDocument, default=list, nullable=False)
+    ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    supersedes_review_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("stage_reviews.id"), nullable=True)
 
 
 class TherapistDecision(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "therapist_decisions"
+    __table_args__ = (
+        Index(
+            "uq_therapist_decision_review_request",
+            "stage_review_id",
+            "request_key",
+            unique=True,
+            postgresql_where=text("request_key IS NOT NULL"),
+            sqlite_where=text("request_key IS NOT NULL"),
+        ),
+    )
 
     patient_profile_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patient_profiles.id"), index=True)
     stage_review_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("stage_reviews.id"), index=True)
@@ -307,6 +341,9 @@ class TherapistDecision(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     payload_snapshot: Mapped[dict] = mapped_column(JSONDocument, default=dict, nullable=False)
     result_snapshot: Mapped[dict] = mapped_column(JSONDocument, default=dict, nullable=False)
     resulting_training_plan_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("training_plan_versions.id"), nullable=True)
+    attention_resolution_policy: Mapped[str] = mapped_column(String(40), default="resolve", nullable=False)
+    expected_review_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    request_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 

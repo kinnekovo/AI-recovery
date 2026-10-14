@@ -16,6 +16,8 @@ class GoalCreate(BaseModel):
 class ExerciseRuleCreate(BaseModel):
     task_template_id: UUID
     exercise_type: Literal["repeat", "scenario"]
+    sequence_role: Literal["warmup", "main", "consolidation", "challenge"] = "main"
+    estimated_duration_seconds: int = Field(default=90, ge=30, le=900)
     order_index: int = Field(ge=0)
     target_repetitions: int = Field(default=1, ge=1, le=20)
     difficulty: str = Field(default="standard", min_length=1, max_length=32)
@@ -86,6 +88,7 @@ class PatientSettingsUpdate(BaseModel):
 
 class AttentionResolve(BaseModel):
     resolution_note: str = Field(min_length=1, max_length=2000)
+    resolution_code: str | None = Field(default=None, max_length=64)
     status: Literal["resolved", "dismissed"] = "resolved"
 
 
@@ -93,6 +96,8 @@ class StageReviewCreate(BaseModel):
     review_from: datetime | None = None
     review_to: datetime | None = None
     therapist_notes: str | None = Field(default=None, max_length=5000)
+    attention_item_ids: list[UUID] = Field(default_factory=list, max_length=20)
+    primary_attention_item_id: UUID | None = None
 
 
 class DecisionCreate(BaseModel):
@@ -107,7 +112,42 @@ class DecisionCreate(BaseModel):
     ]
     reason: str = Field(min_length=1, max_length=5000)
     source_attention_item_id: UUID | None = None
+    source_attention_item_ids: list[UUID] = Field(default_factory=list, max_length=20)
+    attention_resolution_policy: Literal["resolve", "dismiss", "wait_plan", "keep_open"] | None = None
+    expected_review_version: int = Field(default=1, ge=1)
+    request_key: str | None = Field(default=None, max_length=64)
     payload: dict = Field(default_factory=dict)
+
+
+class AttentionStageReviewCreate(BaseModel):
+    additional_attention_item_ids: list[UUID] = Field(default_factory=list, max_length=20)
+    review_from: datetime | None = None
+    review_to: datetime | None = None
+    therapist_notes: str | None = Field(default=None, max_length=5000)
+
+
+class TrainingPlanDraftUpdate(BaseModel):
+    stage_focus: str = Field(min_length=1, max_length=160)
+    strategy: dict = Field(default_factory=dict)
+    rehabilitation_goal_id: UUID
+    exercise_rules: list[ExerciseRuleCreate] = Field(min_length=1, max_length=20)
+    expected_active_plan_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def unique_order(self):
+        orders = [item.order_index for item in self.exercise_rules]
+        if len(orders) != len(set(orders)):
+            raise ValueError("exercise rule order_index must be unique")
+        return self
+
+
+class TrainingPlanAbandon(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class TrainingPlanPublish(BaseModel):
+    expected_active_plan_id: UUID | None = None
+    request_key: str | None = Field(default=None, max_length=64)
 
 
 class FormalAssessmentCreate(BaseModel):

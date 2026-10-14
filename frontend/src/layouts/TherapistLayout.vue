@@ -10,6 +10,7 @@
       </div>
       <nav v-if="productV2Enabled">
         <RouterLink to="/therapist"><Inbox :size="19"/>工作台</RouterLink>
+        <RouterLink to="/therapist/reviews"><ClipboardCheck :size="19"/>待复核<span v-if="pendingReviews" class="therapist-nav-count">{{ pendingReviews > 99 ? '99+' : pendingReviews }}</span></RouterLink>
         <RouterLink to="/therapist/patients"><Users :size="19"/>患者</RouterLink>
         <RouterLink to="/therapist/plans"><ClipboardList :size="19"/>训练方案</RouterLink>
       </nav>
@@ -27,11 +28,20 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { ClipboardList, Inbox, Users } from 'lucide-vue-next'
+import { ClipboardCheck, ClipboardList, Inbox, Users } from 'lucide-vue-next'
 import { productV2Enabled } from '@/api/v2'
+import { reviewWorkflowApi } from '@/api/reviewWorkflow'
+import { onMounted, ref } from 'vue'
 
 const auth = useAuthStore()
 const router = useRouter()
+const pendingReviews = ref(0)
+
+onMounted(async () => {
+  if (!productV2Enabled) return
+  try { pendingReviews.value = (await reviewWorkflowApi.queue({ limit: 1 })).summary.total }
+  catch { pendingReviews.value = 0 }
+})
 
 function logout() {
   auth.logout()

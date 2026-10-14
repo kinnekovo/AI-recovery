@@ -39,13 +39,17 @@ from app.modules.product_v2.model import (
     TrainingSessionSummary,
 )
 from app.modules.product_v2.schema import (
+    AttentionStageReviewCreate,
     AttemptCreateV2,
     DecisionCreate,
     FormalAssessmentCreate,
     GoalCreate,
     StageReviewCreate,
     TrainingPlanDraftCreate,
+    TrainingPlanDraftUpdate,
+    TrainingPlanPublish,
 )
+from app.modules.evaluation_runs.model import EvaluationReviewRevision
 from app.modules.pronunciation.model import PronunciationAnalysisResult, PronunciationSegment
 from app.modules.scenario_dialogues.model import DialogueStatus, ScenarioDialogueEvaluation, ScenarioDialogueSession
 from app.modules.scenario_dialogues import service as scenario_dialogue_service
@@ -220,7 +224,9 @@ def plan_dict(plan: TrainingPlanVersion | None, include_rules: bool = True):
                 "id": str(rule.id),
                 "task_template_id": str(rule.task_template_id),
                 "exercise_type": rule.exercise_type,
+                "sequence_role": rule.sequence_role,
                 "order_index": rule.order_index,
+                "estimated_duration_seconds": rule.estimated_duration_seconds,
                 "target_repetitions": rule.target_repetitions,
                 "difficulty": rule.difficulty,
                 "max_information_units": rule.max_information_units,
@@ -288,7 +294,7 @@ def create_plan_draft(db: Session, actor: User, patient_user_id: UUID, payload: 
         },
         effective_from=payload.effective_from,
         effective_to=payload.effective_to,
-        supersedes_id=payload.supersedes_id,
+        supersedes_id=payload.supersedes_id or (_active_plan(db, profile.id).id if _active_plan(db, profile.id) else None),
     )
     db.add(plan)
     db.flush()
@@ -298,7 +304,9 @@ def create_plan_draft(db: Session, actor: User, patient_user_id: UUID, payload: 
                 training_plan_version_id=plan.id,
                 task_template_id=rule.task_template_id,
                 exercise_type=rule.exercise_type,
+                sequence_role=rule.sequence_role,
                 order_index=rule.order_index,
+                estimated_duration_seconds=rule.estimated_duration_seconds,
                 target_repetitions=rule.target_repetitions,
                 difficulty=rule.difficulty,
                 max_information_units=rule.max_information_units,
@@ -316,20 +324,34 @@ def create_plan_draft(db: Session, actor: User, patient_user_id: UUID, payload: 
     )
 
 
-def publish_plan(db: Session, actor: User, patient_user_id: UUID, plan_id: UUID):
+def publish_plan(db: Session, actor: User, patient_user_id: UUID, plan_id: UUID, payload: TrainingPlanPublish | None = None):
     profile = _therapist_profile(db, actor, patient_user_id)
     plan = db.scalar(select(TrainingPlanVersion).where(TrainingPlanVersion.id == plan_id).with_for_update())
     if not plan or plan.patient_profile_id != profile.id:
         raise HTTPException(status_code=404, detail="训练方案不存在")
+    if payload and payload.request_key and plan.publish_request_key == payload.request_key and plan.status == "active":
+        return plan_dict(db.scalar(select(TrainingPlanVersion).options(selectinload(TrainingPlanVersion.exercise_rules).selectinload(TrainingPlanExerciseRule.task_template)).where(TrainingPlanVersion.id == plan.id)))
     if plan.status != "draft":
         raise HTTPException(status_code=409, detail="只有草稿方案可以发布；已发布版本不可原地编辑")
-    if not db.scalar(select(func.count(TrainingPlanExerciseRule.id)).where(TrainingPlanExerciseRule.training_plan_version_id == plan.id)):
+    rules = list(db.scalars(select(TrainingPlanExerciseRule).options(selectinload(TrainingPlanExerciseRule.task_template)).where(TrainingPlanExerciseRule.training_plan_version_id == plan.id).order_by(TrainingPlanExerciseRule.order_index)))
+    if not rules:
         raise HTTPException(status_code=409, detail="训练方案至少需要一个练习")
+    if [row.order_index for row in rules] != list(range(len(rules))):
+        raise HTTPException(status_code=409, detail="练习顺序需要从 0 开始连续排列")
+    if any(not row.task_template or not row.task_template.is_active for row in rules):
+        raise HTTPException(status_code=409, detail="方案中包含已停用的练习模板，请先编辑草稿")
+    if sum(row.estimated_duration_seconds for row in rules) > 1800:
+        raise HTTPException(status_code=409, detail="方案练习的预计总时长不能超过 30 分钟")
     current = db.scalar(
         select(TrainingPlanVersion)
         .where(TrainingPlanVersion.patient_profile_id == profile.id, TrainingPlanVersion.status == "active")
         .with_for_update()
     )
+    expected_active_id = payload.expected_active_plan_id if payload else None
+    if payload and (str(current.id) if current else None) != (str(expected_active_id) if expected_active_id else None):
+        raise HTTPException(status_code=409, detail="当前生效方案已变化，请重新载入版本差异后再发布")
+    if plan.source_decision_id and (str(current.id) if current else None) != (str(plan.supersedes_id) if plan.supersedes_id else None):
+        raise HTTPException(status_code=409, detail="生成草稿后当前方案已变化，请基于最新版本重新调整")
     now = utc_now()
     today = _patient_today(profile)
     if current:
@@ -343,7 +365,35 @@ def publish_plan(db: Session, actor: User, patient_user_id: UUID, plan_id: UUID)
     plan.status = "active"
     plan.published_by_user_id = actor.id
     plan.published_at = now
+    plan.publish_request_key = payload.request_key if payload else None
     plan.effective_from = plan.effective_from or today
+    if plan.source_decision_id:
+        decision = db.get(TherapistDecision, plan.source_decision_id)
+        if decision:
+            decision.result_snapshot = {**(decision.result_snapshot or {}), "published_training_plan_version_id": str(plan.id), "published_version_number": plan.version_number, "requires_publish": False}
+            attention_ids = set((decision.payload_snapshot or {}).get("source_attention_item_ids", []))
+            if decision.source_attention_item_id:
+                attention_ids.add(str(decision.source_attention_item_id))
+            for attention_id in attention_ids:
+                try:
+                    item = db.scalar(select(AttentionItem).where(AttentionItem.id == UUID(attention_id)).with_for_update())
+                except (TypeError, ValueError):
+                    continue
+                if item and item.patient_profile_id == profile.id and item.status == "waiting_plan_publish":
+                    previous = item.status
+                    item.status = "resolved"
+                    item.resolved_at = now
+                    item.status_updated_at = now
+                    item.waiting_reason = None
+                    item.resolution_code = "plan_updated"
+                    item.resolution_note = f"阶段复核决定生成并发布训练方案 v{plan.version_number}"
+                    from app.modules.review_workflow.service import record_event
+
+                    record_event(db, item, "plan_published", actor=actor, from_status=previous, to_status="resolved", related_refs={"plan_id": str(plan.id), "decision_id": str(decision.id)})
+                    record_event(db, item, "resolved", actor=actor, from_status=previous, to_status="resolved", note=item.resolution_note, related_refs={"plan_id": str(plan.id), "decision_id": str(decision.id)})
+    from app.core.observability import log_event
+
+    log_event("info", "review_workflow", "plan_published_from_review" if plan.source_decision_id else "training_plan_published", plan_id=str(plan.id), patient_profile_id=str(profile.id), actor_user_id=str(actor.id))
     db.commit()
     return plan_dict(
         db.scalar(
@@ -352,6 +402,156 @@ def publish_plan(db: Session, actor: User, patient_user_id: UUID, plan_id: UUID)
             .where(TrainingPlanVersion.id == plan.id)
         )
     )
+
+
+def _plan_for_therapist(db: Session, actor: User, plan_id: UUID, *, lock: bool = False) -> TrainingPlanVersion:
+    statement = select(TrainingPlanVersion).options(selectinload(TrainingPlanVersion.exercise_rules).selectinload(TrainingPlanExerciseRule.task_template)).where(TrainingPlanVersion.id == plan_id)
+    if lock:
+        statement = statement.with_for_update()
+    plan = db.scalar(statement)
+    if not plan:
+        raise HTTPException(status_code=404, detail="训练方案不存在")
+    profile = db.get(PatientProfile, plan.patient_profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="患者档案不存在")
+    _therapist_profile(db, actor, profile.user_id)
+    return plan
+
+
+def training_plan_detail(db: Session, actor: User, plan_id: UUID):
+    plan = _plan_for_therapist(db, actor, plan_id)
+    payload = plan_dict(plan)
+    profile = db.get(PatientProfile, plan.patient_profile_id)
+    patient = db.get(User, profile.user_id) if profile else None
+    payload["patient_user_id"] = str(patient.id) if patient else None
+    payload["patient_name"] = patient.username if patient else "未知患者"
+    payload["rehabilitation_goal"] = goal_dict(db.get(RehabilitationGoal, plan.rehabilitation_goal_id))
+    payload.update({"abandon_reason": plan.abandon_reason, "abandoned_at": plan.abandoned_at.isoformat() if plan.abandoned_at else None, "source_decision_id": str(plan.source_decision_id) if plan.source_decision_id else None})
+    current = _active_plan(db, plan.patient_profile_id)
+    payload["active_plan"] = plan_dict(current) if current else None
+    return payload
+
+
+def update_plan_draft(db: Session, actor: User, plan_id: UUID, payload: TrainingPlanDraftUpdate):
+    plan = _plan_for_therapist(db, actor, plan_id, lock=True)
+    if plan.status != "draft":
+        raise HTTPException(status_code=409, detail="只有方案草稿可以编辑")
+    current = _active_plan(db, plan.patient_profile_id)
+    actual_active_id = current.id if current else None
+    if actual_active_id != payload.expected_active_plan_id:
+        raise HTTPException(status_code=409, detail="当前生效方案已变化，请刷新草稿和差异后再保存")
+    goal = db.get(RehabilitationGoal, payload.rehabilitation_goal_id)
+    if not goal or goal.patient_profile_id != plan.patient_profile_id or goal.status != "active":
+        raise HTTPException(status_code=409, detail="训练方案必须关联该患者当前有效的康复目标")
+    order_values = sorted(rule.order_index for rule in payload.exercise_rules)
+    if order_values != list(range(len(order_values))):
+        raise HTTPException(status_code=422, detail="练习顺序需要从 0 开始连续排列")
+    templates = {row.id: row for row in db.scalars(select(TaskTemplate).where(TaskTemplate.id.in_([rule.task_template_id for rule in payload.exercise_rules])))}
+    if len(templates) != len({rule.task_template_id for rule in payload.exercise_rules}):
+        raise HTTPException(status_code=422, detail="方案包含不存在的练习模板")
+    for rule in payload.exercise_rules:
+        template = templates[rule.task_template_id]
+        if not template.is_active or _enum_value(template.task_type) != rule.exercise_type:
+            raise HTTPException(status_code=409, detail="方案包含已停用的模板或类型不匹配的练习")
+    strategy = dict(payload.strategy or {})
+    duration = strategy.get("duration", plan.strategy_snapshot.get("duration", 15))
+    if not isinstance(duration, (int, float)) or duration < 1 or duration > 180:
+        raise HTTPException(status_code=422, detail="方案参考时长需在 1 到 180 分钟之间")
+    plan.stage_focus = payload.stage_focus.strip()
+    plan.strategy_snapshot = strategy
+    plan.rehabilitation_goal_id = goal.id
+    plan.exercise_rules.clear()
+    db.flush()
+    for rule in sorted(payload.exercise_rules, key=lambda item: item.order_index):
+        plan.exercise_rules.append(TrainingPlanExerciseRule(
+            task_template_id=rule.task_template_id,
+            exercise_type=rule.exercise_type,
+            sequence_role=rule.sequence_role,
+            order_index=rule.order_index,
+            estimated_duration_seconds=rule.estimated_duration_seconds,
+            target_repetitions=rule.target_repetitions,
+            difficulty=rule.difficulty,
+            max_information_units=rule.max_information_units,
+            prompt_policy=rule.prompt_policy,
+            scene_scope=rule.scene_scope,
+        ))
+    db.commit()
+    return training_plan_detail(db, actor, plan.id)
+
+
+def plan_diff(db: Session, actor: User, plan_id: UUID):
+    plan = _plan_for_therapist(db, actor, plan_id)
+    baseline = db.get(TrainingPlanVersion, plan.supersedes_id) if plan.supersedes_id else None
+    def project(version):
+        if not version:
+            return None
+        rules = list(db.scalars(select(TrainingPlanExerciseRule).options(selectinload(TrainingPlanExerciseRule.task_template)).where(TrainingPlanExerciseRule.training_plan_version_id == version.id).order_by(TrainingPlanExerciseRule.order_index)))
+        return {"stage_focus": version.stage_focus, "strategy": version.strategy_snapshot or {}, "exercise_rules": [{"task_template_id": str(rule.task_template_id), "title": rule.task_template.title if rule.task_template else "已停用模板", "exercise_type": rule.exercise_type, "sequence_role": rule.sequence_role, "order_index": rule.order_index, "estimated_duration_seconds": rule.estimated_duration_seconds, "target_repetitions": rule.target_repetitions, "difficulty": rule.difficulty, "max_information_units": rule.max_information_units, "prompt_policy": rule.prompt_policy or {}, "scene_scope": rule.scene_scope or {}} for rule in rules]}
+    return {"baseline_plan_id": str(baseline.id) if baseline else None, "baseline": project(baseline), "draft": project(plan)}
+
+
+def abandon_plan(db: Session, actor: User, plan_id: UUID, reason: str):
+    plan = _plan_for_therapist(db, actor, plan_id, lock=True)
+    if plan.status != "draft":
+        raise HTTPException(status_code=409, detail="只有草稿方案可以废弃")
+    successor_review_id = None
+    if plan.source_decision_id:
+        decision = db.get(TherapistDecision, plan.source_decision_id)
+        previous_review = db.get(StageReview, decision.stage_review_id) if decision else None
+        if previous_review:
+            successor = StageReview(
+                patient_profile_id=previous_review.patient_profile_id,
+                training_plan_version_id=previous_review.training_plan_version_id,
+                created_by_user_id=actor.id,
+                status="ready_for_decision",
+                version=1,
+                review_window=previous_review.review_window,
+                facts_snapshot=previous_review.facts_snapshot,
+                observation_ids=previous_review.observation_ids,
+                recommendation_ids=previous_review.recommendation_ids,
+                attention_item_ids=previous_review.attention_item_ids,
+                assessment_ids=previous_review.assessment_ids,
+                clinical_stage_run_ids=previous_review.clinical_stage_run_ids,
+                therapist_notes=previous_review.therapist_notes,
+                primary_attention_item_id=previous_review.primary_attention_item_id,
+                patient_context_snapshot=previous_review.patient_context_snapshot,
+                evidence_review_revision_ids=previous_review.evidence_review_revision_ids,
+                ready_at=utc_now(),
+                supersedes_review_id=previous_review.id,
+            )
+            db.add(successor)
+            db.flush()
+            successor_review_id = str(successor.id)
+            attention_ids = set((decision.payload_snapshot or {}).get("source_attention_item_ids", []))
+            if decision.source_attention_item_id:
+                attention_ids.add(str(decision.source_attention_item_id))
+            for attention_id in attention_ids:
+                try:
+                    item = db.scalar(select(AttentionItem).where(AttentionItem.id == UUID(attention_id)).with_for_update())
+                except (TypeError, ValueError):
+                    continue
+                if item and item.patient_profile_id == plan.patient_profile_id and item.status == "waiting_plan_publish":
+                    previous = item.status
+                    item.status = "in_review"
+                    item.waiting_reason = None
+                    item.status_updated_at = utc_now()
+                    item.primary_stage_review_id = successor.id
+                    item.resolution_note = None
+                    from app.modules.review_workflow.service import record_event
+
+                    record_event(db, item, "draft_abandoned", actor=actor, from_status=previous, to_status="in_review", note=reason, related_refs={"plan_id": str(plan.id), "stage_review_id": str(successor.id)})
+    plan.status = "abandoned"
+    plan.abandoned_by_user_id = actor.id
+    plan.abandoned_at = utc_now()
+    plan.abandon_reason = reason.strip()
+    if plan.source_decision_id:
+        decision = db.get(TherapistDecision, plan.source_decision_id)
+        if decision:
+            decision.result_snapshot = {**(decision.result_snapshot or {}), "abandoned_training_plan_version_id": str(plan.id), "abandon_reason": reason.strip(), "requires_publish": False}
+    db.commit()
+    result = training_plan_detail(db, actor, plan.id)
+    result["successor_stage_review_id"] = successor_review_id
+    return result
 
 
 def list_plans(db: Session, actor: User, patient_user_id: UUID):
@@ -1737,7 +1937,7 @@ def create_attention(db: Session, profile_id: UUID, item_type: str, trigger_code
         select(AttentionItem).where(
             AttentionItem.patient_profile_id == profile_id,
             AttentionItem.dedup_key == dedup_key,
-            AttentionItem.status.in_(["open", "acknowledged"]),
+            AttentionItem.status.in_(["open", "acknowledged", "in_review", "waiting_information", "waiting_plan_publish"]),
         )
     )
     if existing:
@@ -1756,6 +1956,9 @@ def create_attention(db: Session, profile_id: UUID, item_type: str, trigger_code
     )
     db.add(row)
     db.flush()
+    from app.modules.review_workflow.service import record_event
+
+    record_event(db, row, "created", to_status="open", related_refs={"source_refs": source_refs})
     return row
 
 
@@ -1774,6 +1977,14 @@ def attention_dict(db: Session, row: AttentionItem):
         "priority": row.priority,
         "summary": row.summary,
         "status": row.status,
+        "assigned_to_user_id": str(row.assigned_to_user_id) if row.assigned_to_user_id else None,
+        "assigned_to": db.get(User, row.assigned_to_user_id).username if row.assigned_to_user_id and db.get(User, row.assigned_to_user_id) else None,
+        "acknowledged_at": row.acknowledged_at.isoformat() if row.acknowledged_at else None,
+        "status_updated_at": row.status_updated_at.isoformat() if row.status_updated_at else row.created_at.isoformat(),
+        "resolution_code": row.resolution_code,
+        "resolution_note": row.resolution_note,
+        "waiting_reason": row.waiting_reason,
+        "evidence_count": len(row.source_refs or []) + len(row.evidence_ids or []),
         "created_at": row.created_at.isoformat(),
         "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
     }
@@ -1784,34 +1995,56 @@ def therapist_workbench(db: Session, actor: User):
         TherapistPatientAssignment.therapist_user_id == actor.id,
         TherapistPatientAssignment.status == "active",
     )
-    stmt = select(AttentionItem).where(AttentionItem.status.in_(["open", "acknowledged"]))
+    stmt = select(AttentionItem).where(AttentionItem.status.in_(["open", "acknowledged", "in_review", "waiting_information", "waiting_plan_publish"]))
     if actor.role != UserRole.admin:
         stmt = stmt.where(AttentionItem.patient_profile_id.in_(assigned_ids))
     rows = list(db.scalars(stmt.order_by(AttentionItem.created_at.asc())))
     return {
-        "summary": {"open": sum(item.status == "open" for item in rows), "acknowledged": sum(item.status == "acknowledged" for item in rows)},
+        "summary": {
+            "open": sum(item.status == "open" for item in rows),
+            "acknowledged": sum(item.status in {"acknowledged", "in_review"} for item in rows),
+            "waiting_information": sum(item.status == "waiting_information" for item in rows),
+            "waiting_plan_publish": sum(item.status == "waiting_plan_publish" for item in rows),
+        },
         "attention_items": [attention_dict(db, item) for item in rows],
         "generated_at": utc_now().isoformat(),
     }
 
 
-def set_attention_status(db: Session, actor: User, item_id: UUID, new_status: str, note: str | None = None):
-    item = db.get(AttentionItem, item_id)
+def set_attention_status(db: Session, actor: User, item_id: UUID, new_status: str, note: str | None = None, resolution_code: str | None = None):
+    item = db.scalar(select(AttentionItem).where(AttentionItem.id == item_id).with_for_update())
     if not item:
         raise HTTPException(status_code=404, detail="关注事项不存在")
     profile = db.get(PatientProfile, item.patient_profile_id)
     _therapist_profile(db, actor, profile.user_id)
     if new_status == "acknowledged":
+        if item.status in {"resolved", "dismissed"}:
+            raise HTTPException(status_code=409, detail="该待办已关闭，不能再次接手")
+        if item.assigned_to_user_id and item.assigned_to_user_id != actor.id and actor.role != UserRole.admin:
+            owner = db.get(User, item.assigned_to_user_id)
+            raise HTTPException(status_code=409, detail=f"该待办已由 {owner.username if owner else '其他治疗师'} 接手")
+        previous = item.status
         item.status = "acknowledged"
         item.assigned_to_user_id = actor.id
-        item.acknowledged_at = utc_now()
+        item.acknowledged_at = item.acknowledged_at or utc_now()
+        item.status_updated_at = utc_now()
     elif new_status in {"resolved", "dismissed"}:
+        if item.status == "waiting_plan_publish":
+            raise HTTPException(status_code=409, detail="待发布方案的待办只能在方案发布或明确放弃后关闭")
+        if item.assigned_to_user_id and item.assigned_to_user_id != actor.id and actor.role != UserRole.admin:
+            raise HTTPException(status_code=409, detail="只能关闭自己接手的待办")
+        previous = item.status
         item.status = new_status
         item.assigned_to_user_id = actor.id
         item.resolved_at = utc_now()
         item.resolution_note = note
+        item.resolution_code = resolution_code or ("false_positive" if new_status == "dismissed" else "confirmed_no_change")
+        item.status_updated_at = utc_now()
     else:
         raise HTTPException(status_code=422, detail="无效关注事项状态")
+    from app.modules.review_workflow.service import record_event
+
+    record_event(db, item, "acknowledged" if new_status == "acknowledged" else new_status, actor=actor, from_status=previous, to_status=item.status, note=note)
     db.commit()
     return attention_dict(db, item)
 
@@ -1965,7 +2198,7 @@ def patient_workspace(db: Session, actor: User, patient_user_id: UUID):
     goal = _active_goal(db, profile.id)
     plan = _active_plan(db, profile.id)
     sessions = list(db.scalars(select(TrainingSession).where(TrainingSession.patient_profile_id == profile.id).order_by(TrainingSession.created_at.desc()).limit(20)))
-    attention = list(db.scalars(select(AttentionItem).where(AttentionItem.patient_profile_id == profile.id, AttentionItem.status.in_(["open", "acknowledged"])).order_by(AttentionItem.created_at.desc())))
+    attention = list(db.scalars(select(AttentionItem).where(AttentionItem.patient_profile_id == profile.id, AttentionItem.status.in_(["open", "acknowledged", "in_review", "waiting_information", "waiting_plan_publish"])).order_by(AttentionItem.created_at.desc())))
     reviews = list(db.scalars(select(StageReview).where(StageReview.patient_profile_id == profile.id).order_by(StageReview.created_at.desc()).limit(10)))
     assessments = list(db.scalars(select(AssessmentSession).where(AssessmentSession.patient_profile_id == profile.id).order_by(AssessmentSession.assessed_at.desc()).limit(10)))
     return {
@@ -1993,9 +2226,30 @@ def create_stage_review(db: Session, actor: User, patient_user_id: UUID, payload
     metrics = list(db.scalars(metric_stmt.order_by(MetricRecord.measured_at)))
     observations = list(db.scalars(select(ObservationRecord).where(ObservationRecord.patient_profile_id == profile.id)))
     recommendations = list(db.scalars(select(RecommendationRecord).where(RecommendationRecord.patient_profile_id == profile.id, RecommendationRecord.status == "proposed")))
-    attention = list(db.scalars(select(AttentionItem).where(AttentionItem.patient_profile_id == profile.id, AttentionItem.status.in_(["open", "acknowledged"]))))
+    attention_ids = list(dict.fromkeys(payload.attention_item_ids))
+    if payload.primary_attention_item_id and payload.primary_attention_item_id not in attention_ids:
+        attention_ids.insert(0, payload.primary_attention_item_id)
+    attention = list(db.scalars(select(AttentionItem).where(AttentionItem.patient_profile_id == profile.id, AttentionItem.id.in_(attention_ids)))) if attention_ids else []
+    if len(attention) != len(attention_ids):
+        raise HTTPException(status_code=409, detail="所选待办不存在或不属于该患者")
     assessments = list(db.scalars(select(AssessmentSession).where(AssessmentSession.patient_profile_id == profile.id)))
     clinical_runs = list(db.scalars(select(EvaluationRun).where(EvaluationRun.patient_profile_id == profile.id, EvaluationRun.domain == "clinical_stage")))
+    user = db.get(User, patient_user_id)
+    revision_ids: list[str] = []
+    run_ids = {item.primary_evaluation_run_id for item in attention if item.primary_evaluation_run_id}
+    for item in attention:
+        for ref in item.source_refs or []:
+            if not isinstance(ref, dict):
+                continue
+            try:
+                source_id = UUID(str(ref.get("id")))
+            except (TypeError, ValueError):
+                continue
+            source_type = {"attempt": "attempt", "dialogue_session": "dialogue_session", "scenario_dialogue": "dialogue_session"}.get(str(ref.get("type")))
+            if source_type:
+                run_ids.update(db.scalars(select(EvaluationRun.id).where(EvaluationRun.source_type == source_type, EvaluationRun.source_id == source_id)))
+    if run_ids:
+        revision_ids = [str(value) for value in db.scalars(select(EvaluationReviewRevision.id).where(EvaluationReviewRevision.evaluation_run_id.in_(run_ids)).order_by(EvaluationReviewRevision.created_at.asc()))]
     review = StageReview(
         patient_profile_id=profile.id,
         training_plan_version_id=plan.id if plan else None,
@@ -2009,15 +2263,100 @@ def create_stage_review(db: Session, actor: User, patient_user_id: UUID, payload
         assessment_ids=[str(item.id) for item in assessments],
         clinical_stage_run_ids=[str(item.id) for item in clinical_runs],
         therapist_notes=payload.therapist_notes,
+        primary_attention_item_id=payload.primary_attention_item_id,
+        patient_context_snapshot={
+            "patient": {"user_id": str(patient_user_id), "name": user.username if user else "未知患者"},
+            "goal": goal_dict(_active_goal(db, profile.id)),
+            "active_plan": plan_dict(plan),
+            "primary_attention": {"id": str(payload.primary_attention_item_id)} if payload.primary_attention_item_id else None,
+            "captured_at": utc_now().isoformat(),
+        },
+        evidence_review_revision_ids=revision_ids,
     )
     db.add(review)
+    db.flush()
+    from app.modules.review_workflow.service import record_event
+
+    for item in attention:
+        item.primary_stage_review_id = review.id
+        item.status_updated_at = utc_now()
+        record_event(db, item, "stage_review_created", actor=actor, from_status=item.status, to_status=item.status, related_refs={"stage_review_id": str(review.id), "primary": item.id == payload.primary_attention_item_id})
     db.commit()
     db.refresh(review)
     return stage_review_detail(db, actor, review.id)
 
 
+def create_stage_review_from_attention(db: Session, actor: User, item_id: UUID, payload: AttentionStageReviewCreate):
+    from app.modules.review_workflow.service import begin_review, get_attention_for_actor, record_event
+
+    primary = get_attention_for_actor(db, actor, item_id)
+    existing = db.scalar(select(StageReview).where(
+        StageReview.primary_attention_item_id == primary.id,
+        StageReview.status.in_(["draft", "ready_for_decision"]),
+    ).order_by(StageReview.created_at.desc()))
+    if existing:
+        detail = stage_review_detail(db, actor, existing.id)
+        detail["reused"] = True
+        return detail
+    begin_review(db, actor, item_id)
+    selected_ids = list(dict.fromkeys([primary.id, *payload.additional_attention_item_ids]))
+    for selected_id in selected_ids[1:]:
+        other = get_attention_for_actor(db, actor, selected_id, lock=True)
+        if other.patient_profile_id != primary.patient_profile_id:
+            raise HTTPException(status_code=409, detail="一次阶段复核只能关联同一患者的待办")
+        if other.status not in {"open", "acknowledged", "in_review", "waiting_information"}:
+            raise HTTPException(status_code=409, detail="所选待办当前不能加入阶段复核")
+        if other.assigned_to_user_id and other.assigned_to_user_id != actor.id and actor.role != UserRole.admin:
+            raise HTTPException(status_code=409, detail="所选的其他待办已由另一位治疗师接手")
+        old_status = other.status
+        other.status = "in_review"
+        other.assigned_to_user_id = actor.id
+        other.acknowledged_at = other.acknowledged_at or utc_now()
+        other.status_updated_at = utc_now()
+        record_event(db, other, "review_started", actor=actor, from_status=old_status, to_status="in_review")
+    db.flush()
+    review = create_stage_review(db, actor, db.get(PatientProfile, primary.patient_profile_id).user_id, StageReviewCreate(
+        review_from=payload.review_from,
+        review_to=payload.review_to,
+        therapist_notes=payload.therapist_notes,
+        attention_item_ids=selected_ids,
+        primary_attention_item_id=primary.id,
+    ))
+    review["reused"] = False
+    return review
+
+
+def mark_stage_review_ready(db: Session, actor: User, review_id: UUID):
+    review = db.scalar(select(StageReview).where(StageReview.id == review_id).with_for_update())
+    if not review:
+        raise HTTPException(status_code=404, detail="阶段复核不存在")
+    profile = db.get(PatientProfile, review.patient_profile_id)
+    _therapist_profile(db, actor, profile.user_id)
+    if review.status == "finalized":
+        raise HTTPException(status_code=409, detail="已完成决定的阶段复核为只读")
+    if review.status == "ready_for_decision":
+        return stage_review_detail(db, actor, review.id)
+    has_facts = bool((review.facts_snapshot or {}).get("metrics") or review.attention_item_ids or review.assessment_ids or review.clinical_stage_run_ids or review.therapist_notes)
+    if not has_facts:
+        raise HTTPException(status_code=409, detail="当前没有可供决定的训练事实、来源待办或治疗师观察")
+    review.status = "ready_for_decision"
+    review.ready_at = utc_now()
+    review.version += 1
+    from app.modules.review_workflow.service import record_event
+
+    for raw_id in review.attention_item_ids or []:
+        try:
+            item = db.get(AttentionItem, UUID(raw_id))
+        except (TypeError, ValueError):
+            item = None
+        if item:
+            record_event(db, item, "stage_review_ready", actor=actor, from_status=item.status, to_status=item.status, related_refs={"stage_review_id": str(review.id), "review_version": review.version})
+    db.commit()
+    return stage_review_detail(db, actor, review.id)
+
+
 def stage_review_dict(review: StageReview):
-    return {"id": str(review.id), "status": review.status, "training_plan_version_id": str(review.training_plan_version_id) if review.training_plan_version_id else None, "review_window": review.review_window, "facts": review.facts_snapshot, "observation_ids": review.observation_ids, "recommendation_ids": review.recommendation_ids, "attention_item_ids": review.attention_item_ids, "assessment_ids": review.assessment_ids, "clinical_stage_run_ids": review.clinical_stage_run_ids, "therapist_notes": review.therapist_notes, "created_at": review.created_at.isoformat(), "finalized_at": review.finalized_at.isoformat() if review.finalized_at else None}
+    return {"id": str(review.id), "status": review.status, "version": review.version, "training_plan_version_id": str(review.training_plan_version_id) if review.training_plan_version_id else None, "review_window": review.review_window, "facts": review.facts_snapshot, "observation_ids": review.observation_ids, "recommendation_ids": review.recommendation_ids, "attention_item_ids": review.attention_item_ids, "primary_attention_item_id": str(review.primary_attention_item_id) if review.primary_attention_item_id else None, "patient_context": review.patient_context_snapshot or {}, "evidence_review_revision_ids": review.evidence_review_revision_ids or [], "assessment_ids": review.assessment_ids, "clinical_stage_run_ids": review.clinical_stage_run_ids, "therapist_notes": review.therapist_notes, "ready_at": review.ready_at.isoformat() if review.ready_at else None, "created_at": review.created_at.isoformat(), "finalized_at": review.finalized_at.isoformat() if review.finalized_at else None}
 
 
 def stage_review_detail(db: Session, actor: User, review_id: UUID):
@@ -2027,6 +2366,9 @@ def stage_review_detail(db: Session, actor: User, review_id: UUID):
     profile = db.get(PatientProfile, review.patient_profile_id)
     _therapist_profile(db, actor, profile.user_id)
     payload = stage_review_dict(review)
+    payload["patient"] = (review.patient_context_snapshot or {}).get("patient")
+    payload["active_plan"] = (review.patient_context_snapshot or {}).get("active_plan")
+    payload["goal"] = (review.patient_context_snapshot or {}).get("goal")
     payload["observations"] = [observation_dict(item) for item in db.scalars(select(ObservationRecord).where(ObservationRecord.id.in_([UUID(item) for item in review.observation_ids])))] if review.observation_ids else []
     payload["recommendations"] = [recommendation_dict(item) for item in db.scalars(select(RecommendationRecord).where(RecommendationRecord.id.in_([UUID(item) for item in review.recommendation_ids])))] if review.recommendation_ids else []
     payload["attention_items"] = [attention_dict(db, item) for item in db.scalars(select(AttentionItem).where(AttentionItem.id.in_([UUID(item) for item in review.attention_item_ids])))] if review.attention_item_ids else []
@@ -2076,30 +2418,67 @@ def stage_review_detail(db: Session, actor: User, review_id: UUID):
         }
         for item in clinical_runs
     ]
+    payload["evidence_review_revisions"] = [
+        {"id": str(item.id), "evaluation_run_id": str(item.evaluation_run_id), "action": item.review_action, "reason": item.reason, "automatic": item.automatic_value_snapshot, "revised": item.revised_value_snapshot, "created_at": item.created_at.isoformat()}
+        for item in db.scalars(select(EvaluationReviewRevision).where(EvaluationReviewRevision.id.in_([UUID(value) for value in review.evidence_review_revision_ids or []])).order_by(EvaluationReviewRevision.created_at.asc()))
+    ] if review.evidence_review_revision_ids else []
+    decision = db.scalar(select(TherapistDecision).where(TherapistDecision.stage_review_id == review.id).order_by(TherapistDecision.decided_at.desc()))
+    payload["decision"] = {
+        "id": str(decision.id), "decision_type": decision.decision_type, "reason": decision.reason,
+        "result": decision.result_snapshot, "attention_resolution_policy": decision.attention_resolution_policy,
+        "resulting_training_plan_version_id": str(decision.resulting_training_plan_version_id) if decision.resulting_training_plan_version_id else None,
+        "decided_at": decision.decided_at.isoformat(),
+    } if decision else None
     return payload
 
 
 def create_decision(db: Session, actor: User, review_id: UUID, payload: DecisionCreate):
-    review = db.get(StageReview, review_id)
+    review = db.scalar(select(StageReview).where(StageReview.id == review_id).with_for_update())
     if not review:
         raise HTTPException(status_code=404, detail="阶段复核不存在")
     profile = db.get(PatientProfile, review.patient_profile_id)
     _therapist_profile(db, actor, profile.user_id)
+    request_key = payload.request_key or hashlib.sha256(f"{review.id}:{actor.id}:{payload.decision_type}:{payload.reason}".encode()).hexdigest()
+    existing = db.scalar(select(TherapistDecision).where(TherapistDecision.stage_review_id == review.id, TherapistDecision.request_key == request_key))
+    if existing:
+        return {"id": str(existing.id), "stage_review_id": str(existing.stage_review_id), "decision_type": existing.decision_type, "reason": existing.reason, "payload": existing.payload_snapshot, "result": existing.result_snapshot, "resulting_training_plan_version_id": str(existing.resulting_training_plan_version_id) if existing.resulting_training_plan_version_id else None, "decided_at": existing.decided_at.isoformat()}
     if review.status == "finalized":
         raise HTTPException(status_code=409, detail="该阶段复核已经形成决策")
+    if review.status != "ready_for_decision":
+        raise HTTPException(status_code=409, detail="请先完成事实核对并将阶段复核标记为可决定")
+    if review.version != payload.expected_review_version:
+        raise HTTPException(status_code=409, detail="阶段复核内容已变化，请重新载入后再作决定")
+    source_ids = list(dict.fromkeys([*(payload.source_attention_item_ids or []), *([payload.source_attention_item_id] if payload.source_attention_item_id else []), *([review.primary_attention_item_id] if review.primary_attention_item_id else [])]))
+    source_items = []
+    for source_id in source_ids:
+        item = db.scalar(select(AttentionItem).where(AttentionItem.id == source_id).with_for_update())
+        if not item or item.patient_profile_id != profile.id:
+            raise HTTPException(status_code=409, detail="决定关联的待办不存在或患者不匹配")
+        if item.status in {"resolved", "dismissed"}:
+            raise HTTPException(status_code=409, detail="决定关联的待办已经关闭")
+        if item.assigned_to_user_id and item.assigned_to_user_id != actor.id and actor.role != UserRole.admin:
+            raise HTTPException(status_code=409, detail="决定关联的待办由其他治疗师接手")
+        source_items.append(item)
+    resolution_policy = payload.attention_resolution_policy or ("wait_plan" if payload.decision_type in {"adjust_stage_focus", "adjust_strategy", "create_new_training_plan_version"} else "dismiss" if payload.decision_type == "no_action" else "resolve")
+    creates_plan = payload.decision_type in {"adjust_stage_focus", "adjust_strategy", "create_new_training_plan_version"}
+    if creates_plan and resolution_policy != "wait_plan":
+        raise HTTPException(status_code=422, detail="生成训练方案的决定必须等待方案发布后关闭来源待办")
     decision = TherapistDecision(
         patient_profile_id=profile.id,
         stage_review_id=review.id,
         actor_user_id=actor.id,
         decision_type=payload.decision_type,
         reason=payload.reason,
-        source_attention_item_id=payload.source_attention_item_id,
-        payload_snapshot=payload.payload,
+        source_attention_item_id=source_items[0].id if source_items else payload.source_attention_item_id,
+        payload_snapshot={**payload.payload, "source_attention_item_ids": [str(item.id) for item in source_items]},
         result_snapshot={},
+        attention_resolution_policy=resolution_policy,
+        expected_review_version=payload.expected_review_version,
+        request_key=request_key,
     )
     db.add(decision)
     db.flush()
-    if payload.decision_type == "create_new_training_plan_version":
+    if creates_plan:
         current = db.get(TrainingPlanVersion, review.training_plan_version_id) if review.training_plan_version_id else _active_plan(db, profile.id)
         if not current:
             raise HTTPException(status_code=409, detail="没有可作为新版本基础的训练方案")
@@ -2118,19 +2497,62 @@ def create_decision(db: Session, actor: User, review_id: UUID, payload: Decision
         db.flush()
         current_rules = list(db.scalars(select(TrainingPlanExerciseRule).where(TrainingPlanExerciseRule.training_plan_version_id == current.id)))
         for item in current_rules:
-            db.add(TrainingPlanExerciseRule(training_plan_version_id=draft.id, task_template_id=item.task_template_id, exercise_type=item.exercise_type, order_index=item.order_index, target_repetitions=item.target_repetitions, difficulty=item.difficulty, max_information_units=item.max_information_units, prompt_policy=item.prompt_policy, scene_scope=item.scene_scope))
+            db.add(TrainingPlanExerciseRule(training_plan_version_id=draft.id, task_template_id=item.task_template_id, exercise_type=item.exercise_type, sequence_role=item.sequence_role, order_index=item.order_index, estimated_duration_seconds=item.estimated_duration_seconds, target_repetitions=item.target_repetitions, difficulty=item.difficulty, max_information_units=item.max_information_units, prompt_policy=item.prompt_policy, scene_scope=item.scene_scope))
         decision.resulting_training_plan_version_id = draft.id
-        decision.result_snapshot = {"draft_training_plan_version_id": str(draft.id), "requires_publish": True}
+        decision.result_snapshot = {"draft_training_plan_version_id": str(draft.id), "draft_version_number": draft.version_number, "requires_publish": True, "attention_resolution_policy": "wait_plan"}
+        from app.modules.review_workflow.service import record_event
+
+        for item in source_items:
+            previous = item.status
+            item.status = "waiting_plan_publish"
+            item.waiting_reason = "plan_publish"
+            item.status_updated_at = utc_now()
+            item.primary_stage_review_id = review.id
+            record_event(db, item, "plan_draft_created", actor=actor, from_status=previous, to_status=item.status, related_refs={"stage_review_id": str(review.id), "decision_id": str(decision.id), "plan_id": str(draft.id)})
     else:
-        decision.result_snapshot = {"status": "recorded"}
+        decision.result_snapshot = {"status": "recorded", "attention_resolution_policy": resolution_policy}
+        if payload.decision_type == "request_formal_assessment":
+            create_attention(
+                db,
+                profile.id,
+                "assessment_due",
+                "therapist_requested_formal_assessment",
+                "治疗师已安排正式评估，请联系治疗师确认时间。",
+                f"formal-assessment:{review.id}",
+                [{"type": "stage_review", "id": str(review.id)}],
+                priority="normal",
+            )
     review.status = "finalized"
     review.finalized_at = utc_now()
-    if payload.source_attention_item_id:
-        item = db.get(AttentionItem, payload.source_attention_item_id)
-        if item and item.patient_profile_id == profile.id:
+    review.version += 1
+    from app.modules.review_workflow.service import record_event
+
+    for item in source_items:
+        if creates_plan:
+            continue
+        previous = item.status
+        item.assigned_to_user_id = actor.id
+        item.status_updated_at = utc_now()
+        if resolution_policy == "keep_open":
+            item.status = "in_review"
+            item.waiting_reason = None
+        elif resolution_policy == "dismiss":
+            item.status = "dismissed"
+            item.resolved_at = utc_now()
+            item.resolution_code = "false_positive"
+            item.resolution_note = payload.reason.strip()
+        else:
             item.status = "resolved"
             item.resolved_at = utc_now()
-            item.resolution_note = f"由阶段复核决策 {decision.id} 处理"
+            item.resolution_code = "formal_assessment_requested" if payload.decision_type == "request_formal_assessment" else "confirmed_no_change" if payload.decision_type == "continue_current_plan" else "corrected_no_plan_change"
+            item.resolution_note = payload.reason.strip()
+            item.waiting_reason = None
+        record_event(db, item, "dismissed" if item.status == "dismissed" else "decision_recorded", actor=actor, from_status=previous, to_status=item.status, note=payload.reason, related_refs={"stage_review_id": str(review.id), "decision_id": str(decision.id)})
+        if item.status in {"resolved", "dismissed"}:
+            record_event(db, item, item.status, actor=actor, from_status=previous, to_status=item.status, note=payload.reason, related_refs={"decision_id": str(decision.id)})
+    from app.core.observability import log_event
+
+    log_event("info", "review_workflow", "therapist_decision_recorded", stage_review_id=str(review.id), decision_id=str(decision.id), decision_type=decision.decision_type, actor_user_id=str(actor.id))
     db.commit()
     db.refresh(decision)
     return {"id": str(decision.id), "stage_review_id": str(decision.stage_review_id), "decision_type": decision.decision_type, "reason": decision.reason, "payload": decision.payload_snapshot, "result": decision.result_snapshot, "resulting_training_plan_version_id": str(decision.resulting_training_plan_version_id) if decision.resulting_training_plan_version_id else None, "decided_at": decision.decided_at.isoformat()}

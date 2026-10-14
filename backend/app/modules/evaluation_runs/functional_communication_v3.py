@@ -165,24 +165,67 @@ def review_or_recompute(db: Session, user: User, run_id: UUID, payload: Evaluati
     current = get_run(db, run_id)
     if current.domain != DOMAIN: raise HTTPException(status_code=409, detail="该评估不是场景沟通 V3 结果")
     get_run_for_professional(db, user, run_id)
+    if payload is None:
+        dialogue, turns = _load_dialogue(db, current.source_id)
+        rebuilt = _build(dialogue, turns)
+        same = db.scalar(select(EvaluationRun).where(EvaluationRun.source_type == "dialogue_session", EvaluationRun.source_id == dialogue.id, EvaluationRun.domain == DOMAIN, EvaluationRun.input_fingerprint == rebuilt.input_fingerprint))
+        candidate = same or create_candidate_run(db, rebuilt)
+        adopted = candidate if candidate.adoption_status == "adopted" else adopt_candidate_run(db, candidate.id)
+        return adopted, None
     request_key = _review_request_key(run_id, user.id, payload) if payload else None
     if request_key:
         existing_revision = db.scalar(select(EvaluationReviewRevision).where(EvaluationReviewRevision.evaluation_run_id == run_id, EvaluationReviewRevision.review_request_key == request_key))
         if existing_revision:
             return (get_run(db, existing_revision.recomputed_run_id) if existing_revision.recomputed_run_id else current), existing_revision
+    target = next((item for item in current.dimension_results if item.id == payload.dimension_result_id), None) if payload and payload.dimension_result_id else None
+    if payload and payload.dimension_result_id and not target:
+        raise HTTPException(status_code=409, detail="复核维度不属于该评估运行")
+    if payload and payload.review_action in {"corrected", "unjudgeable"} and not target:
+        raise HTTPException(status_code=422, detail="修正或标记无法判断时必须选择一个评估维度")
+    if payload and payload.review_action == "corrected" and (not payload.reason or not payload.reason.strip() or not payload.revised_value_snapshot):
+        raise HTTPException(status_code=422, detail="修正结果必须填写修正值和依据")
+    if payload and payload.review_action == "unjudgeable" and not payload.reason_code:
+        raise HTTPException(status_code=422, detail="无法判断必须选择原因")
+    dialogue, turns = _load_dialogue(db, current.source_id)
+    if payload and payload.review_action in {"confirmed", "corrected"} and not any(turn.speaker == DialogueSpeaker.patient and turn.audio_file_id for turn in turns):
+        raise HTTPException(status_code=409, detail="缺少患者原音，只能记录无法判断，不能确认或修正自动结果")
+    transcript_override = str((payload.evidence_override or {}).get("transcript_override") or "").strip() if payload else ""
+    if payload and payload.reason_code == "asr_mismatch" and not transcript_override:
+        raise HTTPException(status_code=422, detail="标记 ASR 与原音不一致时，请填写回听后的校正转写")
+    if payload and payload.evidence_override.get("quoted_evidence"):
+        quote = str(payload.evidence_override["quoted_evidence"])
+        if payload.reason_code == "asr_mismatch":
+            transcript_source = transcript_override
+        else:
+            transcript_source = " ".join(turn.text for turn in turns if turn.speaker == DialogueSpeaker.patient)
+        if quote not in transcript_source:
+            raise HTTPException(status_code=422, detail="引用内容必须能在对应患者转写中定位；ASR 修正时请引用校正转写中的原话")
+    automatic_snapshot = {
+        "domain": current.domain,
+        "dimensions": [{"id": str(row.id), "dimension_code": row.dimension_code, "value": row.value, "level": row.level, "unit": row.unit, "status": row.status, "evidence_snapshot": row.evidence_snapshot or {}, "measurement_quality": row.measurement_quality or {}} for row in current.dimension_results],
+    }
     if payload and payload.review_action == "confirmed":
-        revision = EvaluationReviewRevision(evaluation_run_id=run_id, **payload.model_copy(update={"reviewer_user_id": user.id, "recomputed_run_id": None, "review_request_key": request_key}).model_dump())
+        revision_payload = payload.model_dump()
+        revision_payload.update({"reviewer_user_id": user.id, "recomputed_run_id": None, "review_request_key": request_key, "automatic_value_snapshot": automatic_snapshot, "revised_value_snapshot": {}})
+        revision = EvaluationReviewRevision(evaluation_run_id=run_id, **revision_payload)
         db.add(revision); db.commit(); return current, revision
     dialogue, turns = _load_dialogue(db, current.source_id)
     override = _review_override(current, payload)
     rebuilt = _build(dialogue, turns, review_override=override)
     same = db.scalar(select(EvaluationRun).where(EvaluationRun.source_type == "dialogue_session", EvaluationRun.source_id == dialogue.id, EvaluationRun.domain == DOMAIN, EvaluationRun.input_fingerprint == rebuilt.input_fingerprint))
-    if same: return same, None
+    if same:
+        candidate = same
+    else:
+        try:
+            candidate = create_candidate_run(db, rebuilt, commit=False)
+        except Exception:
+            db.rollback(); raise
     try:
-        candidate = create_candidate_run(db, rebuilt, commit=False)
-        revision = EvaluationReviewRevision(evaluation_run_id=run_id, **(payload or EvaluationReviewRevisionCreate(review_action="corrected")).model_copy(update={"reviewer_user_id": user.id, "recomputed_run_id": candidate.id, "review_request_key": request_key}).model_dump())
+        revision_payload = (payload or EvaluationReviewRevisionCreate(review_action="confirmed")).model_dump()
+        revision_payload.update({"reviewer_user_id": user.id, "recomputed_run_id": candidate.id, "review_request_key": request_key, "automatic_value_snapshot": automatic_snapshot})
+        revision = EvaluationReviewRevision(evaluation_run_id=run_id, **revision_payload)
         db.add(revision); db.flush()
-        adopted = adopt_candidate_run(db, candidate.id, commit=False)
+        adopted = candidate if candidate.adoption_status == "adopted" else adopt_candidate_run(db, candidate.id, commit=False)
         db.commit()
         return adopted, revision
     except Exception:
@@ -196,7 +239,7 @@ def _review_request_key(run_id: UUID, user_id: UUID, payload: EvaluationReviewRe
     # immutable revisions while retaining the option to supply an explicit key.
     return payload.review_request_key or _fingerprint({"run_id": str(run_id), "reviewer": str(user_id), "action": payload.review_action,
         "dimension_result_id": str(payload.dimension_result_id) if payload.dimension_result_id else None,
-        "automatic": payload.automatic_value_snapshot, "revised": payload.revised_value_snapshot,
+        "revised": payload.revised_value_snapshot,
         "override": payload.evidence_override, "reason": payload.reason})
 
 
@@ -211,5 +254,5 @@ def _review_override(current: EvaluationRun, payload: EvaluationReviewRevisionCr
     if payload.review_action == "unjudgeable":
         patch["status"] = "unjudgeable"
     if payload.evidence_override:
-        patch["evidence_snapshot"] = deepcopy(payload.evidence_override)
+        patch["evidence_snapshot"] = {"therapist_override": deepcopy(payload.evidence_override)}
     return {code: patch} if code else patch

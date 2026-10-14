@@ -19,6 +19,7 @@ from app.modules.profiles.router import router as profiles_router
 from app.modules.profile_v2.router import router as profile_v2_router
 from app.modules.product_v2.router import router as product_v2_router
 from app.modules.reports.router import router as reports_router
+from app.modules.review_workflow.router import router as review_workflow_router
 from app.modules.scoring.router import router as scoring_router
 from app.modules.scenario_dialogues.router import router as scenario_dialogues_router
 from app.modules.therapist.router import router as therapist_router
@@ -52,6 +53,7 @@ def create_app() -> FastAPI:
     app.include_router(profiles_router, prefix=settings.api_prefix)
     app.include_router(profile_v2_router, prefix=settings.api_prefix)
     app.include_router(product_v2_router, prefix=settings.api_prefix)
+    app.include_router(review_workflow_router, prefix=settings.api_prefix)
     app.include_router(therapist_router, prefix=settings.api_prefix)
     app.include_router(family_router, prefix=settings.api_prefix)
     app.include_router(files_router, prefix=settings.api_prefix)
