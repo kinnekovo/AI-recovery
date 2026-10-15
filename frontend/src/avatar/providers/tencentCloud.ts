@@ -37,6 +37,10 @@ export class TencentCloudAvatarProvider implements AvatarProvider {
   async prepare(context: AvatarProviderContext): Promise<void> {
     this.context = context
     if (!this.active) return
+    if (this.session && this.playerIsMounted()) {
+      this.markReady(this.session)
+      return
+    }
     context.update({
       provider: 'tencent_cloud',
       state: 'idle',
@@ -125,8 +129,16 @@ export class TencentCloudAvatarProvider implements AvatarProvider {
   }
 
   private async connect(): Promise<boolean> {
-    if (this.session) return true
-    if (!this.active || !document.getElementById(this.containerId)) return false
+    const container = document.getElementById(this.containerId)
+    if (!this.active || !container) return false
+    if (this.session) {
+      if (!this.playerIsMounted()) {
+        this.soundEnabled = false
+        this.mountPlayer(this.session.play_stream_addr)
+      }
+      this.markReady(this.session)
+      return true
+    }
     this.connecting ||= this.createSession()
     return this.connecting
   }
@@ -143,15 +155,7 @@ export class TencentCloudAvatarProvider implements AvatarProvider {
       this.session = lease
       this.leaseId = lease.id
       this.connectionError = ''
-      this.context?.update({
-        provider: 'tencent_cloud',
-        line: lease.timbre_bound
-          ? '腾讯云数字人已绑定专属声音。首次使用请在画面中点击“开启声音”。'
-          : '腾讯云数字人已连接，当前使用默认声音。首次使用请在画面中点击“开启声音”。',
-        error: '',
-        speechSource: lease.timbre_bound ? 'cloud_custom_text' : 'cloud_text',
-        videoStatus: 'ready',
-      })
+      this.markReady(lease)
       return true
     } catch (error) {
       if (lease?.id) void avatarSessionsApi.close(lease.id).catch(() => undefined)
@@ -166,6 +170,7 @@ export class TencentCloudAvatarProvider implements AvatarProvider {
   private mountPlayer(playStreamAddr: string) {
     const container = document.getElementById(this.containerId)
     if (!container) throw new Error('训练页数字人播放区域尚未就绪。')
+    this.player?.remove()
     container.replaceChildren()
     const iframe = document.createElement('iframe')
     iframe.title = '腾讯云数字人实时画面'
@@ -173,6 +178,23 @@ export class TencentCloudAvatarProvider implements AvatarProvider {
     iframe.src = `/tencent-avatar/webrtc-player.html?url=${encodeURIComponent(playStreamAddr)}`
     container.appendChild(iframe)
     this.player = iframe
+  }
+
+  private playerIsMounted() {
+    const container = document.getElementById(this.containerId)
+    return Boolean(container && this.player?.isConnected && this.player.parentElement === container)
+  }
+
+  private markReady(lease: TencentAvatarSession) {
+    this.context?.update({
+      provider: 'tencent_cloud',
+      line: lease.timbre_bound
+        ? '腾讯云数字人已绑定专属声音。首次使用请在画面中点击“开启声音”。'
+        : '腾讯云数字人已连接，当前使用默认声音。首次使用请在画面中点击“开启声音”。',
+      error: '',
+      speechSource: lease.timbre_bound ? 'cloud_custom_text' : 'cloud_text',
+      videoStatus: 'ready',
+    })
   }
 
   private readonly onPlayerMessage = (event: MessageEvent) => {

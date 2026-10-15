@@ -5,63 +5,68 @@
       <div class="focus-header-actions"><RouterLink class="v2-icon-text" to="/training">保存并退出</RouterLink><button v-if="session?.status==='in_progress'||session?.status==='paused'" class="v2-icon-text" :disabled="busy || avatar.isBusy.value" @click="togglePause"><Pause v-if="session?.status==='in_progress'" :size="18"/><Play v-else :size="18"/>{{ session?.status==='in_progress'?'暂停':'继续' }}</button></div>
     </header>
 
-    <div v-if="loading" class="v2-state">正在恢复训练进度…</div>
+    <div v-if="loading && !session" class="v2-state">正在恢复训练进度…</div>
     <div v-else-if="error && !session" class="v2-state v2-state-error"><strong>训练没有恢复成功</strong><span>{{ error }}</span><button class="v2-button secondary" @click="load">重新加载</button></div>
 
     <template v-else-if="session && current">
       <div class="session-rail" aria-label="训练进度"><span v-for="item in session.exercises" :key="item.id" :class="item.status"><i></i><small>{{ item.order_index + 1 }}</small></span></div>
-      <div class="exercise-stage">
-        <div class="exercise-brief">
-          <p class="v2-section-label">{{ current.exercise_type === 'repeat' ? '跟读练习' : '场景表达' }}</p>
-          <h1>{{ current.title }}</h1>
-          <p>{{ current.instruction }}</p>
-        </div>
+      <div class="exercise-stage" :aria-busy="loading">
+        <p v-if="loading" class="training-refresh-status" role="status">正在准备下一项练习…</p>
+        <div class="training-workspace">
+          <AvatarCoachPanel
+            class="training-avatar-panel"
+            cloud-container-id="v2-repeat-avatar-cloud"
+            :snapshot="avatar.snapshot"
+            :avatar-url="currentAgent?.avatar_url"
+            :avatar-animation-config="currentAgent?.avatar_animation_config"
+            :title="current.exercise_type === 'repeat' ? '数字人跟读示范' : '数字人陪伴'"
+          >
+            <template #actions>
+              <button
+                v-if="current.exercise_type === 'repeat'"
+                class="v2-button secondary repeat-demo-button"
+                type="button"
+                :disabled="avatar.isBusy.value || recording || loading || session.status !== 'in_progress'"
+                @click="speakRepeatTarget"
+              >
+                <Volume2 :size="19" />{{ avatar.isBusy.value ? '正在示范…' : '听数字人示范' }}
+              </button>
+            </template>
+          </AvatarCoachPanel>
 
-        <AvatarCoachPanel
-          v-if="current.exercise_type === 'repeat'"
-          class="repeat-avatar-coach"
-          cloud-container-id="v2-repeat-avatar-cloud"
-          :snapshot="avatar.snapshot"
-          :avatar-url="currentAgent?.avatar_url"
-          :avatar-animation-config="currentAgent?.avatar_animation_config"
-          title="数字人跟读示范"
-        >
-          <template #actions>
-            <button
-              class="v2-button secondary repeat-demo-button"
-              type="button"
-              :disabled="avatar.isBusy.value || recording || session.status !== 'in_progress'"
-              @click="speakRepeatTarget"
-            >
-              <Volume2 :size="19" />{{ avatar.isBusy.value ? '正在示范…' : '听数字人示范' }}
-            </button>
-          </template>
-        </AvatarCoachPanel>
+          <div class="training-interaction-column">
+            <div class="exercise-brief">
+              <p class="v2-section-label">{{ current.exercise_type === 'repeat' ? '跟读练习' : '场景表达' }}</p>
+              <h1>{{ current.title }}</h1>
+              <p>{{ current.instruction }}</p>
+            </div>
 
-        <section v-if="current.exercise_type === 'repeat'" class="practice-surface">
-          <div class="target-utterance"><span>请说</span><strong>{{ current.target }}</strong></div>
-          <RecorderPanel v-if="session.status==='in_progress' && !avatar.isBusy.value" :key="`${current.id}-${retryKey}`" mode="repeat" :wait-seconds="waitSeconds" @recorded="blob=$event" @recording-state="handleRepeatRecordingState" @recorder-error="error=$event" />
-          <p v-else-if="avatar.isBusy.value" class="v2-quiet-copy" aria-live="polite">请先听完数字人示范，再开始录音。</p>
-          <p v-else class="v2-quiet-copy">训练已暂停。点击右上角“继续”后再录音。</p>
-          <div v-if="feedback" class="instant-feedback" aria-live="polite"><CheckCircle2 :size="26"/><div><strong>这一遍已经完成</strong><p>{{ feedbackText }}</p></div></div>
-          <div v-if="statusMessage" class="v2-inline-success" role="status">{{ statusMessage }}</div>
-          <div v-if="error" class="v2-inline-error" role="alert">{{ error }}</div>
-          <div class="training-actions">
-            <button class="v2-button secondary" :disabled="busy||session.status!=='in_progress'" @click="hint"><Lightbulb :size="19"/>给我一点提示</button>
-            <button class="v2-button primary" :disabled="!blob || busy || session.status!=='in_progress'" @click="submitRepeat"><Upload :size="19"/>{{ busy?'正在分析…':'提交这一遍' }}</button>
+            <section v-if="current.exercise_type === 'repeat'" class="practice-surface">
+              <div class="target-utterance"><span>请说</span><strong>{{ current.target }}</strong></div>
+              <RecorderPanel v-if="session.status==='in_progress' && !avatar.isBusy.value" :key="`${current.id}-${retryKey}`" mode="repeat" :wait-seconds="waitSeconds" @recorded="blob=$event" @recording-state="handleRepeatRecordingState" @recorder-error="error=$event" />
+              <p v-else-if="avatar.isBusy.value" class="v2-quiet-copy" aria-live="polite">请先听完数字人示范，再开始录音。</p>
+              <p v-else class="v2-quiet-copy">训练已暂停。点击右上角“继续”后再录音。</p>
+              <div v-if="feedback" class="instant-feedback" aria-live="polite"><CheckCircle2 :size="26"/><div><strong>这一遍已经完成</strong><p>{{ feedbackText }}</p></div></div>
+              <div v-if="statusMessage" class="v2-inline-success" role="status">{{ statusMessage }}</div>
+              <div v-if="error" class="v2-inline-error" role="alert">{{ error }}</div>
+              <div class="training-actions">
+                <button class="v2-button secondary" :disabled="busy||loading||session.status!=='in_progress'" @click="hint"><Lightbulb :size="19"/>给我一点提示</button>
+                <button class="v2-button primary" :disabled="!blob || busy || loading || session.status!=='in_progress'" @click="submitRepeat"><Upload :size="19"/>{{ busy?'正在分析…':'提交这一遍' }}</button>
+              </div>
+            </section>
+
+            <section v-else class="practice-surface">
+              <div class="scenario-prompt"><span>场景</span><strong>{{ current.target }}</strong><p>用自己的话表达，不需要照着固定句子说。</p></div>
+              <ol v-if="dialogue?.turns?.length" class="v2-dialogue-log"><li v-for="turn in dialogue.turns" :key="turn.turn_index" :class="turn.speaker"><strong>{{ turn.speaker==='agent'?'陪伴助手':'我' }}</strong><p>{{ turn.text }}</p></li></ol>
+              <RecorderPanel v-if="dialogue?.status !== 'completed' && session.status==='in_progress'" :key="`${current.id}-${dialogue?.patient_turn_count||0}`" mode="scenario" :wait-seconds="waitSeconds" @recorded="blob=$event" @recording-state="recording=$event" @recorder-error="error=$event"/>
+              <div v-if="statusMessage" class="v2-inline-success" role="status">{{ statusMessage }}</div>
+              <div v-if="error" class="v2-inline-error" role="alert">{{ error }}</div>
+              <div class="training-actions"><button class="v2-button secondary" :disabled="busy||loading||session.status!=='in_progress'" @click="scenarioHint"><Lightbulb :size="19"/>表达提示</button><button v-if="dialogue?.status!=='completed'" class="v2-button primary" :disabled="!blob||busy||loading||session.status!=='in_progress'" @click="submitScenario">{{ busy?'正在听…':'提交这一轮' }}</button><button v-else class="v2-button primary" :disabled="busy||loading" @click="advance">继续</button></div>
+            </section>
+
+            <details class="training-more"><summary>我现在有点困难</summary><div><button :disabled="busy||loading||session.status!=='in_progress'" @click="requestHelp">请治疗师关注</button><button :disabled="busy||loading||session.status!=='in_progress'" @click="skip">先跳过这一题</button></div></details>
           </div>
-        </section>
-
-        <section v-else class="practice-surface">
-          <div class="scenario-prompt"><span>场景</span><strong>{{ current.target }}</strong><p>用自己的话表达，不需要照着固定句子说。</p></div>
-          <ol v-if="dialogue?.turns?.length" class="v2-dialogue-log"><li v-for="turn in dialogue.turns" :key="turn.turn_index" :class="turn.speaker"><strong>{{ turn.speaker==='agent'?'陪伴助手':'我' }}</strong><p>{{ turn.text }}</p></li></ol>
-          <RecorderPanel v-if="dialogue?.status !== 'completed' && session.status==='in_progress'" :key="`${current.id}-${dialogue?.patient_turn_count||0}`" mode="scenario" :wait-seconds="waitSeconds" @recorded="blob=$event" @recording-state="recording=$event" @recorder-error="error=$event"/>
-          <div v-if="statusMessage" class="v2-inline-success" role="status">{{ statusMessage }}</div>
-          <div v-if="error" class="v2-inline-error" role="alert">{{ error }}</div>
-          <div class="training-actions"><button class="v2-button secondary" :disabled="busy||session.status!=='in_progress'" @click="scenarioHint"><Lightbulb :size="19"/>表达提示</button><button v-if="dialogue?.status!=='completed'" class="v2-button primary" :disabled="!blob||busy||session.status!=='in_progress'" @click="submitScenario">{{ busy?'正在听…':'提交这一轮' }}</button><button v-else class="v2-button primary" :disabled="busy" @click="advance">继续</button></div>
-        </section>
-
-        <details class="training-more"><summary>我现在有点困难</summary><div><button :disabled="busy||session.status!=='in_progress'" @click="requestHelp">请治疗师关注</button><button :disabled="busy||session.status!=='in_progress'" @click="skip">先跳过这一题</button></div></details>
+        </div>
       </div>
     </template>
 
@@ -118,11 +123,12 @@ watch([currentAgent, current, loading], async ([agent, exercise, isLoading]) => 
   // Waiting for that transition avoids treating a missing DOM container as a
   // Tencent Cloud connection failure.
   if (isLoading) return
-  const isRepeat = exercise?.exercise_type === 'repeat'
-  cloudProvider.setAgent(isRepeat ? agent?.id || null : null, isRepeat)
-  if (isRepeat) {
+  const hasExercise = Boolean(exercise)
+  cloudProvider.setAgent(hasExercise ? agent?.id || null : null, hasExercise)
+  if (hasExercise) {
     await nextTick()
     await avatar.prepare()
+    if (exercise?.exercise_type === 'scenario') avatar.idle('我会陪你完成这个场景练习。')
   }
 }, { immediate: true })
 
