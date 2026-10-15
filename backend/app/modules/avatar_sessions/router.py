@@ -7,7 +7,7 @@ from app.core.response import api_success
 from app.database.session import get_db
 from app.modules.agents.service import get_owned_agent
 from app.modules.avatar_sessions import service
-from app.modules.avatar_sessions.schema import AvatarSessionCreate, AvatarSpeechCreate
+from app.modules.avatar_sessions.schema import AvatarSessionCreate, AvatarSpeechCreate, AvatarTextDrive
 from app.modules.users.model import User
 from app.modules.users.service import require_patient
 
@@ -45,4 +45,15 @@ def drive_audio(
     db: Session = Depends(get_db),
 ):
     result = service.drive_audio(db, current_user, service.get_owned_session(db, current_user, session_id), audio)
+    return api_success(result)
+
+
+@router.post("/{session_id}/text")
+def drive_text(
+    session_id: UUID,
+    payload: AvatarTextDrive,
+    current_user: User = Depends(require_patient),
+    db: Session = Depends(get_db),
+):
+    result = service.drive_text(db, current_user, service.get_owned_session(db, current_user, session_id), payload.text)
     return api_success(result)

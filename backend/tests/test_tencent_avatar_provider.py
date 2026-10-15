@@ -34,6 +34,7 @@ class TencentAvatarProviderTest(unittest.TestCase):
             base_url="https://gw.tvs.qq.com",
             request_timeout=30,
             ready_timeout=120,
+            timbre_key=None,
         )
 
     @patch("app.integrations.tencent_avatar.provider.time.time", return_value=1700000000)
@@ -63,6 +64,46 @@ class TencentAvatarProviderTest(unittest.TestCase):
         self.assertTrue(messages[-1]["Data"]["IsFinal"])
         self.assertEqual(messages[-1]["Data"]["Audio"], "")
         self.assertAlmostEqual(duration, (5120 * 7 + 2) / 32000)
+
+    def test_text_drive_sends_verified_cloud_command(self) -> None:
+        runtime = self.make_runtime()
+        socket = FakeWebSocket()
+        runtime.session_id = "session-id"
+        runtime.ws = socket  # type: ignore[assignment]
+        runtime._connected.set()
+
+        duration = runtime.send_text("今天天气很好。")
+        payload = json.loads(socket.messages[0])["Payload"]
+
+        self.assertEqual(payload["Command"], "SEND_TEXT")
+        self.assertEqual(payload["Data"], {"Text": "今天天气很好。", "ChatCommand": "NotUseChat"})
+        self.assertGreater(duration, 1.0)
+
+    def test_custom_timbre_is_bound_when_session_is_created(self) -> None:
+        runtime = self.make_runtime()
+        runtime.timbre_key = "custom-timbre-key"
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        def fake_api_call(endpoint: str, body: dict[str, object]):
+            calls.append((endpoint, body))
+            if endpoint == runtime._CREATE:
+                return {
+                    "SessionId": "session-id",
+                    "PlayStreamAddr": "webrtc://example.test/live/session-id",
+                    "SessionStatus": 1,
+                }
+            return {}
+
+        runtime._api_call = fake_api_call  # type: ignore[method-assign]
+        runtime._open_websocket = lambda: None  # type: ignore[method-assign]
+
+        runtime.open()
+
+        self.assertEqual(calls[0][1]["SpeechParam"], {
+            "TimbreKey": "custom-timbre-key",
+            "Speed": 0.9,
+            "Volume": 0,
+        })
 
     def test_photo_is_cropped_to_safe_square_jpeg_for_face_detection(self) -> None:
         source_path = Path(__file__).parent / f"portrait-{uuid4().hex}.png"
@@ -103,6 +144,22 @@ class TencentAvatarProviderTest(unittest.TestCase):
 
         self.assertLessEqual(len(filename), 20)
         self.assertRegex(filename, r"^[A-Za-z0-9_-]+\.jpg$")
+
+    def test_free_voice_detection_omits_training_text(self) -> None:
+        client = TencentAvatarCustomizationClient.__new__(TencentAvatarCustomizationClient)
+        captured: dict[str, object] = {}
+
+        def fake_api_call(endpoint: str, body: dict[str, object]):
+            captured["endpoint"] = endpoint
+            captured["body"] = body
+            return {"TaskId": "quality-task"}
+
+        client._api_call = fake_api_call  # type: ignore[method-assign]
+        task_id = client.start_voice_quality_detection("https://example.test/zeroshot/voice.mp3")
+
+        self.assertEqual(task_id, "quality-task")
+        self.assertNotIn("TextId", captured["body"])
+        self.assertEqual(captured["body"]["Language"], "chi")
 
 
 if __name__ == "__main__":

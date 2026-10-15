@@ -129,6 +129,8 @@ const capabilityLabel = computed(() => {
   const labels = {
     none: '语音引导已启用',
     cloud_audio: '真实云端语音',
+    cloud_text: '云端文本实时合成',
+    cloud_custom_text: '专属声音实时合成',
     browser_tts: '已切换设备语音',
     silent: '文字引导',
   } as const

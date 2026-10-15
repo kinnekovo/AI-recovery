@@ -40,10 +40,11 @@ export const agentsApi = {
   refreshTencentAvatar(agentId: string) {
     return request<Agent>(http.post(`/agents/${agentId}/tencent-avatar/status`))
   },
-  uploadVoice(agentId: string, file: File, voiceGender: 1 | 2) {
+  uploadVoice(agentId: string, file: File, voiceGender: 1 | 2, consentConfirmed: boolean) {
     const form = new FormData()
     form.append('audio_file', file)
     form.append('voice_gender', String(voiceGender))
+    form.append('consent_confirmed', String(consentConfirmed))
     return request<Agent>(http.post(`/agents/${agentId}/voice`, form))
   },
   getVoiceStatus(agentId: string) {
@@ -52,7 +53,7 @@ export const agentsApi = {
     )
   },
   generateWelcome(agentId: string) {
-    return request<{ agent: Agent; audio_url: string }>(http.post(`/agents/${agentId}/welcome-audio`))
+    return request<{ agent: Agent; audio_url: string }>(http.post(`/agents/${agentId}/welcome-audio`, null, { timeout: 150_000 }))
   },
   revokeConsent(agentId: string, consentType: 'image' | 'voice') {
     return request<{ id: string }>(

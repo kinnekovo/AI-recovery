@@ -240,7 +240,7 @@ def provider_matrix(current_user: User = Depends(require_therapist)):
         ("Generic LLM Feedback", settings.llm_feedback_provider, runtime["Generic LLM Feedback"], False, True, "factory remains mock-only; v2 summary uses deterministic template", "MOCK ONLY"),
         ("Scenario Semantics", settings.llm_feedback_provider, "OpenAICompatibleScenarioSemantics" if scenario_active else "disabled", scenario_active, True, "deterministic semantic fallback retains provenance", "REAL AND ACTIVE" if scenario_active else "REAL IMPLEMENTATION BUT NOT CONFIGURED"),
         ("TTS", settings.tts_provider, runtime["TTS"], "Mock" not in runtime["TTS"], True, "existing provider selection preserved", "REAL AND ACTIVE" if "Mock" not in runtime["TTS"] else "MOCK TEST ONLY"),
-        ("Voice Clone", settings.vcl_provider, runtime["Voice Clone"], "TencentVCLProvider" in runtime["Voice Clone"], True, "existing provider selection preserved", "REAL AND ACTIVE" if "TencentVCL" in runtime["Voice Clone"] else "DISABLED"),
+        ("Voice Clone", settings.vcl_provider, runtime["Voice Clone"], "TencentAvatarVoiceCloneProvider" in runtime["Voice Clone"], True, "Tencent Digital Human ZERO_SHOT_VOICE flow", "REAL AND ACTIVE" if "TencentAvatarVoiceCloneProvider" in runtime["Voice Clone"] else "DISABLED"),
         ("Avatar", "aliyun" if settings.aliyun_avatar_enabled else "disabled", "AliyunAvatarProvider" if settings.aliyun_avatar_enabled else "disabled", settings.aliyun_avatar_enabled, True, "existing Aliyun implementation preserved", "REAL AND ACTIVE" if settings.aliyun_avatar_enabled else "DISABLED"),
     ]
     return api_success([

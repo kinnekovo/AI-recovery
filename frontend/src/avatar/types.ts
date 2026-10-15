@@ -1,7 +1,7 @@
 export type AvatarProviderKind = 'static_2d' | 'live2d' | 'three_d' | 'external_streaming' | 'tencent_cloud'
 
 export type AvatarRuntimeState = 'idle' | 'loading_speech' | 'speaking' | 'listening' | 'thinking' | 'encouraging' | 'error'
-export type AvatarSpeechSource = 'none' | 'cloud_audio' | 'browser_tts' | 'silent'
+export type AvatarSpeechSource = 'none' | 'cloud_audio' | 'cloud_text' | 'cloud_custom_text' | 'browser_tts' | 'silent'
 
 export interface AvatarRuntimeSnapshot {
   provider: AvatarProviderKind

@@ -58,6 +58,11 @@ class Agent(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     voice_clone_task_id: Mapped[str | None] = mapped_column(String(160), nullable=True, unique=True)
     voice_training_text_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
     voice_training_text: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    voice_clone_status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
+    voice_clone_stage: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    voice_clone_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    voice_sample_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    voice_gender: Mapped[int | None] = mapped_column(Integer, nullable=True)
     generation_status: Mapped[AgentGenerationStatus] = mapped_column(
         Enum(AgentGenerationStatus, name="agent_generation_status"),
         default=AgentGenerationStatus.draft,

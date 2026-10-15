@@ -178,8 +178,8 @@ def tencent_vcl_missing_env(settings) -> list[str]:
     return required_missing(
         settings,
         {
-            "TENCENTCLOUD_SECRET_ID": settings.tencentcloud_secret_id,
-            "TENCENTCLOUD_SECRET_KEY": settings.tencentcloud_secret_key,
+            "TENCENT_AVATAR_APP_KEY": getattr(settings, "tencent_avatar_app_key", None),
+            "TENCENT_AVATAR_ACCESS_TOKEN": getattr(settings, "tencent_avatar_access_token", None),
         },
     )
 

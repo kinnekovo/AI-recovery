@@ -13,10 +13,12 @@ from app.core.observability import log_event
 from app.integrations.aliyun_avatar.provider import AliyunAvatarError, close_chat_session, create_chat_session, is_configured, provision_no_train_avatar
 from app.integrations.tts.provider import TTSProviderError, get_tts_provider
 from app.integrations.tencent_avatar.provider import (
+    TencentAvatarCustomizationClient,
     TencentAvatarError,
     close_runtime as close_tencent_runtime,
     create_cloud_session,
     drive_audio as drive_tencent_audio,
+    drive_text as drive_tencent_text,
     is_configured as tencent_is_configured,
     register_runtime,
 )
@@ -129,6 +131,8 @@ def create_tencent_session(db: Session, user: User, agent: Agent | None) -> tupl
     # a personal agent. Personal assets still retain the existing consent gate.
     if agent is not None:
         require_active_consent(db, user, agent.id, "image")
+        if agent.voice_external_id:
+            require_active_consent(db, user, agent.id, "voice")
     instance_id = f"tencent:{asset_virtualman_key}"
     active = db.scalar(
         select(AvatarSession).where(
@@ -145,7 +149,11 @@ def create_tencent_session(db: Session, user: User, agent: Agent | None) -> tupl
     db.add(lease)
     db.commit()
     try:
-        result, runtime = create_cloud_session(user_id=str(user.id), asset_virtualman_key=asset_virtualman_key)
+        result, runtime = create_cloud_session(
+            user_id=str(user.id),
+            asset_virtualman_key=asset_virtualman_key,
+            timbre_key=agent.voice_external_id if agent else None,
+        )
     except TencentAvatarError as exc:
         lease.status = AvatarSessionStatus.failed
         db.commit()
@@ -168,6 +176,8 @@ def create_tencent_session(db: Session, user: User, agent: Agent | None) -> tupl
         "session_id": result.session_id,
         "play_stream_addr": result.play_stream_addr,
         "protocol": result.protocol,
+        "speech_mode": "cloud_text",
+        "timbre_bound": bool(agent and agent.voice_external_id),
     }
 
 
@@ -182,23 +192,40 @@ def drive_audio(db: Session, user: User, lease: AvatarSession, pcm_data: bytes) 
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.message) from exc
 
 
+def drive_text(db: Session, user: User, lease: AvatarSession, text: str) -> dict[str, object]:
+    if lease.owner_user_id != user.id or not lease.instance_id.startswith("tencent:"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="腾讯云数字人会话不存在。")
+    if lease.status != AvatarSessionStatus.active:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="腾讯云数字人会话尚未就绪。")
+    try:
+        return drive_tencent_text(str(lease.id), text)
+    except TencentAvatarError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.message) from exc
+
+
 def generate_speech(db: Session, user: User, agent: Agent | None, text: str) -> dict[str, object]:
     clean_text = text.strip()
     if not clean_text:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="数字人口播文本不能为空。")
     if len(clean_text) > 150:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="数字人口播文本不能超过 150 个字符。")
-    try:
-        provider = get_tts_provider()
-    except TTSProviderError as exc:
-        log_event("warning", "avatar_speech", "speech_provider_unavailable", error_code=exc.code)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.message) from exc
-
     voice_id = agent.voice_external_id if agent and agent.voice_external_id else "default"
     fallback = agent is None or agent.voice_external_id is None
     if agent and agent.voice_external_id:
         require_active_consent(db, user, agent.id, "voice")
-    cache_name = _speech_cache_name(provider.cache_identity(voice_id), clean_text)
+        provider_name = "tencent_avatar_timbre"
+        provider_identity = f"{provider_name}|{voice_id}|speed=0.9"
+        suffix = ".mp3"
+    else:
+        try:
+            provider = get_tts_provider()
+        except TTSProviderError as exc:
+            log_event("warning", "avatar_speech", "speech_provider_unavailable", error_code=exc.code)
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.message) from exc
+        provider_name = provider.name
+        provider_identity = provider.cache_identity(voice_id)
+        suffix = ".wav"
+    cache_name = _speech_cache_name(provider_identity, clean_text, suffix=suffix)
     cached = db.scalar(
         select(FileAsset).where(
             FileAsset.owner_user_id == user.id,
@@ -212,16 +239,21 @@ def generate_speech(db: Session, user: User, agent: Agent | None, text: str) -> 
             "text": clean_text,
             "audio_file_id": str(cached.id),
             "audio_url": public_url(cached),
-            "provider": provider.name,
+            "provider": provider_name,
             "fallback": fallback,
             "cached": True,
         }
 
     try:
-        audio_path = provider.synthesize(clean_text, voice_id)
-    except TTSProviderError as exc:
-        log_event("warning", "avatar_speech", "speech_generation_failed", error_code=exc.code)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.message) from exc
+        if not fallback:
+            audio_path = TencentAvatarCustomizationClient().synthesize_timbre_audio(clean_text, voice_id)
+        else:
+            audio_path = provider.synthesize(clean_text, voice_id)
+    except (TTSProviderError, TencentAvatarError) as exc:
+        error_code = getattr(exc, "code", "speech_generation_failed")
+        error_message = getattr(exc, "message", str(exc))
+        log_event("warning", "avatar_speech", "speech_generation_failed", error_code=error_code)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error_message) from exc
     path = Path(audio_path)
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="数字人口播音频生成失败。")
@@ -234,7 +266,7 @@ def generate_speech(db: Session, user: User, agent: Agent | None, text: str) -> 
         file_type=FileType.generated_audio,
         original_name=path.name,
         storage_path=str(path),
-        mime_type="audio/wav",
+        mime_type="audio/mpeg" if path.suffix.lower() == ".mp3" else "audio/wav",
         size_bytes=path.stat().st_size,
     )
     db.add(asset)
@@ -244,15 +276,15 @@ def generate_speech(db: Session, user: User, agent: Agent | None, text: str) -> 
         "text": clean_text,
         "audio_file_id": str(asset.id),
         "audio_url": public_url(asset),
-        "provider": provider.name,
+        "provider": provider_name,
         "fallback": fallback,
         "cached": False,
     }
 
 
-def _speech_cache_name(provider_identity: str, text: str) -> str:
+def _speech_cache_name(provider_identity: str, text: str, *, suffix: str = ".wav") -> str:
     digest = sha256(f"{provider_identity}|{text}".encode("utf-8")).hexdigest()
-    return f"avatar_{digest}.wav"
+    return f"avatar_{digest}{suffix}"
 
 
 def close_session(db: Session, user: User, lease: AvatarSession) -> None:

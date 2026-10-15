@@ -73,7 +73,6 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { CheckCircle2, Lightbulb, Pause, Play, Upload, Volume2 } from 'lucide-vue-next'
-import { avatarSessionsApi } from '@/api/avatarSessions'
 import { scenarioDialoguesApi } from '@/api/scenarioDialogues'
 import { v2Api, type ExerciseV2, type TrainingSessionV2 } from '@/api/v2'
 import { TencentCloudAvatarProvider } from '@/avatar/providers/tencentCloud'
@@ -155,8 +154,7 @@ async function speakRepeatTarget() {
   error.value = ''
   statusMessage.value = ''
   try {
-    const speech = await avatarSessionsApi.generateSpeech(currentAgent.value?.id || null, current.value.target)
-    await avatar.speak(current.value.target, speech.audio_url)
+    await avatar.speak(current.value.target)
   } catch (err) {
     const message = toUserMessage(err, '数字人示范暂时没有播放成功，请稍后重试。')
     error.value = message

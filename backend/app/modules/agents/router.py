@@ -102,10 +102,18 @@ def upload_voice(
     agent_id: UUID,
     audio_file: UploadFile = File(...),
     voice_gender: int = Form(..., ge=1, le=2),
+    consent_confirmed: bool = Form(...),
     current_user: User = Depends(require_patient),
     db: Session = Depends(get_db),
 ):
-    agent = service.upload_voice_sample(db, current_user, agent_id, audio_file, voice_gender)
+    agent = service.upload_voice_sample(
+        db,
+        current_user,
+        agent_id,
+        audio_file,
+        voice_gender,
+        consent_confirmed=consent_confirmed,
+    )
     return api_success(agent_payload(agent))
 
 

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.integrations.tencent_avatar.provider import TencentAvatarCustomizationClient, TencentAvatarError
-from app.integrations.tts.provider import get_tts_provider
+from app.integrations.tts.provider import TTSProviderError, get_tts_provider
 from app.integrations.voice_clone.provider import VoiceCloneProviderError, VoiceCloneTaskStatus, get_voice_clone_provider
 from app.modules.agents.model import Agent, AgentGenerationStatus, AliyunAvatarStatus
 from app.modules.agents.schema import AgentCreate
@@ -223,10 +223,9 @@ def _tencent_avatar_http_error(exc: TencentAvatarError) -> HTTPException:
 
 def get_voice_training_text(db: Session, user: User, agent_id: UUID, *, refresh: bool = False) -> Agent:
     agent = get_owned_agent(db, user, agent_id)
-    require_active_consent(db, user, agent.id, "voice")
     if agent.voice_external_id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该智能体已有专属音色，不能再申请新的音色 ID。")
-    if agent.voice_clone_task_id:
+    if agent.voice_clone_task_id and agent.voice_clone_status != "failed":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该智能体已创建声音复刻任务，只能查询该任务，不能创建新的音色 ID。")
     if agent.voice_training_text_id and agent.voice_training_text and not refresh:
         return agent
@@ -272,20 +271,32 @@ def delete_owned_agent(db: Session, user: User, agent_id: UUID) -> UUID | None:
     return replacement_id
 
 
-def upload_voice_sample(db: Session, user: User, agent_id: UUID, upload: UploadFile, voice_gender: int) -> Agent:
+def upload_voice_sample(
+    db: Session,
+    user: User,
+    agent_id: UUID,
+    upload: UploadFile,
+    voice_gender: int,
+    *,
+    consent_confirmed: bool,
+) -> Agent:
     agent = get_owned_agent(db, user, agent_id)
-    require_active_consent(db, user, agent.id, "voice")
+    if not consent_confirmed:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="请先确认声音授权后再提交录音。")
+    record_consent(db, user, agent.id, "voice", version="tencent-zero-shot-voice-v1")
     if agent.voice_external_id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该智能体已有专属音色，不能再上传音频或创建新的音色 ID。")
-    if agent.voice_clone_task_id:
+    if agent.voice_clone_task_id and agent.voice_clone_status != "failed":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该智能体已创建声音复刻任务，只能查询该任务，不能创建新的音色 ID。")
-    if not agent.voice_training_text_id:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="请先获取并朗读页面展示的指定文本，再上传声音样本。")
     asset = save_upload(db, user, upload, FileType.voice_sample)
     try:
         task = get_voice_clone_provider().create_one_sentence_clone(
             asset.storage_path,
-            text_id=agent.voice_training_text_id,
+            # The companion is a familiar, authorized person rather than the
+            # patient. Free speech is intentional: omitting TextId makes the
+            # official zero-shot endpoint evaluate audio quality without
+            # rejecting the sample for not matching a prescribed sentence.
+            text_id=None,
             voice_name=agent.name,
             voice_gender=voice_gender,
         )
@@ -293,6 +304,11 @@ def upload_voice_sample(db: Session, user: User, agent_id: UUID, upload: UploadF
         raise _voice_clone_http_error(exc) from exc
     agent.voice_sample_file_id = asset.id
     agent.voice_clone_task_id = task.task_id
+    agent.voice_clone_status = "detecting"
+    agent.voice_clone_stage = "QUALITY_CHECK"
+    agent.voice_clone_error = None
+    agent.voice_sample_url = None
+    agent.voice_gender = voice_gender
     agent.voice_consent_confirmed = True
     agent.generation_status = AgentGenerationStatus.voice_training
     db.commit()
@@ -306,7 +322,11 @@ def refresh_voice_clone_status(db: Session, user: User, agent_id: UUID) -> tuple
     if not agent.voice_clone_task_id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该智能体尚未创建声音复刻任务。")
     try:
-        task = get_voice_clone_provider().get_task_status(agent.voice_clone_task_id)
+        task = get_voice_clone_provider().get_task_status(
+            agent.voice_clone_task_id,
+            voice_name=agent.name,
+            voice_gender=agent.voice_gender or (1 if agent.avatar_gender == "MALE" else 2),
+        )
     except VoiceCloneProviderError as exc:
         raise _voice_clone_http_error(exc) from exc
     if task.status_code == 2:
@@ -315,10 +335,22 @@ def refresh_voice_clone_status(db: Session, user: User, agent_id: UUID) -> tuple
         if agent.voice_external_id and agent.voice_external_id != task.fast_voice_type:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="检测到不同的专属音色 ID，已停止保存以避免覆盖。")
         agent.voice_external_id = task.fast_voice_type
+        agent.voice_sample_url = task.sample_url
+        agent.voice_clone_status = "ready"
+        agent.voice_clone_stage = task.stage or "END"
+        agent.voice_clone_error = None
         agent.generation_status = AgentGenerationStatus.voice_ready
     elif task.status_code == 3:
+        agent.voice_clone_status = "failed"
+        agent.voice_clone_stage = task.stage
+        agent.voice_clone_error = (task.error_message or "腾讯云声音复刻失败，请重新录制。")[:500]
         agent.generation_status = AgentGenerationStatus.failed
     else:
+        if task.next_task_id:
+            agent.voice_clone_task_id = task.next_task_id
+        agent.voice_clone_status = task.status if task.status in {"detecting", "training"} else "training"
+        agent.voice_clone_stage = task.stage
+        agent.voice_clone_error = None
         agent.generation_status = AgentGenerationStatus.voice_training
     db.commit()
     db.refresh(agent)
@@ -326,7 +358,12 @@ def refresh_voice_clone_status(db: Session, user: User, agent_id: UUID) -> tuple
 
 
 def _voice_clone_http_error(exc: VoiceCloneProviderError) -> HTTPException:
-    status_code = status.HTTP_422_UNPROCESSABLE_ENTITY if exc.code in {"unsupported_audio", "audio_too_large", "empty_audio", "quality_rejected"} else status.HTTP_502_BAD_GATEWAY
+    if exc.code == "quota_exhausted":
+        status_code = status.HTTP_409_CONFLICT
+    elif exc.code in {"unsupported_audio", "audio_too_large", "empty_audio", "quality_rejected"}:
+        status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
+    else:
+        status_code = status.HTTP_502_BAD_GATEWAY
     return HTTPException(status_code=status_code, detail=exc.message)
 
 
@@ -335,14 +372,22 @@ def generate_welcome_audio(db: Session, user: User, agent_id: UUID) -> tuple[Age
     if agent.voice_external_id:
         require_active_consent(db, user, agent.id, "voice")
     text = f"{agent.name}已经准备好了，我们一起开始今天的练习。"
-    audio_path = get_tts_provider().synthesize(text, agent.voice_external_id or "default")
+    try:
+        if agent.voice_external_id:
+            audio_path = TencentAvatarCustomizationClient().synthesize_timbre_audio(text, agent.voice_external_id)
+        else:
+            audio_path = get_tts_provider().synthesize(text, "default")
+    except (TencentAvatarError, TTSProviderError) as exc:
+        message = getattr(exc, "message", str(exc))
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=message) from exc
+    audio_path_obj = Path(audio_path)
     asset = FileAsset(
         owner_user_id=user.id,
         file_type=FileType.generated_audio,
-        original_name=Path(audio_path).name,
+        original_name=audio_path_obj.name,
         storage_path=audio_path,
-        mime_type="audio/wav",
-        size_bytes=Path(audio_path).stat().st_size,
+        mime_type="audio/mpeg" if audio_path_obj.suffix.lower() == ".mp3" else "audio/wav",
+        size_bytes=audio_path_obj.stat().st_size,
     )
     db.add(asset)
     db.flush()

@@ -42,6 +42,11 @@ def revoke_consent(db: Session, user: User, agent_id, consent_type: str) -> Cons
     if consent_type == "voice":
         agent.voice_consent_confirmed = False
         agent.voice_external_id = None
+        agent.voice_clone_task_id = None
+        agent.voice_clone_status = "pending"
+        agent.voice_clone_stage = None
+        agent.voice_clone_error = "已撤回声音授权，不会再使用该音色生成新内容。"
+        agent.voice_sample_url = None
     db.flush()
     return consent
 

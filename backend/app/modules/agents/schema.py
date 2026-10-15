@@ -39,6 +39,11 @@ class AgentRead(BaseModel):
     voice_external_id: str | None = None
     voice_clone_task_id: str | None = None
     voice_training_text: str | None = None
+    voice_clone_status: str = "pending"
+    voice_clone_stage: str | None = None
+    voice_clone_error: str | None = None
+    voice_sample_url: str | None = None
+    voice_gender: int | None = None
     generation_status: str
     image_consent_confirmed: bool
     voice_consent_confirmed: bool

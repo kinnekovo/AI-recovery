@@ -11,6 +11,7 @@
       <div v-for="agent in agents" :key="agent.id" class="agent-select" :class="{ 'agent-select-current': isCurrent(agent.id) }">
         <AgentCard :agent="agent" />
         <p v-if="isCurrent(agent.id)" class="current-agent-label">当前陪练</p>
+        <VoiceCloneSettings :agent="agent" @updated="updateAgent" />
         <div class="agent-action-row">
           <RouterLink
             v-if="['pending', 'failed'].includes(agent.tencent_avatar_status)"
@@ -51,6 +52,8 @@
 import { computed, onMounted, ref } from 'vue'
 import AppButton from '@/components/common/AppButton.vue'
 import AgentCard from '@/components/agent/AgentCard.vue'
+import VoiceCloneSettings from '@/components/agent/VoiceCloneSettings.vue'
+import type { Agent } from '@/types/api'
 import { useAgentStore } from '@/stores/agent'
 import { useAuthStore } from '@/stores/auth'
 import { toUserMessage } from '@/utils/errors'
@@ -69,6 +72,10 @@ onMounted(() => store.loadAgents())
 
 function isCurrent(agentId: string) {
   return auth.me?.patient_profile?.current_agent_id === agentId
+}
+
+function updateAgent(updated: Agent) {
+  store.agents = store.agents.map((agent) => agent.id === updated.id ? updated : agent)
 }
 
 async function setCurrent(agentId: string) {

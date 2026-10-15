@@ -71,6 +71,11 @@ export interface Agent {
   voice_external_id: string | null
   voice_clone_task_id: string | null
   voice_training_text: string | null
+  voice_clone_status: 'pending' | 'detecting' | 'training' | 'ready' | 'failed'
+  voice_clone_stage: string | null
+  voice_clone_error: string | null
+  voice_sample_url: string | null
+  voice_gender: 1 | 2 | null
   generation_status: string
   image_consent_confirmed: boolean
   voice_consent_confirmed: boolean

@@ -15,10 +15,17 @@ export interface TencentAvatarSession extends AvatarSessionBase {
   provider: 'tencent'
   play_stream_addr: string
   protocol: 'webrtc' | 'trtc' | 'rtmp' | string
+  speech_mode: 'cloud_text'
+  timbre_bound: boolean
 }
 
 export interface TencentAvatarAudioResult {
   sent_bytes: number
+  duration_seconds: number
+}
+
+export interface TencentAvatarTextResult {
+  accepted: boolean
   duration_seconds: number
 }
 
@@ -52,7 +59,12 @@ export const avatarSessionsApi = {
       timeout: 120_000,
     }))
   },
+  sendText(sessionId: string, text: string) {
+    return request<TencentAvatarTextResult>(http.post(`/avatar/sessions/${sessionId}/text`, { text }, {
+      timeout: 30_000,
+    }))
+  },
   generateSpeech(agentId: string | null, text: string) {
-    return request<AvatarSpeechResult>(http.post('/avatar/sessions/speech', { agent_id: agentId, text }, { timeout: 60_000 }))
+    return request<AvatarSpeechResult>(http.post('/avatar/sessions/speech', { agent_id: agentId, text }, { timeout: 150_000 }))
   }
 }

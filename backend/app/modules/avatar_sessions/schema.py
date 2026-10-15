@@ -13,6 +13,10 @@ class AvatarSpeechCreate(BaseModel):
     text: str = Field(min_length=1, max_length=150)
 
 
+class AvatarTextDrive(BaseModel):
+    text: str = Field(min_length=1, max_length=150)
+
+
 class AvatarSessionRead(BaseModel):
     id: UUID
     session_id: str

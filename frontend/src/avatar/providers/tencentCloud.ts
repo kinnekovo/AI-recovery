@@ -1,9 +1,6 @@
-import { http } from '@/api/http'
 import { avatarSessionsApi, type TencentAvatarSession } from '@/api/avatarSessions'
 import { Static2DAvatarProvider } from '@/avatar/providers/static2d'
 import type { AvatarProvider, AvatarProviderContext, AvatarRuntimeState, AvatarSpeakInput } from '@/avatar/types'
-
-type AudioContextConstructor = typeof AudioContext
 
 export class TencentCloudAvatarProvider implements AvatarProvider {
   kind = 'tencent_cloud' as const
@@ -17,11 +14,14 @@ export class TencentCloudAvatarProvider implements AvatarProvider {
   private active = false
   private connecting: Promise<boolean> | null = null
   private context: AvatarProviderContext | null = null
-  private audioContext: AudioContext | null = null
   private runId = 0
   private soundEnabled = false
   private resolveSoundGate: ((enabled: boolean) => void) | null = null
   private connectionError = ''
+
+  private get speechSource() {
+    return this.session?.timbre_bound ? 'cloud_custom_text' as const : 'cloud_text' as const
+  }
 
   constructor(private readonly containerId: string) {
     window.addEventListener('message', this.onPlayerMessage)
@@ -42,7 +42,7 @@ export class TencentCloudAvatarProvider implements AvatarProvider {
       state: 'idle',
       line: '正在连接腾讯云数字人画面…',
       error: '',
-      speechSource: 'cloud_audio',
+      speechSource: 'cloud_text',
       videoStatus: 'running',
     })
     const connected = await this.connect()
@@ -58,14 +58,10 @@ export class TencentCloudAvatarProvider implements AvatarProvider {
 
   async speak(input: AvatarSpeakInput, context: AvatarProviderContext): Promise<void> {
     this.context = context
-    if (!input.audioUrl) {
-      context.update({ provider: 'static_2d' })
-      return this.fallback.speak(input, context)
-    }
     const runId = ++this.runId
-    context.update({ provider: 'tencent_cloud', state: 'loading_speech', line: input.text, error: '', speechSource: 'cloud_audio', videoStatus: 'running' })
+    context.update({ provider: 'tencent_cloud', state: 'loading_speech', line: input.text, error: '', speechSource: this.speechSource, videoStatus: 'running' })
     try {
-      const [connected, pcm] = await Promise.all([this.connect(), this.decodeToPcm(input.audioUrl)])
+      const connected = await this.connect()
       if (!connected || !this.leaseId) throw new Error(this.connectionError || '腾讯云数字人会话未能建立。')
       if (runId !== this.runId) return
       if (!this.soundEnabled) {
@@ -73,18 +69,15 @@ export class TencentCloudAvatarProvider implements AvatarProvider {
         const enabled = await this.waitForSound()
         if (!enabled || runId !== this.runId) return
       }
-      context.update({ provider: 'tencent_cloud', state: 'speaking', speechSource: 'cloud_audio', videoStatus: 'ready' })
+      context.update({ provider: 'tencent_cloud', state: 'speaking', speechSource: this.speechSource, videoStatus: 'ready' })
       const startedAt = performance.now()
-      const result = await avatarSessionsApi.sendAudio(
-        this.leaseId,
-        pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength) as ArrayBuffer,
-      )
+      const result = await avatarSessionsApi.sendText(this.leaseId, input.text)
       const remainingMs = Math.max(0, result.duration_seconds * 1000 + 500 - (performance.now() - startedAt))
       if (remainingMs) await new Promise((resolve) => window.setTimeout(resolve, remainingMs))
       if (runId === this.runId) context.update({ state: 'idle', mouthOpen: false, mouthEnergy: 0 })
     } catch (error) {
       if (runId === this.runId) {
-        const failureMessage = error instanceof Error ? error.message : '腾讯云数字人播报失败，已切换为纯语音示范。'
+        const failureMessage = error instanceof Error ? error.message : '腾讯云数字人播报失败，已切换为本机语音示范。'
         this.resetSession()
         // Static2DAvatarProvider starts by resetting the snapshot. Start it
         // first, then restore the cloud failure so the UI never presents the
@@ -129,8 +122,6 @@ export class TencentCloudAvatarProvider implements AvatarProvider {
     this.player?.remove()
     this.player = null
     if (leaseId) void avatarSessionsApi.close(leaseId).catch(() => undefined)
-    if (this.audioContext) void this.audioContext.close().catch(() => undefined)
-    this.audioContext = null
   }
 
   private async connect(): Promise<boolean> {
@@ -152,7 +143,15 @@ export class TencentCloudAvatarProvider implements AvatarProvider {
       this.session = lease
       this.leaseId = lease.id
       this.connectionError = ''
-      this.context?.update({ provider: 'tencent_cloud', line: '腾讯云数字人已准备好。首次使用请在画面中点击“开启声音”。', error: '', speechSource: 'cloud_audio', videoStatus: 'ready' })
+      this.context?.update({
+        provider: 'tencent_cloud',
+        line: lease.timbre_bound
+          ? '腾讯云数字人已绑定专属声音。首次使用请在画面中点击“开启声音”。'
+          : '腾讯云数字人已连接，当前使用默认声音。首次使用请在画面中点击“开启声音”。',
+        error: '',
+        speechSource: lease.timbre_bound ? 'cloud_custom_text' : 'cloud_text',
+        videoStatus: 'ready',
+      })
       return true
     } catch (error) {
       if (lease?.id) void avatarSessionsApi.close(lease.id).catch(() => undefined)
@@ -191,29 +190,6 @@ export class TencentCloudAvatarProvider implements AvatarProvider {
   private waitForSound(): Promise<boolean> {
     if (this.soundEnabled) return Promise.resolve(true)
     return new Promise((resolve) => { this.resolveSoundGate = resolve })
-  }
-
-  private async decodeToPcm(audioUrl: string): Promise<Int16Array> {
-    const response = await http.get<Blob>(audioUrl.startsWith('/api') ? audioUrl.slice(4) : audioUrl, { responseType: 'blob' })
-    const AudioContextClass = (window.AudioContext || (window as Window & { webkitAudioContext?: AudioContextConstructor }).webkitAudioContext) as AudioContextConstructor | undefined
-    if (!AudioContextClass) throw new Error('当前浏览器不支持腾讯云数字人音频驱动。')
-    this.audioContext ||= new AudioContextClass()
-    const decoded = await this.audioContext.decodeAudioData(await response.data.arrayBuffer())
-    const targetRate = 16000
-    const frameCount = Math.max(1, Math.ceil(decoded.duration * targetRate))
-    const offline = new OfflineAudioContext(1, frameCount, targetRate)
-    const source = offline.createBufferSource()
-    source.buffer = decoded
-    source.connect(offline.destination)
-    source.start(0)
-    const rendered = await offline.startRendering()
-    const samples = rendered.getChannelData(0)
-    const pcm = new Int16Array(samples.length)
-    for (let index = 0; index < samples.length; index += 1) {
-      const sample = Math.max(-1, Math.min(1, samples[index]))
-      pcm[index] = sample < 0 ? sample * 0x8000 : sample * 0x7fff
-    }
-    return pcm
   }
 
 }

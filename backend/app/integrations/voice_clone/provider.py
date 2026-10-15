@@ -38,6 +38,9 @@ class VoiceCloneTaskStatus:
     status_code: int
     fast_voice_type: str | None = None
     error_message: str | None = None
+    sample_url: str | None = None
+    stage: str | None = None
+    next_task_id: str | None = None
 
 
 class VoiceCloneProvider:
@@ -46,10 +49,12 @@ class VoiceCloneProvider:
     def get_training_text(self) -> VoiceTrainingText:
         raise NotImplementedError
 
-    def create_one_sentence_clone(self, audio_path: str, *, text_id: str, voice_name: str, voice_gender: int) -> VoiceCloneTask:
+    def create_one_sentence_clone(
+        self, audio_path: str, *, text_id: str | None, voice_name: str, voice_gender: int
+    ) -> VoiceCloneTask:
         raise NotImplementedError
 
-    def get_task_status(self, task_id: str) -> VoiceCloneTaskStatus:
+    def get_task_status(self, task_id: str, *, voice_name: str = "陪伴声音", voice_gender: int = 2) -> VoiceCloneTaskStatus:
         raise NotImplementedError
 
 
@@ -59,10 +64,12 @@ class MockVoiceCloneProvider(VoiceCloneProvider):
     def get_training_text(self) -> VoiceTrainingText:
         return VoiceTrainingText(text_id="mock-training-text", text="请清晰朗读：我已确认这是我的声音，仅用于康复训练。")
 
-    def create_one_sentence_clone(self, audio_path: str, *, text_id: str, voice_name: str, voice_gender: int) -> VoiceCloneTask:
+    def create_one_sentence_clone(
+        self, audio_path: str, *, text_id: str | None, voice_name: str, voice_gender: int
+    ) -> VoiceCloneTask:
         return VoiceCloneTask(task_id=f"mock-task-{uuid4().hex}")
 
-    def get_task_status(self, task_id: str) -> VoiceCloneTaskStatus:
+    def get_task_status(self, task_id: str, *, voice_name: str = "陪伴声音", voice_gender: int = 2) -> VoiceCloneTaskStatus:
         return VoiceCloneTaskStatus(task_id=task_id, status="success", status_code=2, fast_voice_type=f"mock_voice_{task_id[-8:]}")
 
 
@@ -115,7 +122,9 @@ class TencentVCLProvider(VoiceCloneProvider):
         except Exception as exc:
             raise self._to_error(exc, "获取声音复刻朗读文本失败") from exc
 
-    def create_one_sentence_clone(self, audio_path: str, *, text_id: str, voice_name: str) -> VoiceCloneTask:
+    def create_one_sentence_clone(
+        self, audio_path: str, *, text_id: str | None, voice_name: str, voice_gender: int
+    ) -> VoiceCloneTask:
         path = Path(audio_path)
         codec = path.suffix.lower().lstrip(".")
         if codec not in SUPPORTED_CODECS:
@@ -164,7 +173,7 @@ class TencentVCLProvider(VoiceCloneProvider):
         except Exception as exc:
             raise self._to_error(exc, "声音复刻检测或任务创建失败") from exc
 
-    def get_task_status(self, task_id: str) -> VoiceCloneTaskStatus:
+    def get_task_status(self, task_id: str, *, voice_name: str = "陪伴声音", voice_gender: int = 2) -> VoiceCloneTaskStatus:
         client, models = self._client()
         try:
             request = models.DescribeVRSTaskStatusRequest()
@@ -195,6 +204,8 @@ def get_voice_clone_provider() -> VoiceCloneProvider:
     provider = get_settings().vcl_provider
     if provider == "mock":
         return MockVoiceCloneProvider()
-    if provider == "tencent":
-        return TencentVCLProvider()
+    if provider in {"tencent", "tencent_avatar"}:
+        from app.integrations.voice_clone.tencent_avatar import TencentAvatarVoiceCloneProvider
+
+        return TencentAvatarVoiceCloneProvider()
     raise VoiceCloneProviderError("unknown_provider", f"不支持的 VCL_PROVIDER：{provider}")

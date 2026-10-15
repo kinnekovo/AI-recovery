@@ -68,7 +68,9 @@ def customization_is_configured() -> bool:
     return bool(settings.tencent_avatar_enabled and settings.tencent_avatar_app_key and settings.tencent_avatar_access_token)
 
 
-def create_cloud_session(*, user_id: str, asset_virtualman_key: str | None = None) -> tuple[TencentAvatarSessionResult, "TencentAvatarRuntime"]:
+def create_cloud_session(
+    *, user_id: str, asset_virtualman_key: str | None = None, timbre_key: str | None = None
+) -> tuple[TencentAvatarSessionResult, "TencentAvatarRuntime"]:
     if not is_configured(asset_virtualman_key):
         raise TencentAvatarError("not_configured", "腾讯云数字人尚未启用，或缺少 AppKey、AccessToken、AssetVirtualmanKey。")
     settings = get_settings()
@@ -83,6 +85,7 @@ def create_cloud_session(*, user_id: str, asset_virtualman_key: str | None = Non
         base_url=settings.tencent_avatar_api_base_url,
         request_timeout=settings.tencent_avatar_request_timeout_seconds,
         ready_timeout=settings.tencent_avatar_ready_timeout_seconds,
+        timbre_key=timbre_key,
     )
     try:
         return runtime.open(), runtime
@@ -97,11 +100,16 @@ class TencentAvatarCustomizationClient:
     _FACE_STATUS = "/v2/ivh/facedetectserver/facedetectservice/getfacedetectstate"
     _MAKE = "/v2/ivh/assetmanager/customservice/make"
     _MAKE_STATUS = "/v2/ivh/assetmanager/customservice/getprogress"
+    _VOICE_TEXT = "/v2/ivh/assetmanager/zeroshotservice/gettext"
+    _VOICE_DETECT = "/v2/ivh/assetmanager/zeroshotservice/detectaudioquality"
+    _VOICE_DETECT_STATUS = "/v2/ivh/assetmanager/zeroshotservice/getdetectprogress"
+    _TTS = "/v2/ivh/videomaker/broadcastservice/tts"
+    _MEDIA_STATUS = "/v2/ivh/videomaker/broadcastservice/getprogress"
 
     def __init__(self) -> None:
         settings = get_settings()
         if not customization_is_configured():
-            raise TencentAvatarError("not_configured", "腾讯云照片数字人定制尚未启用，或缺少 AppKey、AccessToken。")
+            raise TencentAvatarError("not_configured", "腾讯云数智人定制尚未启用，或缺少 AppKey、AccessToken。")
         self.app_key = settings.tencent_avatar_app_key or ""
         self.access_token = settings.tencent_avatar_access_token or ""
         self.base_url = settings.tencent_avatar_api_base_url.rstrip("/")
@@ -145,6 +153,116 @@ class TencentAvatarCustomizationClient:
         except Exception as exc:
             raise TencentAvatarError("cos_upload_failed", f"照片上传到腾讯云失败：{exc}") from exc
         return f"https://{host}/{quote(object_key, safe='/')}"
+
+    def upload_voice_sample(self, source_path: str, codec: str) -> str:
+        credentials_payload = self._api_call(self._UPLOAD_CREDENTIALS, {})
+        credentials = credentials_payload.get("Credentials") or {}
+        path_prefix = str(credentials_payload.get("PathPrefix") or "")
+        secret_id = str(credentials.get("TmpSecretId") or "")
+        secret_key = str(credentials.get("TmpSecretKey") or "")
+        token = str(credentials.get("Token") or "")
+        if not path_prefix or not secret_id or not secret_key or not token:
+            raise TencentAvatarError("invalid_upload_credentials", "腾讯云没有返回完整的录音上传凭证。")
+
+        prefix_url = path_prefix if "://" in path_prefix else f"https://{path_prefix.lstrip('/')}"
+        parsed = urlparse(prefix_url)
+        host = parsed.netloc
+        if ".cos." not in host or not parsed.path:
+            raise TencentAvatarError("invalid_upload_path", "腾讯云返回的录音上传路径格式不正确。")
+        bucket, region_host = host.split(".cos.", 1)
+        region = region_host.split(".myqcloud.com", 1)[0]
+        key_prefix = parsed.path.strip("/")
+        safe_codec = codec.lower().strip(".")
+        object_key = f"{key_prefix}/zeroshot/v_{uuid4().hex[:12]}.{safe_codec}"
+        try:
+            from qcloud_cos import CosConfig, CosS3Client
+        except ImportError as exc:
+            raise TencentAvatarError("dependency_missing", "缺少腾讯云 COS SDK，请重新安装 backend/requirements.txt。") from exc
+        try:
+            config = CosConfig(Region=region, SecretId=secret_id, SecretKey=secret_key, Token=token, Scheme="https")
+            with Path(source_path).open("rb") as source:
+                CosS3Client(config).put_object(
+                    Bucket=bucket,
+                    Body=source,
+                    Key=object_key,
+                    ContentType=f"audio/{'mp4' if safe_codec == 'm4a' else safe_codec}",
+                )
+        except Exception as exc:
+            raise TencentAvatarError("cos_upload_failed", f"录音上传到腾讯云失败：{exc}") from exc
+        return f"https://{host}/{quote(object_key, safe='/')}"
+
+    def get_voice_training_text(self) -> dict[str, Any]:
+        return self._api_call(self._VOICE_TEXT, {"Language": "chi"})
+
+    def start_voice_quality_detection(self, audio_url: str, *, text_id: str | None = None) -> str:
+        payload: dict[str, Any] = {
+            "AudioUrl": audio_url,
+            "Language": "chi",
+        }
+        if text_id:
+            payload["TextId"] = text_id
+        result = self._api_call(self._VOICE_DETECT, payload)
+        task_id = str(result.get("TaskId") or "")
+        if not task_id:
+            raise TencentAvatarError("invalid_response", "腾讯云音质检测没有返回任务 ID。")
+        return task_id
+
+    def get_voice_quality_detection(self, task_id: str) -> dict[str, Any]:
+        return self._api_call(self._VOICE_DETECT_STATUS, {"TaskId": task_id})
+
+    def start_voice_customization(self, *, audio_id: str, anchor_name: str, sex_type: str) -> str:
+        result = self._api_call(self._MAKE, {
+            "AnchorName": self._safe_anchor_name(anchor_name),
+            "MakeType": "ZERO_SHOT_VOICE",
+            "AudioId": audio_id,
+            "SexType": sex_type,
+            "ZeroshortLang": "chi",
+            "Notes": "言语康复智能体用户授权声音复刻",
+        })
+        task_id = str(result.get("TaskId") or "")
+        if not task_id:
+            raise TencentAvatarError("invalid_response", "腾讯云声音复刻没有返回任务 ID。")
+        return task_id
+
+    def synthesize_timbre_audio(self, text: str, timbre_key: str) -> str:
+        result = self._api_call(self._TTS, {
+            "TimbreKey": timbre_key,
+            "InputSsml": text,
+            "Speed": 0.9,
+            "Volume": 0,
+        })
+        task_id = str(result.get("TaskId") or "")
+        if not task_id:
+            raise TencentAvatarError("invalid_response", "腾讯云音频制作没有返回任务 ID。")
+        deadline = time.monotonic() + max(60, self.request_timeout * 4)
+        media_url = ""
+        while time.monotonic() < deadline:
+            progress = self._api_call(self._MEDIA_STATUS, {"TaskId": task_id})
+            state = str(progress.get("Status") or "").upper()
+            if state == "SUCCESS":
+                media_url = str(progress.get("MediaUrl") or "")
+                break
+            if state == "FAIL":
+                raise TencentAvatarError(
+                    str(progress.get("FailCode") or "tts_failed"),
+                    str(progress.get("FailMessage") or "腾讯云专属音色合成失败。"),
+                )
+            time.sleep(1)
+        if not media_url:
+            raise TencentAvatarError("tts_timeout", "腾讯云专属音色合成超时，请稍后重试。")
+        try:
+            response = requests.get(media_url, timeout=self.request_timeout)
+            response.raise_for_status()
+            audio_bytes = response.content
+        except requests.RequestException as exc:
+            raise TencentAvatarError("audio_download_failed", f"腾讯云专属音频下载失败：{exc}") from exc
+        if not audio_bytes:
+            raise TencentAvatarError("empty_audio", "腾讯云专属音色返回了空音频。")
+        output_dir = get_settings().storage_root / "generated-audio"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"tencent_avatar_tts_{uuid4().hex}.mp3"
+        output_path.write_bytes(audio_bytes)
+        return str(output_path)
 
     def start_face_detection(self, image_url: str, *, checker_version: int = 1) -> str:
         request_id = str(uuid4())
@@ -271,6 +389,15 @@ def drive_audio(lease_id: str, pcm_data: bytes) -> dict[str, object]:
     return {"sent_bytes": len(pcm_data), "duration_seconds": duration_seconds}
 
 
+def drive_text(lease_id: str, text: str) -> dict[str, object]:
+    with _runtimes_lock:
+        runtime = _runtimes.get(lease_id)
+    if not runtime:
+        raise TencentAvatarError("runtime_missing", "腾讯云数字人连接已失效，请刷新页面后重试。")
+    duration_seconds = runtime.send_text(text)
+    return {"accepted": True, "duration_seconds": duration_seconds}
+
+
 def close_runtime(lease_id: str, provider_session_id: str | None = None) -> None:
     with _runtimes_lock:
         runtime = _runtimes.pop(lease_id, None)
@@ -296,7 +423,8 @@ class TencentAvatarRuntime:
     _COMMAND = "/v2/ws/ivh/interactdriver/interactdriverservice/commandchannel"
 
     def __init__(self, *, app_key: str, access_token: str, asset_virtualman_key: str, user_id: str,
-                 protocol: str, driver_type: int, base_url: str, request_timeout: int, ready_timeout: int) -> None:
+                 protocol: str, driver_type: int, base_url: str, request_timeout: int, ready_timeout: int,
+                 timbre_key: str | None = None) -> None:
         self.app_key = app_key
         self.access_token = access_token
         self.asset_virtualman_key = asset_virtualman_key
@@ -306,6 +434,7 @@ class TencentAvatarRuntime:
         self.base_url = base_url.rstrip("/")
         self.request_timeout = request_timeout
         self.ready_timeout = ready_timeout
+        self.timbre_key = timbre_key
         self.session_id: str | None = None
         self.play_stream_addr: str | None = None
         self.ws: websocket.WebSocketApp | None = None
@@ -316,14 +445,21 @@ class TencentAvatarRuntime:
         self._ws_error: str | None = None
 
     def open(self) -> TencentAvatarSessionResult:
-        created = self._api_call(self._CREATE, {
+        create_payload: dict[str, Any] = {
             "AssetVirtualmanKey": self.asset_virtualman_key,
             "DriverType": self.driver_type,
             "UserId": self.user_id,
             "Protocol": self.protocol,
             "ExtraInfo": {"AlphaChannelEnable": False},
             "AnchorParam": {"SilenceActionDisabled": False},
-        })
+        }
+        if self.timbre_key:
+            create_payload["SpeechParam"] = {
+                "TimbreKey": self.timbre_key,
+                "Speed": 0.9,
+                "Volume": 0,
+            }
+        created = self._api_call(self._CREATE, create_payload)
         self.session_id = str(created.get("SessionId") or "")
         self.play_stream_addr = str(created.get("PlayStreamAddr") or "")
         if not self.session_id or not self.play_stream_addr:
@@ -372,6 +508,24 @@ class TencentAvatarRuntime:
                 "Audio": "", "Seq": len(chunks) + 1, "IsFinal": True,
             }, request_id=request_id)
         return len(pcm_data) / 32000.0
+
+    def send_text(self, text: str) -> float:
+        clean_text = text.strip()
+        if not clean_text:
+            raise TencentAvatarError("empty_text", "数字人口播文本不能为空。")
+        if len(clean_text) > 150:
+            raise TencentAvatarError("text_too_long", "数字人口播文本不能超过 150 个字符。")
+        if not self.session_id or not self._connected.is_set() or self._stopped.is_set():
+            raise TencentAvatarError("websocket_closed", "腾讯云数字人连接已断开，请刷新页面后重试。")
+        with self._drive_lock:
+            self._send_command("SEND_TEXT", {
+                "Text": clean_text,
+                "ChatCommand": "NotUseChat",
+            })
+        # The cloud-rendering command channel does not synchronously return the
+        # final audio duration. Keep the patient recorder disabled for a safe,
+        # conservative estimate while the WebRTC stream finishes speaking.
+        return min(max(len(clean_text) * 0.32 + 0.8, 1.8), 18.0)
 
     def close(self, *, close_cloud: bool) -> None:
         already_stopped = self._stopped.is_set()
@@ -482,6 +636,7 @@ def _close_cloud_session(provider_session_id: str) -> None:
         base_url=settings.tencent_avatar_api_base_url,
         request_timeout=settings.tencent_avatar_request_timeout_seconds,
         ready_timeout=settings.tencent_avatar_ready_timeout_seconds,
+        timbre_key=None,
     )
     runtime.session_id = provider_session_id
     runtime.close(close_cloud=True)
