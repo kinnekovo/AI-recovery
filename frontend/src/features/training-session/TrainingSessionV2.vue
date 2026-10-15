@@ -20,6 +20,8 @@
             :avatar-url="currentAgent?.avatar_url"
             :avatar-animation-config="currentAgent?.avatar_animation_config"
             :title="current.exercise_type === 'repeat' ? '数字人跟读示范' : '数字人陪伴'"
+            :idle-hint="current.exercise_type === 'scenario' ? '可以重播上一句，听完后再继续表达。' : undefined"
+            :speaking-hint="current.exercise_type === 'scenario' ? '先听完陪伴者的回应，再继续表达。' : undefined"
           >
             <template #actions>
               <button
@@ -30,6 +32,15 @@
                 @click="speakRepeatTarget"
               >
                 <Volume2 :size="19" />{{ avatar.isBusy.value ? '正在示范…' : '听数字人示范' }}
+              </button>
+              <button
+                v-else
+                class="v2-button secondary repeat-demo-button"
+                type="button"
+                :disabled="!latestScenarioAgentTurn || avatar.isBusy.value || busy || recording || loading || session.status !== 'in_progress'"
+                @click="replayLatestScenarioTurn"
+              >
+                <Volume2 :size="19" />{{ avatar.isBusy.value ? '正在回应…' : '重播上一句' }}
               </button>
             </template>
           </AvatarCoachPanel>
@@ -58,10 +69,14 @@
             <section v-else class="practice-surface">
               <div class="scenario-prompt"><span>场景</span><strong>{{ current.target }}</strong><p>用自己的话表达，不需要照着固定句子说。</p></div>
               <ol v-if="dialogue?.turns?.length" class="v2-dialogue-log"><li v-for="turn in dialogue.turns" :key="turn.turn_index" :class="turn.speaker"><strong>{{ turn.speaker==='agent'?'陪伴助手':'我' }}</strong><p>{{ turn.text }}</p></li></ol>
-              <RecorderPanel v-if="dialogue?.status !== 'completed' && session.status==='in_progress'" :key="`${current.id}-${dialogue?.patient_turn_count||0}`" mode="scenario" :wait-seconds="waitSeconds" @recorded="blob=$event" @recording-state="recording=$event" @recorder-error="error=$event"/>
+              <RecorderPanel v-if="!dialogueFinished && !scenarioPromptPending && session.status==='in_progress' && !busy && !avatar.isBusy.value" :key="`${current.id}-${dialogue?.patient_turn_count||0}`" mode="scenario" :wait-seconds="waitSeconds" @recorded="blob=$event" @recording-state="handleScenarioRecordingState" @recorder-error="error=$event"/>
+              <p v-else-if="busy" class="v2-quiet-copy" aria-live="polite">正在理解你刚才说的话，请稍等。</p>
+              <p v-else-if="avatar.isBusy.value" class="v2-quiet-copy" aria-live="polite">请先听完陪伴者的回应，再继续表达。</p>
+              <p v-else-if="dialogueFinished" class="v2-quiet-copy">这一段场景练习已经完成，可以继续下一项。</p>
+              <p v-else class="v2-quiet-copy">训练已暂停。点击右上角“继续”后再录音。</p>
               <div v-if="statusMessage" class="v2-inline-success" role="status">{{ statusMessage }}</div>
               <div v-if="error" class="v2-inline-error" role="alert">{{ error }}</div>
-              <div class="training-actions"><button class="v2-button secondary" :disabled="busy||loading||session.status!=='in_progress'" @click="scenarioHint"><Lightbulb :size="19"/>表达提示</button><button v-if="dialogue?.status!=='completed'" class="v2-button primary" :disabled="!blob||busy||loading||session.status!=='in_progress'" @click="submitScenario">{{ busy?'正在听…':'提交这一轮' }}</button><button v-else class="v2-button primary" :disabled="busy||loading" @click="advance">继续</button></div>
+              <div class="training-actions"><button class="v2-button secondary" :disabled="dialogueFinished||busy||avatar.isBusy.value||loading||session.status!=='in_progress'" @click="scenarioHint"><Lightbulb :size="19"/>表达提示</button><button v-if="!dialogueFinished" class="v2-button primary" :disabled="!blob||busy||avatar.isBusy.value||loading||session.status!=='in_progress'" @click="submitScenario">{{ busy?'正在理解…':'提交这一轮' }}</button><button v-else class="v2-button primary" :disabled="busy||avatar.isBusy.value||loading" @click="advance">继续</button></div>
             </section>
 
             <details class="training-more"><summary>我现在有点困难</summary><div><button :disabled="busy||loading||session.status!=='in_progress'" @click="requestHelp">请治疗师关注</button><button :disabled="busy||loading||session.status!=='in_progress'" @click="skip">先跳过这一题</button></div></details>
@@ -85,8 +100,9 @@ import AvatarCoachPanel from '@/components/avatar/AvatarCoachPanel.vue'
 import RecorderPanel from '@/components/training/RecorderPanel.vue'
 import { useAvatarRuntime } from '@/composables/useAvatarRuntime'
 import { useAgentStore } from '@/stores/agent'
-import type { ScenarioDialogue } from '@/types/api'
+import type { ScenarioDialogue, ScenarioDialogueTurn } from '@/types/api'
 import { toUserMessage } from '@/utils/errors'
+import { latestAgentTurn, markScenarioTurnSpoken, scenarioTurnToken, wasScenarioTurnSpoken } from './scenarioAvatar'
 
 const route = useRoute()
 const router = useRouter()
@@ -103,6 +119,8 @@ const error = ref('')
 const dialogue = ref<ScenarioDialogue | null>(null)
 const retryKey = ref(0)
 const pendingDialogueTurnId = ref('')
+const scenarioSpeechInFlight = ref('')
+const scenarioPromptPending = ref(false)
 const statusMessage = ref('')
 const waitSeconds = Math.max(0, Number(localStorage.getItem('patient_wait_time') || 0))
 const current = computed<ExerciseV2 | null>(() => session.value?.current_exercise || null)
@@ -117,6 +135,8 @@ const feedbackText = computed(() => {
   const items = feedback.value?.feedback as Array<{ current_performance: string }> | undefined
   return items?.[0]?.current_performance || '训练事实已经保存，可以继续下一项。'
 })
+const latestScenarioAgentTurn = computed(() => latestAgentTurn(dialogue.value))
+const dialogueFinished = computed(() => Boolean(dialogue.value && dialogue.value.status !== 'active'))
 
 watch([currentAgent, current, loading], async ([agent, exercise, isLoading]) => {
   // The avatar stage is rendered only after the session loader disappears.
@@ -126,9 +146,13 @@ watch([currentAgent, current, loading], async ([agent, exercise, isLoading]) => 
   const hasExercise = Boolean(exercise)
   cloudProvider.setAgent(hasExercise ? agent?.id || null : null, hasExercise)
   if (hasExercise) {
+    const exerciseId = exercise?.id
     await nextTick()
     await avatar.prepare()
-    if (exercise?.exercise_type === 'scenario') avatar.idle('我会陪你完成这个场景练习。')
+    if (exercise?.exercise_type === 'scenario' && current.value?.id === exerciseId && avatar.snapshot.videoStatus !== 'failed') {
+      avatar.idle('我会陪你完成这个场景练习。')
+      await speakLatestScenarioTurn()
+    }
   }
 }, { immediate: true })
 
@@ -151,8 +175,56 @@ async function load() {
 }
 
 async function ensureScenario() {
-  if (current.value?.exercise_type !== 'scenario') return
+  if (current.value?.exercise_type !== 'scenario') {
+    dialogue.value = null
+    scenarioPromptPending.value = false
+    return
+  }
   dialogue.value = await scenarioDialoguesApi.create(current.value.id)
+  const turn = latestAgentTurn(dialogue.value)
+  scenarioPromptPending.value = Boolean(
+    turn && !wasScenarioTurnSpoken(scenarioSpeechStorage(), dialogue.value.id, turn.turn_index),
+  )
+}
+
+function scenarioSpeechStorage() {
+  return window.sessionStorage
+}
+
+async function speakScenarioTurn(turn: ScenarioDialogueTurn, force = false) {
+  const activeDialogue = dialogue.value
+  if (!activeDialogue || current.value?.exercise_type !== 'scenario' || recording.value) return false
+  const token = scenarioTurnToken(activeDialogue.id, turn.turn_index)
+  if (scenarioSpeechInFlight.value === token) return false
+  if (!force && wasScenarioTurnSpoken(scenarioSpeechStorage(), activeDialogue.id, turn.turn_index)) return false
+
+  scenarioSpeechInFlight.value = token
+  scenarioPromptPending.value = true
+  error.value = ''
+  statusMessage.value = dialogueFinished.value ? '请听完最后一句，然后继续下一项。' : '陪伴者正在回应，听完后再继续表达。'
+  try {
+    await avatar.speak(turn.text)
+    if (dialogue.value?.id === activeDialogue.id) {
+      markScenarioTurnSpoken(scenarioSpeechStorage(), activeDialogue.id, turn.turn_index)
+      statusMessage.value = dialogueFinished.value ? '这一段场景练习已经完成。' : '现在轮到你说。'
+    }
+  } catch (err) {
+    error.value = toUserMessage(err, '陪伴者暂时没有说出这句话，你可以重播或根据文字继续。')
+  } finally {
+    if (scenarioSpeechInFlight.value === token) scenarioSpeechInFlight.value = ''
+    if (dialogue.value?.id === activeDialogue.id) scenarioPromptPending.value = false
+  }
+  return true
+}
+
+async function speakLatestScenarioTurn(force = false) {
+  const turn = latestScenarioAgentTurn.value
+  return turn ? speakScenarioTurn(turn, force) : false
+}
+
+async function replayLatestScenarioTurn() {
+  if (busy.value || avatar.isBusy.value || recording.value) return
+  await speakLatestScenarioTurn(true)
 }
 
 async function speakRepeatTarget() {
@@ -172,6 +244,12 @@ function handleRepeatRecordingState(value: boolean) {
   recording.value = value
   if (value) avatar.listen('我在听，请跟着刚才的示范慢慢说。')
   else if (avatar.snapshot.state === 'listening') avatar.idle('录音完成后，可以提交这一遍。')
+}
+
+function handleScenarioRecordingState(value: boolean) {
+  recording.value = value
+  if (value) avatar.listen('我在听，请用自己的话慢慢表达。')
+  else if (avatar.snapshot.state === 'listening') avatar.idle('录音完成后，可以提交这一轮。')
 }
 
 async function togglePause() {
@@ -259,12 +337,14 @@ async function submitRepeat() {
 }
 
 async function scenarioHint() {
-  if (!dialogue.value || busy.value) return
+  if (!dialogue.value || dialogueFinished.value || busy.value || avatar.isBusy.value) return
   busy.value = true
   error.value = ''
   try {
     const result = await scenarioDialoguesApi.hint(dialogue.value.id)
     statusMessage.value = `提示：${result.text}`
+    busy.value = false
+    await avatar.speak(result.text)
   } catch (err) {
     error.value = toUserMessage(err, '表达提示暂时不可用。')
   } finally {
@@ -273,18 +353,32 @@ async function scenarioHint() {
 }
 
 async function submitScenario() {
-  if (!dialogue.value || !blob.value) return
+  if (!dialogue.value || dialogueFinished.value || !blob.value || busy.value || avatar.isBusy.value) return
   busy.value = true
+  error.value = ''
+  statusMessage.value = '正在理解你刚才说的话。'
+  avatar.think('我正在理解你刚才说的话。')
+  let updated = false
   try {
     pendingDialogueTurnId.value ||= crypto.randomUUID()
     dialogue.value = await scenarioDialoguesApi.uploadTurn(dialogue.value.id, blob.value, pendingDialogueTurnId.value)
+    scenarioPromptPending.value = true
     pendingDialogueTurnId.value = ''
     blob.value = null
-    if (dialogue.value.status === 'completed') await advance()
+    updated = true
   } catch (err) {
     error.value = toUserMessage(err, '这一轮没有识别成功，请重新录音。')
+    avatar.idle('刚才没有听清，请保留录音后再试一次。')
   } finally {
     busy.value = false
+  }
+  if (updated) {
+    await nextTick()
+    const spoke = await speakLatestScenarioTurn()
+    if (!spoke) {
+      scenarioPromptPending.value = false
+      if (avatar.snapshot.state === 'thinking') avatar.idle('现在轮到你继续表达。')
+    }
   }
 }
 
@@ -292,6 +386,9 @@ async function advance() {
   avatar.stop()
   feedback.value = null
   blob.value = null
+  dialogue.value = null
+  scenarioSpeechInFlight.value = ''
+  scenarioPromptPending.value = false
   statusMessage.value = ''
   retryKey.value += 1
   await load()

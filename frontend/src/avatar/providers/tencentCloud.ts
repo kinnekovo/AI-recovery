@@ -73,7 +73,7 @@ export class TencentCloudAvatarProvider implements AvatarProvider {
         const enabled = await this.waitForSound()
         if (!enabled || runId !== this.runId) return
       }
-      context.update({ provider: 'tencent_cloud', state: 'speaking', speechSource: this.speechSource, videoStatus: 'ready' })
+      context.update({ provider: 'tencent_cloud', state: 'speaking', line: input.text, speechSource: this.speechSource, videoStatus: 'ready' })
       const startedAt = performance.now()
       const result = await avatarSessionsApi.sendText(this.leaseId, input.text)
       const remainingMs = Math.max(0, result.duration_seconds * 1000 + 500 - (performance.now() - startedAt))
@@ -136,7 +136,6 @@ export class TencentCloudAvatarProvider implements AvatarProvider {
         this.soundEnabled = false
         this.mountPlayer(this.session.play_stream_addr)
       }
-      this.markReady(this.session)
       return true
     }
     this.connecting ||= this.createSession()

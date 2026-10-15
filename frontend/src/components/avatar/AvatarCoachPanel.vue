@@ -71,6 +71,8 @@ const props = defineProps<{
   avatarUrl?: string | null
   avatarAnimationConfig?: Record<string, unknown> | null
   cloudContainerId?: string
+  idleHint?: string
+  speakingHint?: string
 }>()
 
 const avatarObjectUrl = ref('')
@@ -153,11 +155,11 @@ const actionHint = computed(() => {
     return '当前显示的是上传照片预览，不是腾讯云实时数字人视频；本次只提供语音示范。'
   }
   const hints: Record<AvatarRuntimeSnapshot['state'], string> = {
-    idle: '可以点击说明或示范，准备好后再开始录音。',
+    idle: props.idleHint || '可以点击说明或示范，准备好后再开始录音。',
     loading_speech: props.snapshot.videoStatus === 'queued' || props.snapshot.videoStatus === 'running'
       ? '这一句的语音已经准备好，动态形象完成后会自动开始示范。'
       : '正在准备这一句示范，你也可以先看清文字。',
-    speaking: '先听完这一句，结束后再跟着练。',
+    speaking: props.speakingHint || '先听完这一句，结束后再跟着练。',
     listening: '现在轮到你说，慢慢来，把句子说完整。',
     thinking: '请稍等，系统正在整理这次训练结果。',
     encouraging: '这一小步已经完成，可以继续下一项。',
