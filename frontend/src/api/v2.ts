@@ -66,6 +66,7 @@ export interface ExerciseV2 {
 
 export interface TrainingSessionV2 {
   id: string
+  agent_id: string | null
   patient_profile_id: string
   plan_version_id: string
   session_kind: 'formal' | 'extra_practice'

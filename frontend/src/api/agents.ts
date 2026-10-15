@@ -34,6 +34,12 @@ export const agentsApi = {
   syncAliyunAvatar(agentId: string) {
     return request<Agent>(http.post(`/agents/${agentId}/aliyun-avatar/sync`))
   },
+  submitTencentAvatar(agentId: string, photoVersion: 0 | 1 = 0) {
+    return request<Agent>(http.post(`/agents/${agentId}/tencent-avatar/submit`, null, { params: { photo_version: photoVersion } }))
+  },
+  refreshTencentAvatar(agentId: string) {
+    return request<Agent>(http.post(`/agents/${agentId}/tencent-avatar/status`))
+  },
   uploadVoice(agentId: string, file: File, voiceGender: 1 | 2) {
     const form = new FormData()
     form.append('audio_file', file)

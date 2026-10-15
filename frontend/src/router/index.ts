@@ -3,12 +3,8 @@ import LoginView from '@/views/LoginView.vue'
 import PatientLayout from '@/layouts/PatientLayout.vue'
 import FamilyLayout from '@/layouts/FamilyLayout.vue'
 import TherapistLayout from '@/layouts/TherapistLayout.vue'
-import HomeView from '@/views/patient/HomeView.vue'
 import AgentCreateView from '@/views/patient/AgentCreateView.vue'
 import AgentListView from '@/views/patient/AgentListView.vue'
-import TrainingView from '@/views/patient/TrainingView.vue'
-import TrainingSessionView from '@/views/patient/TrainingSessionView.vue'
-import TrainingResultView from '@/views/patient/TrainingResultView.vue'
 import ReportView from '@/views/patient/ReportView.vue'
 import { productV2Enabled } from '@/api/v2'
 import { useAuthStore } from '@/stores/auth'
@@ -36,16 +32,14 @@ const router = createRouter({
       component: PatientLayout,
       meta: { role: 'patient' },
       children: [
-        { path: 'home', component: productV2Enabled ? () => import('@/features/patient-home/PatientHomeV2.vue') : HomeView, meta: { role: 'patient' } },
+        { path: 'home', component: () => import('@/features/patient-home/PatientHomeV2.vue'), meta: { role: 'patient' } },
         { path: 'agent/create', component: AgentCreateView, meta: { role: 'patient' } },
         { path: 'agent/list', component: AgentListView, meta: { role: 'patient' } },
-        { path: 'training', component: productV2Enabled ? () => import('@/features/training-session/TrainingHubV2.vue') : TrainingView, meta: { role: 'patient' } },
-        { path: 'training/extra', component: () => import('@/features/training-session/ExtraPracticeV2.vue'), meta: { role: 'patient', v2Only: true, legacyFallback: '/legacy/training' } },
-        { path: 'training/session/:sessionId', component: () => import('@/features/training-session/TrainingSessionV2.vue'), meta: { role: 'patient', focusMode: true, v2Only: true, legacyFallback: '/legacy/training' } },
-        { path: 'training/session/:sessionId/summary', component: () => import('@/features/training-session/SessionSummaryV2.vue'), meta: { role: 'patient', v2Only: true, legacyFallback: '/legacy/training' } },
-        { path: 'training/:type(repeat|scenario)', component: TrainingSessionView, meta: { role: 'patient' } },
+        { path: 'training', component: () => import('@/features/training-session/TrainingHubV2.vue'), meta: { role: 'patient' } },
+        { path: 'training/extra', component: () => import('@/features/training-session/ExtraPracticeV2.vue'), meta: { role: 'patient', v2Only: true, legacyFallback: '/training' } },
+        { path: 'training/session/:sessionId', component: () => import('@/features/training-session/TrainingSessionV2.vue'), meta: { role: 'patient', focusMode: true, v2Only: true, legacyFallback: '/training' } },
+        { path: 'training/session/:sessionId/summary', component: () => import('@/features/training-session/SessionSummaryV2.vue'), meta: { role: 'patient', v2Only: true, legacyFallback: '/training' } },
         { path: 'training/scenario/result/:dialogueId', component: () => import('@/views/patient/ScenarioDialogueResultView.vue'), meta: { role: 'patient' } },
-        { path: 'training/result', component: TrainingResultView, meta: { role: 'patient' } },
         { path: 'progress', component: () => import('@/features/patient-progress/PatientProgressV2.vue'), meta: { role: 'patient', v2Only: true, legacyFallback: '/evaluation' } },
         { path: 'me', component: () => import('@/features/patient-settings/PatientSettingsV2.vue'), meta: { role: 'patient', v2Only: true, legacyFallback: '/patient/profile' } },
         { path: 'evaluation', component: () => import('@/views/patient/EvaluationView.vue'), meta: { role: 'patient' } },
@@ -54,8 +48,8 @@ const router = createRouter({
         { path: 'report', component: ReportView, meta: { role: 'patient' } },
         { path: 'legacy/agent/create', component: AgentCreateView, meta: { role: 'patient' } },
         { path: 'legacy/agent/list', component: AgentListView, meta: { role: 'patient' } },
-        { path: 'legacy/home', component: HomeView, meta: { role: 'patient' } },
-        { path: 'legacy/training', component: TrainingView, meta: { role: 'patient' } },
+        { path: 'legacy/home', redirect: '/home' },
+        { path: 'legacy/training', redirect: '/training' },
         { path: 'legacy/report', component: ReportView, meta: { role: 'patient' } }
       ]
     },

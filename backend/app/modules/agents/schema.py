@@ -26,6 +26,14 @@ class AgentRead(BaseModel):
     avatar_gender: str | None = None
     aliyun_avatar_status: str = "pending"
     aliyun_avatar_error: str | None = None
+    tencent_avatar_face_task_id: str | None = None
+    tencent_avatar_task_id: str | None = None
+    tencent_avatar_virtualman_key: str | None = None
+    tencent_avatar_resource_id: str | None = None
+    tencent_avatar_status: str = "pending"
+    tencent_avatar_stage: str | None = None
+    tencent_avatar_error: str | None = None
+    tencent_avatar_photo_version: int = 0
     voice_sample_file_id: UUID | None = None
     welcome_audio_file_id: UUID | None = None
     voice_external_id: str | None = None

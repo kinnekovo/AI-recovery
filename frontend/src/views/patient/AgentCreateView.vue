@@ -2,8 +2,8 @@
   <section class="page-stack narrow">
     <div class="page-heading">
       <span class="kicker">创建陪伴者</span>
-      <h1>上传熟悉的人物形象</h1>
-      <p>默认使用本地 2.5D 陪练。阿里云服务启用后，已授权照片可同步为实时数字人形象。</p>
+      <h1>用一张照片创建陪伴者</h1>
+      <p>照片会先在本地完成清晰度检查，并自动调整为腾讯云支持的尺寸；只有在你确认后，才会提交生成实时数字人。</p>
     </div>
     <form v-if="!createdAgent" class="form-panel" @submit.prevent="createPortraitAgent">
       <label>名称<input v-model="form.name" placeholder="妈妈" /></label>
@@ -29,68 +29,81 @@
       </figure>
       <label class="check-line">
         <input v-model="consent" type="checkbox" />
-        已确认该形象获得本人授权，仅用于康复训练；启用阿里云数字人后，照片会提交至阿里云生成实时形象
+        已确认该形象获得本人授权，仅用于康复训练；下一步确认后，照片会提交至腾讯云生成实时形象
       </label>
       <p v-if="error" class="error-text">{{ error }}</p>
-        <AppButton variant="primary" :loading="loading">创建陪伴者形象</AppButton>
+      <AppButton variant="primary" :loading="loading">保存照片并继续</AppButton>
     </form>
-    <section v-else-if="voiceCloneEnabled" class="form-panel voice-clone-panel" aria-live="polite">
-      <span class="kicker">第二步：专属声音</span>
-      <h2>按指定文本录一段声音</h2>
-      <p>可直接在浏览器朗读，也可上传已录好的文件。更换句子只会重新领取腾讯允许的朗读文本，不会创建新的音色 ID。</p>
-      <div class="training-text-wrap">
-        <blockquote class="training-text">{{ createdAgent.voice_training_text }}</blockquote>
-        <AppButton v-if="!createdAgent.voice_clone_task_id" variant="quiet" :loading="refreshingText" @click="changeTrainingText">
-          换一句
-        </AppButton>
-      </div>
-      <label>
-        音色性别
-        <select v-model="voiceGender" :disabled="Boolean(createdAgent.voice_clone_task_id)">
-          <option :value="2">女声</option>
-          <option :value="1">男声</option>
-        </select>
-      </label>
-      <div v-if="!createdAgent.voice_clone_task_id" class="voice-input-choice">
-        <section>
-          <h3>直接朗读</h3>
-          <p>允许麦克风后，按上方文字自然朗读；录音会自动转换为腾讯支持的 WAV 文件。</p>
+    <section v-else class="form-panel tencent-photo-flow" aria-live="polite">
+      <div class="tencent-photo-layout">
+        <figure class="tencent-photo-preview">
+          <img v-if="avatarPreview" :src="avatarPreview" :alt="`${createdAgent.name} 的照片预览`" />
+          <div v-else class="tencent-photo-placeholder">照片已保存</div>
+          <figcaption>{{ createdAgent.name }} · {{ createdAgent.relationship }}</figcaption>
+        </figure>
+        <div class="tencent-photo-content">
+          <span class="kicker">第二步：生成实时数字人</span>
+          <h2>{{ tencentStatusTitle }}</h2>
+          <p>{{ tencentStatusDescription }}</p>
+
+          <ol class="avatar-build-progress" aria-label="照片数字人生成进度">
+            <li class="done"><span>1</span><strong>照片已保存</strong></li>
+            <li :class="{ active: createdAgent.tencent_avatar_status === 'detecting', done: ['training', 'ready'].includes(createdAgent.tencent_avatar_status) }">
+              <span>2</span><strong>腾讯云检测照片</strong>
+            </li>
+            <li :class="{ active: createdAgent.tencent_avatar_status === 'training', done: createdAgent.tencent_avatar_status === 'ready' }">
+              <span>3</span><strong>生成实时形象</strong>
+            </li>
+          </ol>
+
+          <template v-if="['pending', 'failed'].includes(createdAgent.tencent_avatar_status)">
+            <fieldset class="photo-version-options">
+              <legend>本次测试版本</legend>
+              <label><input v-model="photoVersion" type="radio" :value="0" /><span><strong>快速版</strong><small>约 10 分钟，仅头部轻微动态，适合先验证链路。</small></span></label>
+              <label><input v-model="photoVersion" type="radio" :value="1" /><span><strong>优享版</strong><small>约 1 小时，头部和身体有轻微动态。</small></span></label>
+            </fieldset>
+            <label class="check-line quota-confirmation">
+              <input v-model="avatarSubmitConfirmed" type="checkbox" />
+              我确认提交后会消耗 1 个腾讯云“2D 小样本照片”定制额度，任务生成后该额度不能退回
+            </label>
+          </template>
+
+          <p v-if="customizationMessage" class="success-text">{{ customizationMessage }}</p>
+          <p v-if="createdAgent.tencent_avatar_error" class="error-text">{{ createdAgent.tencent_avatar_error }}</p>
+          <p v-if="error" class="error-text">{{ error }}</p>
+
           <div class="button-row">
-            <AppButton v-if="!recording" variant="secondary" :disabled="loading" @click="startRecording">开始录音</AppButton>
-            <AppButton v-else variant="primary" @click="stopRecording">结束录音（{{ recordingSeconds }} 秒）</AppButton>
+            <AppButton
+              v-if="['pending', 'failed'].includes(createdAgent.tencent_avatar_status)"
+              variant="primary"
+              :loading="loading"
+              :disabled="!avatarSubmitConfirmed"
+              @click="submitTencentAvatar"
+            >
+              提交照片并开始检测
+            </AppButton>
+            <AppButton
+              v-else-if="['detecting', 'training'].includes(createdAgent.tencent_avatar_status)"
+              variant="secondary"
+              :loading="loading"
+              @click="refreshTencentAvatar"
+            >
+              查询最新进度
+            </AppButton>
+            <AppButton v-else variant="primary" @click="finish">使用这个数字人</AppButton>
+            <AppButton variant="quiet" :disabled="loading" @click="finish">
+              {{ createdAgent.tencent_avatar_status === 'ready' ? '返回陪伴者列表' : '稍后再继续' }}
+            </AppButton>
           </div>
-          <p v-if="recordingMessage" :class="recordingError ? 'error-text' : 'success-text'">{{ recordingMessage }}</p>
-        </section>
-        <section>
-          <h3>上传录音</h3>
-          <p>也可以选择已按上方文字录好的文件：WAV、MP3、AAC、M4A，时长 5–15 秒、2MB 以内。</p>
-          <label>
-            指定文本的录音文件
-            <input type="file" accept="audio/wav,audio/mpeg,audio/aac,audio/mp4,.m4a" @change="chooseVoiceFile" />
-          </label>
-        </section>
-      </div>
-      <p v-if="voice && !createdAgent.voice_clone_task_id" class="success-text">当前将提交：{{ voice.name }}</p>
-      <p v-if="cloneMessage" class="success-text">{{ cloneMessage }}</p>
-      <p v-if="error" class="error-text">{{ error }}</p>
-      <div class="button-row">
-        <AppButton v-if="!createdAgent.voice_clone_task_id" variant="primary" :loading="loading" @click="startVoiceClone">
-          检测录音并创建唯一音色
-        </AppButton>
-        <AppButton v-else variant="secondary" :loading="loading" @click="refreshVoiceStatus">
-          查询复刻训练结果
-        </AppButton>
-        <AppButton variant="quiet" :disabled="createdAgent.generation_status !== 'voice_ready' && createdAgent.generation_status !== 'ready'" @click="finish">
-          完成创建
-        </AppButton>
+        </div>
       </div>
     </section>
   </section>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import AppButton from '@/components/common/AppButton.vue'
 import { agentsApi } from '@/api/agents'
 import { toUserMessage } from '@/utils/errors'
@@ -98,8 +111,7 @@ import { type PortraitAnimationConfig, validatePortrait } from '@/avatar/face/po
 import type { Agent } from '@/types/api'
 
 const router = useRouter()
-// 声音复刻已保留实现，但在 2.5D 形象验收阶段不展示、不调用。
-const voiceCloneEnabled = false
+const route = useRoute()
 const form = ref<{ name: string; relationship: string; personality_style: string; avatar_gender: 'MALE' | 'FEMALE' }>({
   name: '', relationship: '', personality_style: '温柔鼓励', avatar_gender: 'FEMALE'
 })
@@ -108,32 +120,36 @@ const avatarConfig = ref<PortraitAnimationConfig | null>(null)
 const avatarPreview = ref('')
 const avatarChecking = ref(false)
 const avatarMessage = ref('')
-const voice = ref<File | null>(null)
-const voiceGender = ref<1 | 2>(2)
 const consent = ref(true)
 const loading = ref(false)
 const error = ref('')
-const cloneMessage = ref('')
 const createdAgent = ref<Agent | null>(null)
-const refreshingText = ref(false)
-const recording = ref(false)
-const recordingSeconds = ref(0)
-const recordingMessage = ref('')
-const recordingError = ref(false)
-let mediaRecorder: MediaRecorder | null = null
-let microphoneStream: MediaStream | null = null
-let recordingTimer: number | null = null
-let recordingStartedAt = 0
+const photoVersion = ref<0 | 1>(0)
+const avatarSubmitConfirmed = ref(false)
+const customizationMessage = ref('')
+let customizationTimer: number | null = null
+
+const tencentStatusTitle = computed(() => {
+  const status = createdAgent.value?.tencent_avatar_status
+  if (status === 'detecting') return '正在检查这张照片'
+  if (status === 'training') return '正在生成实时数字人'
+  if (status === 'ready') return '照片数字人已经准备好了'
+  if (status === 'failed') return '这次没有生成成功'
+  return '准备提交腾讯云测试'
+})
+
+const tencentStatusDescription = computed(() => {
+  const status = createdAgent.value?.tencent_avatar_status
+  if (status === 'detecting') return '腾讯云正在确认照片中只有一张清晰正脸。页面会自动查询结果。'
+  if (status === 'training') return photoVersion.value === 0 ? '快速版通常约 10 分钟完成，你可以离开页面后再回来查看。' : '优享版通常约 1 小时完成，你可以离开页面后再回来查看。'
+  if (status === 'ready') return '后续进入跟读训练时，会优先使用这个专属形象。'
+  if (status === 'failed') return '请查看下方原因。你可以修正配置后再次提交，或者暂时使用本地形象。'
+  return '我们会先做人脸检测；检测通过后才正式开始照片数字人训练。'
+})
 
 function pickFile(event: Event): File | null {
   const input = event.target as HTMLInputElement
   return input.files?.[0] || null
-}
-
-function chooseVoiceFile(event: Event) {
-  voice.value = pickFile(event)
-  recordingMessage.value = voice.value ? '已选择上传的录音文件。' : ''
-  recordingError.value = false
 }
 
 async function pickAvatar(event: Event) {
@@ -213,17 +229,9 @@ async function createPortraitAgent() {
       image_consent_confirmed: true,
       voice_consent_confirmed: false
     })
-    await agentsApi.uploadAvatar(agent.id, avatar.value, avatarConfig.value)
-    if (voiceCloneEnabled) {
-      try {
-        createdAgent.value = await agentsApi.getVoiceTrainingText(agent.id)
-      } catch (err) {
-        error.value = toUserMessage(err, '形象已创建，但暂时无法获取声音复刻朗读文本。')
-      }
-    } else {
-      await agentsApi.setCurrent(agent.id)
-      router.push('/agent/list')
-    }
+    createdAgent.value = await agentsApi.uploadAvatar(agent.id, avatar.value, avatarConfig.value)
+    await router.replace({ path: '/agent/create', query: { agent: createdAgent.value.id } })
+    customizationMessage.value = '照片已经安全保存。确认额度后，即可开始腾讯云照片数字人测试。'
   } catch (err) {
     error.value = toUserMessage(err, '创建失败')
   } finally {
@@ -231,172 +239,54 @@ async function createPortraitAgent() {
   }
 }
 
-async function changeTrainingText() {
+async function submitTencentAvatar() {
   if (!createdAgent.value) return
   error.value = ''
-  cloneMessage.value = ''
-  refreshingText.value = true
-  try {
-    createdAgent.value = await agentsApi.getVoiceTrainingText(createdAgent.value.id, true)
-    voice.value = null
-    recordingMessage.value = '已换成腾讯下发的新句子，请按新句子重新录音。'
-    recordingError.value = false
-  } catch (err) {
-    error.value = toUserMessage(err, '暂时无法更换朗读文本')
-  } finally {
-    refreshingText.value = false
-  }
-}
-
-async function startRecording() {
-  error.value = ''
-  recordingMessage.value = ''
-  recordingError.value = false
-  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-    recordingError.value = true
-    recordingMessage.value = '当前浏览器不支持直接录音，请改用“上传录音”。'
-    return
-  }
-  try {
-    microphoneStream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
-    })
-    const chunks: BlobPart[] = []
-    mediaRecorder = new MediaRecorder(microphoneStream)
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size) chunks.push(event.data)
-    }
-    mediaRecorder.onstop = async () => {
-      const elapsedSeconds = (Date.now() - recordingStartedAt) / 1000
-      cleanupRecorder()
-      try {
-        voice.value = await convertRecordingToWav(new Blob(chunks, { type: mediaRecorder?.mimeType || 'audio/webm' }), elapsedSeconds)
-        recordingMessage.value = `录音已准备好（${elapsedSeconds.toFixed(1)} 秒），可提交检测。`
-      } catch (err) {
-        voice.value = null
-        recordingError.value = true
-        recordingMessage.value = err instanceof Error ? err.message : '录音转换失败，请改用上传录音。'
-      }
-    }
-    recordingStartedAt = Date.now()
-    recordingSeconds.value = 0
-    recording.value = true
-    mediaRecorder.start()
-    recordingTimer = window.setInterval(() => {
-      recordingSeconds.value = Math.floor((Date.now() - recordingStartedAt) / 1000)
-      if (recordingSeconds.value >= 15) stopRecording()
-    }, 250)
-  } catch (err) {
-    cleanupRecorder()
-    recordingError.value = true
-    recordingMessage.value = toUserMessage(err, '无法使用麦克风；请确认已允许浏览器访问麦克风，或改用上传录音。')
-  }
-}
-
-function stopRecording() {
-  if (mediaRecorder?.state === 'recording') mediaRecorder.stop()
-}
-
-function cleanupRecorder() {
-  recording.value = false
-  if (recordingTimer !== null) window.clearInterval(recordingTimer)
-  recordingTimer = null
-  microphoneStream?.getTracks().forEach((track) => track.stop())
-  microphoneStream = null
-  mediaRecorder = null
-}
-
-async function convertRecordingToWav(blob: Blob, elapsedSeconds: number): Promise<File> {
-  if (elapsedSeconds <= 5 || elapsedSeconds >= 15) {
-    throw new Error('录音需要大于 5 秒且小于 15 秒；请重新朗读。')
-  }
-  const context = new AudioContext()
-  try {
-    const decoded = await context.decodeAudioData(await blob.arrayBuffer())
-    if (decoded.duration <= 5 || decoded.duration >= 15) {
-      throw new Error('录音需要大于 5 秒且小于 15 秒；请重新朗读。')
-    }
-    const wav = encodeMonoWav(decoded, 24000)
-    if (wav.size > 2 * 1024 * 1024) throw new Error('录音文件超过 2MB，请缩短录音或改用上传文件。')
-    return new File([wav], `voice-clone-${Date.now()}.wav`, { type: 'audio/wav' })
-  } finally {
-    await context.close()
-  }
-}
-
-function encodeMonoWav(buffer: AudioBuffer, targetRate: number): Blob {
-  const outputLength = Math.ceil(buffer.duration * targetRate)
-  const bytes = new ArrayBuffer(44 + outputLength * 2)
-  const view = new DataView(bytes)
-  writeAscii(view, 0, 'RIFF')
-  view.setUint32(4, 36 + outputLength * 2, true)
-  writeAscii(view, 8, 'WAVE')
-  writeAscii(view, 12, 'fmt ')
-  view.setUint32(16, 16, true)
-  view.setUint16(20, 1, true)
-  view.setUint16(22, 1, true)
-  view.setUint32(24, targetRate, true)
-  view.setUint32(28, targetRate * 2, true)
-  view.setUint16(32, 2, true)
-  view.setUint16(34, 16, true)
-  writeAscii(view, 36, 'data')
-  view.setUint32(40, outputLength * 2, true)
-  for (let index = 0; index < outputLength; index += 1) {
-    const sourcePosition = (index * buffer.sampleRate) / targetRate
-    const left = Math.min(Math.floor(sourcePosition), buffer.length - 1)
-    const right = Math.min(left + 1, buffer.length - 1)
-    const mix = Array.from({ length: buffer.numberOfChannels }, (_, channel) => {
-      const samples = buffer.getChannelData(channel)
-      const fraction = sourcePosition - left
-      return samples[left] * (1 - fraction) + samples[right] * fraction
-    }).reduce((sum, sample) => sum + sample, 0) / buffer.numberOfChannels
-    view.setInt16(44 + index * 2, Math.max(-1, Math.min(1, mix)) * 0x7fff, true)
-  }
-  return new Blob([bytes], { type: 'audio/wav' })
-}
-
-function writeAscii(view: DataView, offset: number, value: string) {
-  for (let index = 0; index < value.length; index += 1) view.setUint8(offset + index, value.charCodeAt(index))
-}
-
-async function startVoiceClone() {
-  error.value = ''
-  cloneMessage.value = ''
-  if (!createdAgent.value || !voice.value) {
-    error.value = '请先选择按指定文本录制的声音文件。'
+  customizationMessage.value = ''
+  if (!avatarSubmitConfirmed.value) {
+    error.value = '请先确认本次提交会消耗 1 个照片数字人定制额度。'
     return
   }
   loading.value = true
   try {
-    createdAgent.value = await agentsApi.uploadVoice(createdAgent.value.id, voice.value, voiceGender.value)
-    cloneMessage.value = '录音已通过并已创建唯一复刻任务。腾讯云通常需要几分钟训练；请稍后点击“查询复刻训练结果”。'
+    createdAgent.value = await agentsApi.submitTencentAvatar(createdAgent.value.id, photoVersion.value)
+    customizationMessage.value = '照片已上传，腾讯云正在进行人脸检测。'
+    scheduleCustomizationRefresh()
   } catch (err) {
-    error.value = toUserMessage(err, '声音检测或复刻任务创建失败')
+    error.value = toUserMessage(err, '照片数字人任务提交失败')
   } finally {
     loading.value = false
   }
 }
 
-async function refreshVoiceStatus() {
-  if (!createdAgent.value) return
+async function refreshTencentAvatar() {
+  if (!createdAgent.value || !['detecting', 'training'].includes(createdAgent.value.tencent_avatar_status)) return
   error.value = ''
-  cloneMessage.value = ''
   loading.value = true
   try {
-    const result = await agentsApi.getVoiceStatus(createdAgent.value.id)
-    createdAgent.value = result.agent
-    if (result.task_status_code === 2) {
-      cloneMessage.value = '专属音色训练完成，已保存唯一音色 ID。现在可以完成创建。'
-    } else if (result.task_status_code === 3) {
-      error.value = result.error_message || '声音复刻任务未完成。为避免创建多个音色 ID，页面已停止再次提交。'
-    } else {
-      cloneMessage.value = '声音复刻仍在训练中，请稍后再次查询。'
+    createdAgent.value = await agentsApi.refreshTencentAvatar(createdAgent.value.id)
+    if (createdAgent.value.tencent_avatar_status === 'training') {
+      customizationMessage.value = '照片已通过检测，腾讯云正在生成实时数字人。'
+    } else if (createdAgent.value.tencent_avatar_status === 'ready') {
+      customizationMessage.value = '专属形象已经生成，训练页面会自动使用它。'
     }
+    scheduleCustomizationRefresh()
   } catch (err) {
-    error.value = toUserMessage(err, '查询声音复刻任务失败')
+    error.value = toUserMessage(err, '暂时无法查询生成进度')
+    scheduleCustomizationRefresh(15000)
   } finally {
     loading.value = false
   }
+}
+
+function scheduleCustomizationRefresh(delay = 8000) {
+  if (customizationTimer !== null) window.clearTimeout(customizationTimer)
+  customizationTimer = null
+  if (!createdAgent.value || !['detecting', 'training'].includes(createdAgent.value.tencent_avatar_status)) return
+  customizationTimer = window.setTimeout(() => {
+    customizationTimer = null
+    void refreshTencentAvatar()
+  }, delay)
 }
 
 async function finish() {
@@ -405,8 +295,28 @@ async function finish() {
   router.push('/agent/list')
 }
 
+onMounted(async () => {
+  const agentId = typeof route.query.agent === 'string' ? route.query.agent : ''
+  if (!agentId) return
+  loading.value = true
+  try {
+    const existing = (await agentsApi.list()).find((item) => item.id === agentId)
+    if (!existing) {
+      error.value = '没有找到这个陪伴者，请从陪伴者列表重新进入。'
+      return
+    }
+    createdAgent.value = existing
+    photoVersion.value = existing.tencent_avatar_photo_version
+    if (['detecting', 'training'].includes(existing.tencent_avatar_status)) scheduleCustomizationRefresh(1000)
+  } catch (err) {
+    error.value = toUserMessage(err, '暂时无法恢复照片数字人创建进度')
+  } finally {
+    loading.value = false
+  }
+})
+
 onBeforeUnmount(() => {
   if (avatarPreview.value) URL.revokeObjectURL(avatarPreview.value)
-  cleanupRecorder()
+  if (customizationTimer !== null) window.clearTimeout(customizationTimer)
 })
 </script>

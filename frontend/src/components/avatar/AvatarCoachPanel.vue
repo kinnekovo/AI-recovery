@@ -1,6 +1,6 @@
 <template>
   <section class="avatar-coach-panel" :class="[`state-${snapshot.state}`, { compact, immersive }]">
-    <div class="avatar-stage" aria-hidden="true">
+    <div class="avatar-stage" :aria-hidden="isStreamingProvider ? undefined : true">
       <div class="avatar-presence-ring"></div>
       <div
         v-show="isStreamingProvider"
@@ -15,13 +15,13 @@
         muted
         playsinline
       ></video>
-      <div v-else-if="avatarObjectUrl" class="avatar-photo-frame" :style="avatarMotionStyle">
+      <div v-else-if="avatarObjectUrl && !isStreamingProvider" class="avatar-photo-frame" :style="avatarMotionStyle">
         <img class="avatar-photo-base" :src="avatarObjectUrl" alt="" />
         <span v-if="hasPhotoMouth" class="avatar-photo-mouth-region">
           <img :src="avatarObjectUrl" alt="" />
         </span>
       </div>
-      <div v-else class="avatar-head">
+      <div v-else-if="!isStreamingProvider" class="avatar-head">
         <span class="avatar-hair"></span>
         <span class="avatar-face">
           <i class="avatar-eye left"></i>
@@ -50,7 +50,7 @@
         动态形象正在生成，已等待 {{ snapshot.videoElapsedSeconds }} 秒。视频完成后将与语音同步播放。
       </p>
       <p v-else-if="snapshot.videoStatus === 'fallback' || snapshot.videoStatus === 'failed'" class="avatar-video-fallback">
-        动态形象暂未就绪，本次已使用语音示范。
+        {{ snapshot.error || '实时数字人画面暂未就绪，本次仅播放语音示范。' }}
       </p>
       <slot name="actions"></slot>
     </div>
@@ -111,13 +111,18 @@ function validAnchor(anchor: PortraitAnimationConfig['mouth'] | undefined): anch
     Number.isFinite(anchor.width) && Number.isFinite(anchor.height) && anchor.width > 0 && anchor.height > 0
   )
 }
-const providerLabel = computed(() => ({
-  static_2d: '2.5D 动态陪练',
+const providerLabel = computed(() => {
+  if (props.snapshot.provider === 'static_2d' && props.snapshot.videoStatus === 'failed') {
+    return '照片预览 · 云端未连接'
+  }
+  return ({
+  static_2d: '本地照片陪练',
   external_streaming: '外部实时数字人',
   tencent_cloud: '腾讯云实时数字人',
   live2d: 'Live2D 陪练',
   three_d: '3D 陪练'
-}[props.snapshot.provider]))
+  }[props.snapshot.provider])
+})
 const isStreamingProvider = computed(() => props.snapshot.provider === 'external_streaming' || props.snapshot.provider === 'tencent_cloud')
 const capabilityLabel = computed(() => {
   if (!props.snapshot.canSpeak) return '文字引导'
@@ -142,6 +147,9 @@ const stateLabel = computed(() => {
   return labels[props.snapshot.state]
 })
 const actionHint = computed(() => {
+  if (props.snapshot.videoStatus === 'failed') {
+    return '当前显示的是上传照片预览，不是腾讯云实时数字人视频；本次只提供语音示范。'
+  }
   const hints: Record<AvatarRuntimeSnapshot['state'], string> = {
     idle: '可以点击说明或示范，准备好后再开始录音。',
     loading_speech: props.snapshot.videoStatus === 'queued' || props.snapshot.videoStatus === 'running'

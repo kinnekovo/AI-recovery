@@ -58,6 +58,14 @@ export interface Agent {
   avatar_gender: 'MALE' | 'FEMALE' | null
   aliyun_avatar_status: 'pending' | 'provisioning' | 'ready' | 'failed' | 'manual_review'
   aliyun_avatar_error: string | null
+  tencent_avatar_face_task_id: string | null
+  tencent_avatar_task_id: string | null
+  tencent_avatar_virtualman_key: string | null
+  tencent_avatar_resource_id: string | null
+  tencent_avatar_status: 'pending' | 'detecting' | 'training' | 'ready' | 'failed'
+  tencent_avatar_stage: string | null
+  tencent_avatar_error: string | null
+  tencent_avatar_photo_version: 0 | 1
   voice_sample_file_id: string | null
   welcome_audio_file_id: string | null
   voice_external_id: string | null
@@ -96,27 +104,6 @@ export interface TaskTemplatePayload {
   tags: string[]
   recommendation_weight: number
   is_active: boolean
-}
-
-export interface SessionTask {
-  id: string
-  order_index: number
-  prompt_level: number
-  status: string
-  task_template: TaskTemplate
-}
-
-export interface TrainingSession {
-  id: string
-  training_type: 'repeat' | 'scenario'
-  status: string
-  agent_id: string | null
-  recommendation_review_id: string | null
-  recommendation_source: string | null
-  recommendation_snapshot: Record<string, unknown> | null
-  recommendation_matched: boolean
-  created_at: string
-  session_tasks: SessionTask[]
 }
 
 export interface TrainingRecommendation {
@@ -389,40 +376,6 @@ export interface RecommendationNotePayload {
 export interface RecommendationNote {
   note: string | null
   updated_at: string | null
-}
-
-export interface TrainingSessionCreatePayload {
-  type: 'repeat' | 'scenario'
-  scenario_mode?: 'training' | 'generalization_probe'
-  recommendation_id?: string | null
-  recommendation_source?: string | null
-  recommendation_headline?: string | null
-  recommendation_task_ids?: string[] | null
-}
-
-export interface AvatarSpeechPayload {
-  scene: 'training_intro' | 'session_intro' | 'task_demo' | 'next_task' | 'result_encouragement' | 'error_recovery' | string
-  session_id?: string | null
-  session_task_id?: string | null
-  text: string
-}
-
-export interface AvatarSpeech {
-  text: string
-  audio_file_id: string | null
-  audio_url: string | null
-  provider: string
-  fallback: boolean
-  cached: boolean
-}
-
-export interface TodayTraining {
-  plan_id: string
-  title: string
-  status: string
-  items_count: number
-  recommended_completed: boolean
-  completed_recommended_sessions: number
 }
 
 export interface RecommendationEffect {

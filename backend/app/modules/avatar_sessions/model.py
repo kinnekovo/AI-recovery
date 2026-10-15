@@ -19,7 +19,7 @@ class AvatarSession(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "avatar_sessions"
 
     owner_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
-    agent_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=False, index=True)
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=True, index=True)
     instance_id: Mapped[str] = mapped_column(String(160), nullable=False)
     provider_session_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
     status: Mapped[AvatarSessionStatus] = mapped_column(

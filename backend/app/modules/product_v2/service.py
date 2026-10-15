@@ -1091,6 +1091,7 @@ def session_dict(db: Session, session: TrainingSession):
     current = next((item for item in tasks if item["status"] not in {"completed", "skipped", "technical_invalid"}), None)
     return {
         "id": str(session.id),
+        "agent_id": str(session.agent_id) if session.agent_id else None,
         "patient_profile_id": str(session.patient_profile_id),
         "plan_version_id": str(session.formal_training_plan_version_id) if session.formal_training_plan_version_id else None,
         "session_kind": session.session_kind,

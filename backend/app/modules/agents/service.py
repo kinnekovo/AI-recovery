@@ -6,6 +6,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.integrations.tencent_avatar.provider import TencentAvatarCustomizationClient, TencentAvatarError
 from app.integrations.tts.provider import get_tts_provider
 from app.integrations.voice_clone.provider import VoiceCloneProviderError, VoiceCloneTaskStatus, get_voice_clone_provider
 from app.modules.agents.model import Agent, AgentGenerationStatus, AliyunAvatarStatus
@@ -67,6 +68,14 @@ def upload_avatar(db: Session, user: User, agent_id: UUID, upload: UploadFile, a
     agent.aliyun_avatar_source_file_id = None
     agent.aliyun_avatar_status = AliyunAvatarStatus.pending
     agent.aliyun_avatar_error = None
+    agent.tencent_avatar_face_task_id = None
+    agent.tencent_avatar_task_id = None
+    agent.tencent_avatar_virtualman_key = None
+    agent.tencent_avatar_resource_id = None
+    agent.tencent_avatar_material_url = None
+    agent.tencent_avatar_status = "pending"
+    agent.tencent_avatar_stage = None
+    agent.tencent_avatar_error = None
     db.commit()
     db.refresh(agent)
     settings = get_settings()
@@ -80,6 +89,136 @@ def upload_avatar(db: Session, user: User, agent_id: UUID, upload: UploadFile, a
         except HTTPException:
             db.refresh(agent)
     return agent
+
+
+def submit_tencent_photo_avatar(db: Session, user: User, agent_id: UUID, *, photo_version: int = 0) -> Agent:
+    agent = get_owned_agent(db, user, agent_id)
+    require_active_consent(db, user, agent.id, "image")
+    if not agent.avatar_file or not agent.avatar_file_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="请先上传一张通过校验的正面照片。")
+    if agent.tencent_avatar_status in {"detecting", "training"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="照片数字人任务正在处理中，请查询当前进度，不要重复提交。")
+    if agent.tencent_avatar_status == "ready" and agent.tencent_avatar_virtualman_key:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该陪伴者已经生成照片数字人，无需重复提交。")
+    if photo_version not in {0, 1}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="不支持的照片数字人版本。")
+
+    crop = None
+    if isinstance(agent.avatar_animation_config, dict):
+        configured_crop = agent.avatar_animation_config.get("crop")
+        if isinstance(configured_crop, dict):
+            crop = configured_crop
+    try:
+        client = TencentAvatarCustomizationClient()
+        material_url = client.upload_photo(agent.avatar_file.storage_path, crop)
+        # CheckerVersion=1 can reject an otherwise valid 640x640 close-up with
+        # error 300003 ("face box max size 700"). The same material is accepted
+        # by Tencent's newer checker, which also returns crop and quality data.
+        # PhotoVersion controls the avatar product tier independently, so use
+        # CheckerVersion=2 for both quick and preferred photo avatars.
+        face_task_id = client.start_face_detection(material_url, checker_version=2)
+    except TencentAvatarError as exc:
+        agent.tencent_avatar_status = "failed"
+        agent.tencent_avatar_error = exc.message[:500]
+        db.commit()
+        raise _tencent_avatar_http_error(exc) from exc
+
+    agent.tencent_avatar_face_task_id = face_task_id
+    agent.tencent_avatar_task_id = None
+    agent.tencent_avatar_virtualman_key = None
+    agent.tencent_avatar_resource_id = None
+    agent.tencent_avatar_material_url = material_url
+    agent.tencent_avatar_photo_version = photo_version
+    agent.tencent_avatar_status = "detecting"
+    agent.tencent_avatar_stage = "FACE_DETECT"
+    agent.tencent_avatar_error = None
+    db.commit()
+    db.refresh(agent)
+    return agent
+
+
+def refresh_tencent_photo_avatar(db: Session, user: User, agent_id: UUID) -> Agent:
+    agent = get_owned_agent(db, user, agent_id)
+    require_active_consent(db, user, agent.id, "image")
+    try:
+        client = TencentAvatarCustomizationClient()
+        if agent.tencent_avatar_status == "detecting":
+            if not agent.tencent_avatar_face_task_id or not agent.tencent_avatar_material_url:
+                return _fail_tencent_avatar(db, agent, "照片检测任务信息不完整，请重新提交。")
+            face = client.get_face_detection(agent.tencent_avatar_face_task_id)
+            task_state = str(face.get("TaskState") or "").upper()
+            agent.tencent_avatar_stage = task_state or "FACE_DETECT"
+            if task_state in {"WAITING", "PROCESSING"}:
+                db.commit()
+                db.refresh(agent)
+                return agent
+            if task_state != "SUCCESS" or not face.get("IsPassDetect"):
+                message = str(face.get("ErrorMsg") or "照片未通过腾讯云人脸检测，请换一张单人、正面、无遮挡的照片。")
+                return _fail_tencent_avatar(db, agent, message)
+            task_id = client.start_photo_customization(
+                image_url=agent.tencent_avatar_material_url,
+                anchor_name=f"{agent.name}_{str(agent.id)[:6]}_{agent.tencent_avatar_face_task_id[-6:]}",
+                sex_type=agent.avatar_gender or "FEMALE",
+                photo_version=agent.tencent_avatar_photo_version,
+            )
+            agent.tencent_avatar_task_id = task_id
+            agent.tencent_avatar_status = "training"
+            agent.tencent_avatar_stage = "SUBMIT"
+            agent.tencent_avatar_error = None
+            db.commit()
+            db.refresh(agent)
+            return agent
+
+        if agent.tencent_avatar_status == "training":
+            if not agent.tencent_avatar_task_id:
+                return _fail_tencent_avatar(db, agent, "照片数字人任务信息不完整，请重新提交。")
+            progress = client.get_customization_progress(agent.tencent_avatar_task_id)
+            provider_status = str(progress.get("Status") or "").upper()
+            agent.tencent_avatar_stage = str(progress.get("StageV2") or progress.get("StatusV2") or "TRAIN")
+            if provider_status == "MAKING":
+                db.commit()
+                db.refresh(agent)
+                return agent
+            if provider_status != "SUCCESS":
+                return _fail_tencent_avatar(db, agent, str(progress.get("FailMessage") or "腾讯云照片数字人生成失败，请稍后重试。"))
+            assets = progress.get("AssetList") or []
+            asset = next((item for item in assets if isinstance(item, dict) and item.get("VirtualmanKey")), None)
+            if not asset:
+                return _fail_tencent_avatar(db, agent, "腾讯云任务已完成，但没有返回照片数字人资产。")
+            agent.tencent_avatar_virtualman_key = str(asset.get("VirtualmanKey"))
+            resource_id = asset.get("VirtualmanResourceId")
+            agent.tencent_avatar_resource_id = str(resource_id) if resource_id is not None else None
+            agent.tencent_avatar_status = "ready"
+            agent.tencent_avatar_stage = "END"
+            agent.tencent_avatar_error = None
+            db.commit()
+            db.refresh(agent)
+            return agent
+    except TencentAvatarError as exc:
+        if "无可用定制资产" in exc.message or "UnauthorizedOperation" in exc.message:
+            return _fail_tencent_avatar(
+                db,
+                agent,
+                "照片和人脸检测已经通过，但当前腾讯云账号没有可用的“2D 小样本照片”形象定制配额。请购买或联系腾讯云开通该配额后再重试；2D 精品交互并发不能代替此配额。",
+            )
+        if "InvalidParameterValue" in exc.message or exc.code == "InvalidParameterValue":
+            return _fail_tencent_avatar(db, agent, f"腾讯云拒绝了照片定制参数：{exc.message}")
+        raise _tencent_avatar_http_error(exc) from exc
+    return agent
+
+
+def _fail_tencent_avatar(db: Session, agent: Agent, message: str) -> Agent:
+    agent.tencent_avatar_status = "failed"
+    agent.tencent_avatar_error = message[:500]
+    db.commit()
+    db.refresh(agent)
+    return agent
+
+
+def _tencent_avatar_http_error(exc: TencentAvatarError) -> HTTPException:
+    invalid_codes = {"invalid_photo", "invalid_upload_path", "invalid_upload_credentials"}
+    http_status = status.HTTP_422_UNPROCESSABLE_ENTITY if exc.code in invalid_codes else status.HTTP_502_BAD_GATEWAY
+    return HTTPException(status_code=http_status, detail=exc.message)
 
 
 def get_voice_training_text(db: Session, user: User, agent_id: UUID, *, refresh: bool = False) -> Agent:

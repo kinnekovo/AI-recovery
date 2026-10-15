@@ -8,6 +8,8 @@ storage/voice-samples/*
 storage/training-audio/*
 storage/generated-audio/*
 runtimes/
+tencent-avatar-demo.zip
+tools/tencent-avatar-demo/
 !storage/agent-images/.gitkeep
 !storage/voice-samples/.gitkeep
 !storage/training-audio/.gitkeep

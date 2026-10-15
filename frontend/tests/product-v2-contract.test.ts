@@ -1,6 +1,7 @@
 import type { AxiosAdapter, AxiosResponse } from 'axios'
 import { afterEach, describe, expect, it } from 'vitest'
 import { http } from '@/api/http'
+import { avatarSessionsApi } from '@/api/avatarSessions'
 import { isProductV2Enabled, v2Api } from '@/api/v2'
 import router from '@/router'
 
@@ -13,7 +14,7 @@ describe('Product Reset v2 contracts', () => {
     expect(isProductV2Enabled('true')).toBe(true)
     expect(isProductV2Enabled('false')).toBe(false)
   })
-  it('exposes the patient and therapist product routes while retaining legacy routes', () => {
+  it('exposes the patient and therapist product routes without legacy training pages', () => {
     const paths = router.getRoutes().map(route => route.path)
     expect(paths).toEqual(expect.arrayContaining([
       '/home',
@@ -24,9 +25,10 @@ describe('Product Reset v2 contracts', () => {
       '/therapist/patients',
       '/therapist/plans',
       '/therapist/patients/:patientId/assessments/new',
-      '/legacy/home',
-      '/legacy/training'
+      '/legacy/home'
     ]))
+    expect(paths).not.toContain('/training/:type(repeat|scenario)')
+    expect(paths).not.toContain('/training/result')
   })
 
   it('uses aggregate application APIs rather than table-shaped endpoints', async () => {
@@ -51,5 +53,27 @@ describe('Product Reset v2 contracts', () => {
       'GET /v2/therapist/workbench',
       'POST /v2/therapist/patients/patient-1/formal-assessments'
     ]))
+  })
+
+  it('uses the verified server-side Tencent audio-drive endpoints for repeat demos', async () => {
+    const seen: string[] = []
+    http.defaults.adapter = (async config => {
+      seen.push(`${config.method?.toUpperCase()} ${config.url}`)
+      return {
+        data: { code: 0, message: '', data: { audio_url: '/api/files/audio/content' } },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      } as AxiosResponse
+    }) as AxiosAdapter
+
+    await avatarSessionsApi.generateSpeech('agent-1', '今天天气很好。')
+    await avatarSessionsApi.sendAudio('lease-1', new ArrayBuffer(16))
+
+    expect(seen).toEqual([
+      'POST /avatar/sessions/speech',
+      'POST /avatar/sessions/lease-1/audio',
+    ])
   })
 })

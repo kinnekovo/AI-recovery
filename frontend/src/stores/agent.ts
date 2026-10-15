@@ -22,6 +22,11 @@ export const useAgentStore = defineStore('agent', {
       await agentsApi.revokeConsent(agentId, consentType)
       await this.loadAgents()
     },
+    async refreshTencentAvatar(agentId: string) {
+      const updated = await agentsApi.refreshTencentAvatar(agentId)
+      this.agents = this.agents.map((agent) => agent.id === updated.id ? updated : agent)
+      return updated
+    },
     async remove(agentId: string) {
       await agentsApi.remove(agentId)
       await this.loadAgents()

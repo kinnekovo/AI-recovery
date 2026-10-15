@@ -1,7 +1,7 @@
 import enum
 import uuid
 
-from sqlalchemy import JSON, Boolean, Enum, ForeignKey, String
+from sqlalchemy import JSON, Boolean, Enum, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship as orm_relationship
 
@@ -43,6 +43,15 @@ class Agent(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         Enum(AliyunAvatarStatus, name="aliyun_avatar_status"), default=AliyunAvatarStatus.pending, nullable=False
     )
     aliyun_avatar_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    tencent_avatar_face_task_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    tencent_avatar_task_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    tencent_avatar_virtualman_key: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    tencent_avatar_resource_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    tencent_avatar_material_url: Mapped[str | None] = mapped_column(String(800), nullable=True)
+    tencent_avatar_status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
+    tencent_avatar_stage: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    tencent_avatar_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    tencent_avatar_photo_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     voice_sample_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("files.id"), nullable=True)
     welcome_audio_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("files.id"), nullable=True)
     voice_external_id: Mapped[str | None] = mapped_column(String(160), nullable=True)

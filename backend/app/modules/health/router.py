@@ -195,7 +195,8 @@ def tencent_avatar_missing_env(settings) -> list[str]:
     return required_missing(
         settings,
         {
-            "TENCENT_AVATAR_SIGN": getattr(settings, "tencent_avatar_sign", None),
+            "TENCENT_AVATAR_APP_KEY": getattr(settings, "tencent_avatar_app_key", None),
+            "TENCENT_AVATAR_ACCESS_TOKEN": getattr(settings, "tencent_avatar_access_token", None),
             "TENCENT_AVATAR_ASSET_VIRTUALMAN_KEY": getattr(settings, "tencent_avatar_asset_virtualman_key", None),
         },
     )

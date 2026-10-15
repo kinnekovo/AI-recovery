@@ -12,6 +12,17 @@
         <AgentCard :agent="agent" />
         <p v-if="isCurrent(agent.id)" class="current-agent-label">当前陪练</p>
         <div class="agent-action-row">
+          <RouterLink
+            v-if="['pending', 'failed'].includes(agent.tencent_avatar_status)"
+            class="app-button secondary"
+            :to="{ path: '/agent/create', query: { agent: agent.id } }"
+          >{{ agent.tencent_avatar_status === 'failed' ? '查看原因并重试' : '继续创建数字人' }}</RouterLink>
+          <AppButton
+            v-if="['detecting', 'training'].includes(agent.tencent_avatar_status)"
+            variant="secondary"
+            :loading="loadingAvatarId === agent.id"
+            @click="refreshAvatar(agent.id)"
+          >查询数字人进度</AppButton>
           <AppButton variant="secondary" :disabled="isCurrent(agent.id) || loadingCurrent" @click="setCurrent(agent.id)">
             {{ isCurrent(agent.id) ? '当前陪练' : '设为当前' }}
           </AppButton>
@@ -50,6 +61,7 @@ const agents = computed(() => store.agents)
 const loadingConsent = ref(false)
 const loadingCurrent = ref(false)
 const deletingAgentId = ref<string | null>(null)
+const loadingAvatarId = ref<string | null>(null)
 const message = ref('')
 const error = ref('')
 
@@ -66,11 +78,25 @@ async function setCurrent(agentId: string) {
   try {
     await store.setCurrent(agentId)
     await auth.fetchMe()
-    message.value = '已设为当前陪练，之后的训练会使用这个 2.5D 形象。'
+    message.value = '已设为当前陪练；专属数字人就绪后，训练会自动优先使用它。'
   } catch (err) {
     error.value = toUserMessage(err, '设为当前失败')
   } finally {
     loadingCurrent.value = false
+  }
+}
+
+async function refreshAvatar(agentId: string) {
+  loadingAvatarId.value = agentId
+  message.value = ''
+  error.value = ''
+  try {
+    const agent = await store.refreshTencentAvatar(agentId)
+    message.value = agent.tencent_avatar_status === 'ready' ? '专属照片数字人已经生成完成。' : '任务仍在处理中，可以稍后再次查询。'
+  } catch (err) {
+    error.value = toUserMessage(err, '查询照片数字人进度失败')
+  } finally {
+    loadingAvatarId.value = null
   }
 }
 

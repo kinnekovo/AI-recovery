@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
 from app.core.observability import configure_logging, log_event
+from app.integrations.tencent_avatar.provider import close_all_runtimes
 from app.modules.agents.router import router as agents_router
 from app.modules.avatar_sessions.router import router as avatar_sessions_router
 from app.modules.assessment.router import router as assessment_router
@@ -23,7 +24,6 @@ from app.modules.review_workflow.router import router as review_workflow_router
 from app.modules.scoring.router import router as scoring_router
 from app.modules.scenario_dialogues.router import router as scenario_dialogues_router
 from app.modules.therapist.router import router as therapist_router
-from app.modules.training.router import router as training_router
 from app.modules.users.router import router as users_router
 
 
@@ -42,7 +42,6 @@ def create_app() -> FastAPI:
     app.include_router(users_router, prefix=settings.api_prefix)
     app.include_router(agents_router, prefix=settings.api_prefix)
     app.include_router(avatar_sessions_router, prefix=settings.api_prefix)
-    app.include_router(training_router, prefix=settings.api_prefix)
     app.include_router(attempts_router, prefix=settings.api_prefix)
     app.include_router(scoring_router, prefix=settings.api_prefix)
     app.include_router(scenario_dialogues_router, prefix=settings.api_prefix)
@@ -60,6 +59,8 @@ def create_app() -> FastAPI:
     app.include_router(consent_router, prefix=settings.api_prefix)
     app.include_router(calibration_router, prefix=settings.api_prefix)
     app.include_router(health_router, prefix=settings.api_prefix)
+
+    app.add_event_handler("shutdown", close_all_runtimes)
 
     @app.middleware("http")
     async def log_request_failures(request, call_next):

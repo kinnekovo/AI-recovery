@@ -25,6 +25,10 @@ export function useAvatarRuntime(provider: AvatarProvider = new Static2DAvatarPr
 
   const isBusy = computed(() => snapshot.state === 'loading_speech' || snapshot.state === 'speaking' || snapshot.state === 'thinking')
 
+  async function prepare() {
+    await provider.prepare?.(context)
+  }
+
   async function speak(text: string, audioUrl?: string | null, videoTaskId?: string | null) {
     await provider.speak({ text, audioUrl, videoTaskId, interrupt: true }, context)
   }
@@ -114,6 +118,7 @@ export function useAvatarRuntime(provider: AvatarProvider = new Static2DAvatarPr
   return {
     snapshot,
     isBusy,
+    prepare,
     speak,
     listen,
     think,

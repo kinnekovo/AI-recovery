@@ -51,6 +51,7 @@ export interface AvatarProvider {
     expression: boolean
     streaming: boolean
   }
+  prepare?(context: AvatarProviderContext): Promise<void>
   speak(input: AvatarSpeakInput, context: AvatarProviderContext): Promise<void>
   setState(state: AvatarRuntimeState, context: AvatarProviderContext): void
   stop(): void
