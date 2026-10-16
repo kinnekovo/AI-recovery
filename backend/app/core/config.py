@@ -84,6 +84,9 @@ class Settings:
     llm_feedback_api_key: str | None
     llm_feedback_base_url: str | None
     llm_feedback_model: str | None
+    llm_feedback_timeout_seconds: float
+    llm_feedback_max_attempts: int
+    llm_feedback_retry_backoff_seconds: float
 
     def __init__(self) -> None:
         backend_dir = Path(__file__).resolve().parents[2]
@@ -178,6 +181,12 @@ class Settings:
         self.llm_feedback_api_key = os.getenv("LLM_FEEDBACK_API_KEY")
         self.llm_feedback_base_url = os.getenv("LLM_FEEDBACK_BASE_URL")
         self.llm_feedback_model = os.getenv("LLM_FEEDBACK_MODEL")
+        self.llm_feedback_timeout_seconds = max(1.0, min(float(os.getenv("LLM_FEEDBACK_TIMEOUT_SECONDS", "8")), 30.0))
+        self.llm_feedback_max_attempts = max(1, min(int(os.getenv("LLM_FEEDBACK_MAX_ATTEMPTS", "3")), 5))
+        self.llm_feedback_retry_backoff_seconds = max(
+            0.0,
+            min(float(os.getenv("LLM_FEEDBACK_RETRY_BACKOFF_SECONDS", "0.6")), 5.0),
+        )
 
     @property
     def effective_database_url(self) -> str:

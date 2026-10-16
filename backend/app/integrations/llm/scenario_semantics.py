@@ -31,6 +31,99 @@ class LLMCallResult:
 
 
 _SUPPORTED_PROVIDERS = {"openai", "openai_compatible", "external"}
+_RETRYABLE_HTTP_STATUS_CODES = {429, 502, 503, 504}
+
+
+def _retry_delay_seconds(response: httpx.Response | None, backoff_seconds: float, attempt: int) -> float:
+    """Return a bounded provider-directed or exponential retry delay."""
+    if response is not None:
+        retry_after = response.headers.get("Retry-After")
+        if retry_after:
+            try:
+                return min(max(float(retry_after), 0.0), 5.0)
+            except ValueError:
+                pass
+    return min(backoff_seconds * (2 ** max(attempt - 1, 0)), 5.0)
+
+
+def _post_chat_completion(settings, operation: str, payload: dict, started: float) -> tuple[httpx.Response | None, LLMCallResult | None]:
+    """Call an OpenAI-compatible endpoint with bounded transient retries.
+
+    Permanent client/configuration failures fail immediately. This keeps the
+    training path responsive while allowing a briefly overloaded gateway to
+    recover without silently dropping straight to authored fallback copy.
+    """
+    timeout_seconds = float(getattr(settings, "llm_feedback_timeout_seconds", 8.0))
+    max_attempts = int(getattr(settings, "llm_feedback_max_attempts", 3))
+    backoff_seconds = float(getattr(settings, "llm_feedback_retry_backoff_seconds", 0.6))
+    url = settings.llm_feedback_base_url.rstrip("/") + "/chat/completions"
+    headers = {"Authorization": f"Bearer {settings.llm_feedback_api_key}"}
+
+    for attempt in range(1, max_attempts + 1):
+        response: httpx.Response | None = None
+        try:
+            response = httpx.post(url, headers=headers, json=payload, timeout=timeout_seconds)
+            status_code = int(getattr(response, "status_code", 200))
+            if status_code in _RETRYABLE_HTTP_STATUS_CODES and attempt < max_attempts:
+                delay_seconds = _retry_delay_seconds(response, backoff_seconds, attempt)
+                log_event(
+                    "warning",
+                    "llm",
+                    "scenario_llm_retrying",
+                    operation=operation,
+                    provider=getattr(settings, "llm_feedback_provider", None),
+                    model=getattr(settings, "llm_feedback_model", None),
+                    attempt=attempt,
+                    next_attempt=attempt + 1,
+                    http_status_code=status_code,
+                    delay_seconds=delay_seconds,
+                )
+                if delay_seconds:
+                    time.sleep(delay_seconds)
+                continue
+            response.raise_for_status()
+            return response, None
+        except httpx.HTTPStatusError as error:
+            status_code = error.response.status_code
+            return None, _failure_result(
+                settings,
+                operation,
+                "http_error",
+                f"http_status_{status_code}",
+                started,
+                error,
+                attempts=attempt,
+                http_status_code=status_code,
+            )
+        except httpx.TransportError as error:
+            if attempt < max_attempts:
+                delay_seconds = _retry_delay_seconds(None, backoff_seconds, attempt)
+                log_event(
+                    "warning",
+                    "llm",
+                    "scenario_llm_retrying",
+                    operation=operation,
+                    provider=getattr(settings, "llm_feedback_provider", None),
+                    model=getattr(settings, "llm_feedback_model", None),
+                    attempt=attempt,
+                    next_attempt=attempt + 1,
+                    transport_error=type(error).__name__,
+                    delay_seconds=delay_seconds,
+                )
+                if delay_seconds:
+                    time.sleep(delay_seconds)
+                continue
+            error_code = "request_timeout" if isinstance(error, httpx.TimeoutException) else "transport_error"
+            return None, _failure_result(
+                settings,
+                operation,
+                "http_error",
+                error_code,
+                started,
+                error,
+                attempts=attempt,
+            )
+    return None, _failure_result(settings, operation, "provider_error", "retry_loop_exhausted", started)
 
 
 def _not_ready_result(settings, operation: str) -> LLMCallResult | None:
@@ -48,13 +141,22 @@ def _not_ready_result(settings, operation: str) -> LLMCallResult | None:
     return LLMCallResult(None, status, error_code, provider, model, 0)
 
 
-def _failure_result(settings, operation: str, status: str, error_code: str, started: float, error: BaseException | None = None) -> LLMCallResult:
+def _failure_result(
+    settings,
+    operation: str,
+    status: str,
+    error_code: str,
+    started: float,
+    error: BaseException | None = None,
+    **details,
+) -> LLMCallResult:
     provider = getattr(settings, "llm_feedback_provider", None)
     model = getattr(settings, "llm_feedback_model", None)
     latency_ms = int((time.monotonic() - started) * 1000)
     fields = {"operation": operation, "status": status, "error_code": error_code, "provider": provider, "model": model, "latency_ms": latency_ms}
     if error is not None:
         fields["error"] = error
+    fields.update(details)
     log_event("warning", "llm", "scenario_llm_failed", **fields)
     return LLMCallResult(None, status, error_code, provider, model, latency_ms)
 
@@ -130,16 +232,13 @@ def extract_evidence_with_status(
             }, ensure_ascii=False)},
         ],
     }
-    url = settings.llm_feedback_base_url.rstrip("/") + "/chat/completions"
     try:
-        response = httpx.post(url, headers={"Authorization": f"Bearer {settings.llm_feedback_api_key}"}, json=payload, timeout=15)
-        response.raise_for_status()
+        response, failure = _post_chat_completion(settings, "semantic_extraction", payload, started)
+        if failure is not None:
+            return failure
+        assert response is not None
         content = response.json()["choices"][0]["message"]["content"]
         parsed = json.loads(content)
-    except httpx.HTTPStatusError as error:
-        return _failure_result(settings, "semantic_extraction", "http_error", "http_status_error", started, error)
-    except httpx.HTTPError as error:
-        return _failure_result(settings, "semantic_extraction", "http_error", "http_request_error", started, error)
     except (KeyError, TypeError) as error:
         return _failure_result(settings, "semantic_extraction", "invalid_response", "response_shape_invalid", started, error)
     except (ValueError, json.JSONDecodeError) as error:
@@ -310,16 +409,14 @@ def generate_role_reply_with_status(
         ],
     }
     try:
-        response = httpx.post(settings.llm_feedback_base_url.rstrip("/") + "/chat/completions", headers={"Authorization": f"Bearer {settings.llm_feedback_api_key}"}, json=payload, timeout=15)
-        response.raise_for_status()
+        response, failure = _post_chat_completion(settings, "role_reply", payload, started)
+        if failure is not None:
+            return failure
+        assert response is not None
         parsed = json.loads(response.json()["choices"][0]["message"]["content"])
         if parsed.get("dialogue_act") != dialogue_act or str(parsed.get("target_information_unit_id") or "") != target_id:
             return _failure_result(settings, "role_reply", "schema_rejected", "locked_route_changed", started)
         reply = parsed.get("reply")
-    except httpx.HTTPStatusError as error:
-        return _failure_result(settings, "role_reply", "http_error", "http_status_error", started, error)
-    except httpx.HTTPError as error:
-        return _failure_result(settings, "role_reply", "http_error", "http_request_error", started, error)
     except (KeyError, TypeError) as error:
         return _failure_result(settings, "role_reply", "invalid_response", "response_shape_invalid", started, error)
     except (ValueError, json.JSONDecodeError) as error:

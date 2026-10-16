@@ -3,6 +3,8 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import httpx
+
 from app.integrations.llm.scenario_semantics import (
     _validate,
     extract_evidence,
@@ -54,6 +56,81 @@ class ScenarioSemanticEvidenceTest(unittest.TestCase):
         self.assertEqual(result.status, "provider_error")
         self.assertEqual(result.error_code, "unexpected_provider_error")
         self.assertIsNone(result.value)
+
+    def test_transient_503_is_retried_then_returns_evidence(self):
+        settings = SimpleNamespace(
+            llm_feedback_provider="openai_compatible",
+            llm_feedback_api_key="test-key",
+            llm_feedback_base_url="https://llm.example/v1",
+            llm_feedback_model="test-model",
+            llm_feedback_timeout_seconds=2,
+            llm_feedback_max_attempts=3,
+            llm_feedback_retry_backoff_seconds=0,
+        )
+        unavailable = httpx.Response(503, request=httpx.Request("POST", "https://llm.example/v1/chat/completions"))
+        success = SimpleNamespace(
+            status_code=200,
+            raise_for_status=lambda: None,
+            json=lambda: {"choices": [{"message": {"content": '{"information_units":[{"id":"symptom","status":"supported","quote":"头疼","confidence":0.9}],"answered_current_question":true,"relevance":"relevant"}'}}]},
+        )
+        contract = {"required_information_units": [{"id": "symptom", "label": "症状"}], "optional_information_units": []}
+        with patch("app.integrations.llm.scenario_semantics.get_settings", return_value=settings), patch(
+            "app.integrations.llm.scenario_semantics.httpx.post",
+            side_effect=[unavailable, success],
+        ) as post:
+            result = extract_evidence_with_status(contract, "我头疼。")
+        self.assertEqual(result.status, "success")
+        self.assertEqual(post.call_count, 2)
+
+    def test_permanent_401_fails_without_retry(self):
+        settings = SimpleNamespace(
+            llm_feedback_provider="openai_compatible",
+            llm_feedback_api_key="test-key",
+            llm_feedback_base_url="https://llm.example/v1",
+            llm_feedback_model="test-model",
+            llm_feedback_timeout_seconds=2,
+            llm_feedback_max_attempts=3,
+            llm_feedback_retry_backoff_seconds=0,
+        )
+        unauthorized = httpx.Response(401, request=httpx.Request("POST", "https://llm.example/v1/chat/completions"))
+        contract = {"required_information_units": [{"id": "symptom", "label": "症状"}], "optional_information_units": []}
+        with patch("app.integrations.llm.scenario_semantics.get_settings", return_value=settings), patch(
+            "app.integrations.llm.scenario_semantics.httpx.post",
+            return_value=unauthorized,
+        ) as post:
+            result = extract_evidence_with_status(contract, "我头疼。")
+        self.assertEqual(result.status, "http_error")
+        self.assertEqual(result.error_code, "http_status_401")
+        self.assertEqual(post.call_count, 1)
+
+    def test_transport_error_is_retried_then_role_reply_succeeds(self):
+        settings = SimpleNamespace(
+            llm_feedback_provider="openai_compatible",
+            llm_feedback_api_key="test-key",
+            llm_feedback_base_url="https://llm.example/v1",
+            llm_feedback_model="test-model",
+            llm_feedback_timeout_seconds=2,
+            llm_feedback_max_attempts=2,
+            llm_feedback_retry_backoff_seconds=0,
+        )
+        success = SimpleNamespace(
+            status_code=200,
+            raise_for_status=lambda: None,
+            json=lambda: {"choices": [{"message": {"content": '{"dialogue_act":"clarify","target_information_unit_id":"request","reply":"好的，您想找哪一种商品？"}'}}]},
+        )
+        with patch("app.integrations.llm.scenario_semantics.get_settings", return_value=settings), patch(
+            "app.integrations.llm.scenario_semantics.httpx.post",
+            side_effect=[httpx.ConnectError("temporary connection failure"), success],
+        ) as post:
+            result = generate_role_reply_with_status(
+                {},
+                "clarify",
+                "请再说说您的需要。",
+                target_information_unit={"id": "request"},
+            )
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.value, "好的，您想找哪一种商品？")
+        self.assertEqual(post.call_count, 2)
 
     def test_role_reply_failure_uses_contract_fallback(self):
         settings = SimpleNamespace(llm_feedback_provider="openai_compatible", llm_feedback_api_key="test-key", llm_feedback_base_url="https://llm.example/v1", llm_feedback_model="test-model")
