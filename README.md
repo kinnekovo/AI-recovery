@@ -2,7 +2,7 @@
 
 面向脑卒中后言语障碍患者的陪伴式言语康复训练 Web 系统。
 
-场景表达的重新开发以[多轮对话训练与评价系统设计](doc/场景表达多轮对话训练与评价系统设计.md)为主设计，以[功能性沟通评价与迭代依据](doc/场景表达功能性沟通评价与迭代依据.md)为评价原则；临床校准与试点评估执行标准见：[场景表达临床校准与试点评估方案](doc/场景表达临床校准与试点评估方案.md)。
+场景表达以[多轮对话训练与评价系统设计](docs/algorithms/场景表达多轮对话训练与评价系统设计.md)为主设计，以[功能性沟通评价与迭代依据](docs/algorithms/场景表达功能性沟通评价与迭代依据.md)为评价原则；临床校准与试点评估执行标准见[场景表达临床校准与试点评估方案](docs/algorithms/场景表达临床校准与试点评估方案.md)。
 
 当前项目采用模块化单体架构：
 
@@ -11,9 +11,7 @@
 - 文件存储：本地 `storage/`
 - AI 能力：通过后端 `backend/app/integrations/` Provider 适配层接入
 
-数字人采用本地 2.5D 回退与可选的阿里云实时云渲染方案；未启用阿里云凭据时不会产生外部调用。
-
-数字人当前采用“可靠的头像陪练”路线：优先使用用户上传头像作为 Static 2D Avatar，不在当前阶段引入 Live2D、3D 或外部真人视频数字人。
+数字人采用 Provider 适配：当前生产链路支持腾讯云照片数字人、声音复刻和 WebRTC 播放，同时保留 Static 2D 回退与阿里云适配器。外部 Provider 默认关闭；未配置并启用凭据时不会主动发起真实云调用。
 
 ## 目录结构
 
@@ -21,8 +19,12 @@
 backend/    FastAPI 后端
 frontend/   Vue 前端
 storage/    本地文件存储目录
-doc/        产品、架构、阶段总结和迭代文档
+docs/       产品、架构、开发、算法、归档和维护文档
+tools/      本地联调辅助脚本（不保存下载的二进制）
+backups/    受保护的备份与清单
 ```
+
+详细模块职责见 [代码库指南](docs/architecture/CODEBASE_GUIDE.md)，文档总导航见 [docs/README.md](docs/README.md)，最近一次安全清理记录见 [清理报告](docs/maintenance/CLEANUP_REPORT.md)。
 
 ## 环境要求
 
@@ -50,6 +52,12 @@ python -m venv .venv
 
 ```powershell
 pip install -r requirements.txt
+```
+
+开发与测试环境再安装：
+
+```powershell
+pip install -r requirements-dev.txt
 ```
 
 复制环境变量示例：
@@ -193,23 +201,20 @@ cd backend
 python -m pytest tests
 ```
 
-动态形象 Worker（另开一个终端，默认 mock 模式）：
+后端静态编译与迁移头检查：
 
 ```powershell
 cd backend
+python -m compileall app
+alembic heads
 ```
 
-患者主闭环烟测：
-
-```powershell
-cd backend
-python scripts/smoke_patient_flow.py
-```
-
-前端构建：
+前端检查：
 
 ```powershell
 cd frontend
+npm run typecheck
+npm run test
 npm run build
 ```
 
@@ -220,17 +225,16 @@ cd backend
 alembic upgrade head
 ```
 
-## 产品化路线
+## 文档入口
 
-后续开发以以下文档为准：
+当前有效文档以 `docs/` 导航为准：
 
-- `doc/言语康复智能体_产品落地实现路线图.md`
-- `doc/言语康复智能体_成熟产品迭代清单.md`
-- `doc/言语康复智能体_生产部署指南.md`
-- `doc/言语康复智能体_备份恢复手册.md`
-- `doc/言语康复智能体_试用与授权说明.md`
-- `doc/言语康复智能体_试用账号初始化说明.md`
-- `doc/言语康复智能体_试用反馈收集表.md`
+- [产品文档](docs/product/)
+- [架构文档](docs/architecture/)
+- [开发与部署](docs/development/)
+- [算法与临床依据](docs/algorithms/)
+- [历史归档](docs/archive/)
+- [维护记录](docs/maintenance/)
 
 开发顺序：
 

@@ -1,8 +1,22 @@
 backend/.env
-backend/app/**/__pycache__/
-backend/app/**/*.pyc
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Frontend generated output and tool caches
 frontend/dist/
 frontend/node_modules/
+frontend/node_modules/.vite-temp/
+
+# Downloaded local tunnel executables are not source artifacts
+tools/cloudflared*.exe
 storage/agent-images/*
 storage/voice-samples/*
 storage/training-audio/*
