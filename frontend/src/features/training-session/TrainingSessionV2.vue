@@ -1,5 +1,34 @@
 <template>
   <section class="training-focus patient-readable" :class="{ paused: session?.status === 'paused' }">
+    <div v-if="showAvatarStartup" class="training-startup-screen" aria-live="polite" aria-atomic="true">
+      <div class="training-startup-content">
+        <div class="training-startup-mark" :class="`is-${avatarStartupState}`" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+        <p class="v2-section-label">专属陪伴正在准备</p>
+        <h1>{{ avatarStartupTitle }}</h1>
+        <p>{{ avatarStartupDescription }}</p>
+        <button
+          v-if="avatarStartupState === 'needs_activation'"
+          class="v2-button primary training-startup-action"
+          type="button"
+          :disabled="avatarActivationBusy"
+          @click="activateSoundAndEnter"
+        >
+          <Play :size="20" />{{ avatarActivationBusy ? '正在开启…' : '进入训练' }}
+        </button>
+        <button
+          v-else-if="avatarStartupState === 'error'"
+          class="v2-button secondary training-startup-action"
+          type="button"
+          @click="retryAvatarStartup"
+        >
+          重新加载数字人
+        </button>
+        <small v-else>画面和声音准备好后，会自动播放第一句示范。</small>
+      </div>
+    </div>
+
     <header class="training-focus-header">
       <div><p>{{ session?.session_kind === 'extra_practice' ? '额外练习' : '今天的正式训练' }}</p><strong>{{ progressLabel }}</strong></div>
       <div class="focus-header-actions"><RouterLink class="v2-icon-text" to="/training">保存并退出</RouterLink><button v-if="session?.status==='in_progress'||session?.status==='paused'" class="v2-icon-text" :disabled="busy || avatar.isBusy.value" @click="togglePause"><Pause v-if="session?.status==='in_progress'" :size="18"/><Play v-else :size="18"/>{{ session?.status==='in_progress'?'暂停':'继续' }}</button></div>
@@ -20,7 +49,7 @@
             :avatar-url="currentAgent?.avatar_url"
             :avatar-animation-config="currentAgent?.avatar_animation_config"
             :title="current.exercise_type === 'repeat' ? '数字人跟读示范' : '数字人陪伴'"
-            :idle-hint="current.exercise_type === 'scenario' ? '可以重播上一句，听完后再继续表达。' : undefined"
+            :idle-hint="current.exercise_type === 'scenario' ? '没听清可以点“再听一遍”，听完后再继续表达。' : '没听清可以点“再听一遍”，准备好后开始录音。'"
             :speaking-hint="current.exercise_type === 'scenario' ? '先听完陪伴者的回应，再继续表达。' : undefined"
           >
             <template #actions>
@@ -31,7 +60,7 @@
                 :disabled="avatar.isBusy.value || recording || loading || session.status !== 'in_progress'"
                 @click="speakRepeatTarget"
               >
-                <Volume2 :size="19" />{{ avatar.isBusy.value ? '正在示范…' : '听数字人示范' }}
+                <Volume2 :size="19" />{{ avatar.isBusy.value ? '正在示范…' : '再听一遍' }}
               </button>
               <button
                 v-else
@@ -40,7 +69,7 @@
                 :disabled="!latestScenarioAgentTurn || avatar.isBusy.value || busy || recording || loading || session.status !== 'in_progress'"
                 @click="replayLatestScenarioTurn"
               >
-                <Volume2 :size="19" />{{ avatar.isBusy.value ? '正在回应…' : '重播上一句' }}
+                <Volume2 :size="19" />{{ avatar.isBusy.value ? '正在回应…' : '再听一遍' }}
               </button>
             </template>
           </AvatarCoachPanel>
@@ -122,6 +151,12 @@ const pendingDialogueTurnId = ref('')
 const scenarioSpeechInFlight = ref('')
 const scenarioPromptPending = ref(false)
 const statusMessage = ref('')
+type AvatarStartupState = 'loading' | 'needs_activation' | 'ready' | 'error'
+const avatarStartupState = ref<AvatarStartupState>('loading')
+const avatarActivationBusy = ref(false)
+const trainingStarted = ref(false)
+const autoPlayedExerciseIds = new Set<string>()
+let avatarPreparationRun = 0
 const waitSeconds = Math.max(0, Number(localStorage.getItem('patient_wait_time') || 0))
 const current = computed<ExerciseV2 | null>(() => session.value?.current_exercise || null)
 const currentAgent = computed(() => {
@@ -137,24 +172,97 @@ const feedbackText = computed(() => {
 })
 const latestScenarioAgentTurn = computed(() => latestAgentTurn(dialogue.value))
 const dialogueFinished = computed(() => Boolean(dialogue.value && dialogue.value.status !== 'active'))
+const showAvatarStartup = computed(() => avatarStartupState.value !== 'ready' && !(!session.value && error.value))
+const avatarStartupTitle = computed(() => {
+  if (avatarStartupState.value === 'needs_activation') return '数字人已经准备好了'
+  if (avatarStartupState.value === 'error') return '数字人暂时没有加载成功'
+  return '数字人正在加载中'
+})
+const avatarStartupDescription = computed(() => {
+  if (avatarStartupState.value === 'needs_activation') return '点击进入训练，系统会开启声音并立即播放第一句示范。'
+  if (avatarStartupState.value === 'error') return avatar.snapshot.error || '请检查网络后重新加载，训练进度不会丢失。'
+  return '正在准备陪伴者形象和专属声音，通常需要 10–15 秒。'
+})
 
 watch([currentAgent, current, loading], async ([agent, exercise, isLoading]) => {
   // The avatar stage is rendered only after the session loader disappears.
   // Waiting for that transition avoids treating a missing DOM container as a
   // Tencent Cloud connection failure.
   if (isLoading) return
-  const hasExercise = Boolean(exercise)
-  cloudProvider.setAgent(hasExercise ? agent?.id || null : null, hasExercise)
-  if (hasExercise) {
-    const exerciseId = exercise?.id
-    await nextTick()
-    await avatar.prepare()
-    if (exercise?.exercise_type === 'scenario' && current.value?.id === exerciseId && avatar.snapshot.videoStatus !== 'failed') {
-      avatar.idle('我会陪你完成这个场景练习。')
-      await speakLatestScenarioTurn()
-    }
+  if (!exercise) {
+    cloudProvider.setAgent(null, false)
+    avatarStartupState.value = 'ready'
+    return
   }
+  if (!agent?.id) {
+    cloudProvider.setAgent(null, false)
+    avatar.fail('没有找到可用的数字人陪伴，请返回陪伴设置后重试。')
+    avatarStartupState.value = 'error'
+    return
+  }
+  cloudProvider.setAgent(agent.id, true)
+  await prepareAvatarAndEnter(exercise)
 }, { immediate: true })
+
+async function prepareAvatarAndEnter(exercise: ExerciseV2) {
+  const preparationRun = ++avatarPreparationRun
+  if (!trainingStarted.value) avatarStartupState.value = 'loading'
+  await nextTick()
+  await avatar.prepare()
+  if (preparationRun !== avatarPreparationRun || current.value?.id !== exercise.id) return
+  if (avatar.snapshot.videoStatus === 'failed') {
+    avatarStartupState.value = 'error'
+    return
+  }
+  if (!cloudProvider.isSoundEnabled) {
+    avatarStartupState.value = 'needs_activation'
+    return
+  }
+  revealTrainingAndPlay(exercise)
+}
+
+function revealTrainingAndPlay(exercise: ExerciseV2) {
+  trainingStarted.value = true
+  avatarStartupState.value = 'ready'
+  void nextTick().then(() => autoPlayExercise(exercise))
+}
+
+async function autoPlayExercise(exercise: ExerciseV2) {
+  if (autoPlayedExerciseIds.has(exercise.id) || current.value?.id !== exercise.id) return
+  autoPlayedExerciseIds.add(exercise.id)
+  if (exercise.exercise_type === 'repeat') {
+    await speakRepeatTarget()
+    return
+  }
+  avatar.idle('我会陪你完成这个场景练习。')
+  await speakLatestScenarioTurn(true)
+}
+
+async function activateSoundAndEnter() {
+  const exercise = current.value
+  if (!exercise || avatarActivationBusy.value) return
+  avatarActivationBusy.value = true
+  error.value = ''
+  const enabled = await cloudProvider.enableSound()
+  avatarActivationBusy.value = false
+  if (!enabled) {
+    error.value = '浏览器没有开启声音，请再次点击“进入训练”。'
+    return
+  }
+  revealTrainingAndPlay(exercise)
+}
+
+async function retryAvatarStartup() {
+  const agent = currentAgent.value
+  const exercise = current.value
+  if (!exercise || !agent?.id) return
+  error.value = ''
+  avatarStartupState.value = 'loading'
+  cloudProvider.setAgent(null, false)
+  await nextTick()
+  cloudProvider.setAgent(agent.id, true)
+  await prepareAvatarAndEnter(exercise)
+}
 
 async function load() {
   loading.value = true
@@ -356,29 +464,42 @@ async function submitScenario() {
   if (!dialogue.value || dialogueFinished.value || !blob.value || busy.value || avatar.isBusy.value) return
   busy.value = true
   error.value = ''
-  statusMessage.value = '正在理解你刚才说的话。'
+  statusMessage.value = '陪伴助手正在组织回应，生成后会自动朗读。'
   avatar.think('我正在理解你刚才说的话。')
-  let updated = false
+  const previousAgentTurn = latestAgentTurn(dialogue.value)
+  const previousAgentToken = previousAgentTurn
+    ? scenarioTurnToken(dialogue.value.id, previousAgentTurn.turn_index)
+    : ''
+  let generatedTurn: ScenarioDialogueTurn | null = null
   try {
     pendingDialogueTurnId.value ||= crypto.randomUUID()
-    dialogue.value = await scenarioDialoguesApi.uploadTurn(dialogue.value.id, blob.value, pendingDialogueTurnId.value)
+    const updatedDialogue = await scenarioDialoguesApi.uploadTurn(dialogue.value.id, blob.value, pendingDialogueTurnId.value)
+    const nextAgentTurn = latestAgentTurn(updatedDialogue)
+    const nextAgentToken = nextAgentTurn
+      ? scenarioTurnToken(updatedDialogue.id, nextAgentTurn.turn_index)
+      : ''
+    dialogue.value = updatedDialogue
     scenarioPromptPending.value = true
     pendingDialogueTurnId.value = ''
     blob.value = null
-    updated = true
+    if (nextAgentTurn && nextAgentToken !== previousAgentToken) generatedTurn = nextAgentTurn
   } catch (err) {
     error.value = toUserMessage(err, '这一轮没有识别成功，请重新录音。')
     avatar.idle('刚才没有听清，请保留录音后再试一次。')
   } finally {
     busy.value = false
   }
-  if (updated) {
+  if (generatedTurn) {
     await nextTick()
-    const spoke = await speakLatestScenarioTurn()
+    const spoke = await speakScenarioTurn(generatedTurn, true)
     if (!spoke) {
       scenarioPromptPending.value = false
       if (avatar.snapshot.state === 'thinking') avatar.idle('现在轮到你继续表达。')
     }
+  } else if (!error.value) {
+    scenarioPromptPending.value = false
+    statusMessage.value = '陪伴助手暂时没有生成新的回应，请重新提交这一轮。'
+    avatar.idle('我还没有生成新的回应，请再试一次。')
   }
 }
 

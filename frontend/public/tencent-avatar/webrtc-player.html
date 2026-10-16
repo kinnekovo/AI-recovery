@@ -10,19 +10,15 @@
     #player video { width: 100% !important; height: 100% !important; object-fit: contain !important; }
     .overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(238, 246, 242, .9); color: #345047; font: 600 15px/1.5 system-ui, sans-serif; z-index: 2; }
     .overlay[hidden] { display: none; }
-    .sound { position: fixed; left: 50%; bottom: 14px; min-height: 48px; padding: 0 20px; transform: translateX(-50%); border: 0; border-radius: 24px; background: #176b55; color: #fff; font: 700 16px/1 system-ui, sans-serif; cursor: pointer; box-shadow: 0 8px 24px rgba(20, 35, 30, .18); z-index: 3; }
-    .sound[hidden] { display: none; }
   </style>
 </head>
 <body>
   <div id="player"></div>
   <div id="overlay" class="overlay">正在连接数字人画面…</div>
-  <button id="sound" class="sound" type="button" hidden>开启声音</button>
   <script src="./TcPlayer-2.4.5.js" charset="utf-8"></script>
   <script>
     const streamUrl = new URLSearchParams(location.search).get('url') || ''
     const overlay = document.getElementById('overlay')
-    const sound = document.getElementById('sound')
     let player = null
 
     function muteUnderlyingVideo(callback) {
@@ -58,8 +54,8 @@
           listener(event) {
             if (event.type === 'play') {
               overlay.hidden = true
-              sound.hidden = false
               parent.postMessage({ type: 'tencent-avatar-player', status: 'ready' }, location.origin)
+              void window.enableTencentAvatarSound()
             }
             if (event.type === 'error') {
               const code = event.detail && event.detail.code
@@ -74,14 +70,21 @@
       }
     }
 
-    sound.addEventListener('click', () => {
-      if (!player) return
+    window.enableTencentAvatarSound = async function enableTencentAvatarSound() {
+      if (!player) return false
       player.mute(false)
       player.volume(1)
-      document.querySelectorAll('#player video').forEach((video) => { video.muted = false; video.volume = 1 })
-      sound.hidden = true
-      parent.postMessage({ type: 'tencent-avatar-player', status: 'unmuted' }, location.origin)
-    })
+      const videos = Array.from(document.querySelectorAll('#player video'))
+      const playAttempts = videos.map((video) => {
+        video.muted = false
+        video.volume = 1
+        return video.play()
+      })
+      const results = await Promise.allSettled(playAttempts)
+      const enabled = videos.length > 0 && results.every((result) => result.status === 'fulfilled') && videos.every((video) => !video.muted)
+      parent.postMessage({ type: 'tencent-avatar-player', status: enabled ? 'unmuted' : 'sound-blocked' }, location.origin)
+      return enabled
+    }
   </script>
 </body>
 </html>
